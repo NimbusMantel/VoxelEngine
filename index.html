@@ -1,1 +1,58 @@
-Try out the latest stable features
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>Voxels2d</title>
+        
+        <style type="text/css">
+            .canvas {
+                image-rendering: optimizeSpeed;             // Older versions of FF
+                image-rendering: -moz-crisp-edges;          // FF 6.0+
+                image-rendering: -webkit-optimize-contrast; // Webkit
+                image-rendering: -o-crisp-edges;            // OS X & Windows Opera (12.02+)
+                image-rendering: optimize-contrast;         // Possible future browsers.
+                -ms-interpolation-mode: nearest-neighbor;   // IE
+            }
+        </style>
+    </head>
+    
+    <body>
+        <center>
+            <canvas id="canvas" width="1280" height="720" style="border:2px solid #000000;" class="canvas"></canvas>
+            <br>
+            <label id="fps"></label>
+            <br>
+            <button onclick="canvas.requestFullscreen();">Fullscreen</button>
+        </center>
+        
+        <script type="text/javascript">
+            var canvas = document.getElementById("canvas");
+            
+            canvas.requestFullscreen = (canvas.requestFullScreen || canvas.mozRequestFullScreen || canvas.webkitRequestFullscreen || canvas.msRequestFullscreen);
+            
+            var Module = {"canvas" : canvas};
+            
+            window.requestAnimationFrame = (window.requestAnimationFrame || window.mozRequestAnimationFrame || window.webkitRequestAnimationFrame || window.msRequestAnimationFrame);
+            
+            var fps = document.getElementById("fps");
+            
+            var cT = Date.now() / 1000;
+            var pT = cT;
+            
+            function update () {
+                cT = Date.now() / 1000;
+                fps.innerHTML = Math.round(1 / (cT - pT)) + " fps";
+                pT = cT;
+                
+                window.requestAnimationFrame(update);
+            }
+            
+            window.requestAnimationFrame(update);
+        </script>
+        
+        <script>
+            var script = document.createElement('script');
+            script.src = "game.js";
+            document.body.appendChild(script);
+        </script>
+    </body>
+</html>
