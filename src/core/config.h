@@ -1,3 +1,3 @@
 #pragma once
 
-#define LOGGING_ON 0
+#define LOGGING_ON 1
