@@ -70,7 +70,7 @@ window.requestAnimationFrame(update);
 
 // Pointer: 32 Bit pointer
 
-/*var voxBuf = new ArrayBuffer(8);
+var voxBuf = new ArrayBuffer(8);
 var voxels = new Uint32Array(voxBuf);
 
 voxels[0] = 0xFFFF0000;
@@ -286,7 +286,7 @@ function delVoxel (index, trace) {
         }
         
         for (var i = Child; i < (Child + 8); i++) {
-            delVoxel(Child);
+            delVoxel(Child + i);
         }
         
         if ((voxels[Child + 8] & 0x00000001) == 1) {
@@ -333,7 +333,7 @@ console.log(voxels);
 
 setVoxel(0, 2, 0xFFFF0089);
 
-console.log(voxels);*/
+console.log(voxels);
 
 /*function Voxel (v) {
     this.firstChild = v >>> 17;

@@ -1,7 +1,6 @@
 #include "asset_utils.h"
 #include "platform_asset_utils.h"
 #include "shader.h"
-//#include "texture.h"
 #include <assert.h>
 #include <stdlib.h>
 

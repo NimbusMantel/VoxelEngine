@@ -1,0 +1,24 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 14
+VisualStudioVersion = 14.0.24720.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Voxel Engine", "Voxel Engine.vcxproj", "{92759BAC-4B53-4502-AA6D-9C197A4CE41B}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{92759BAC-4B53-4502-AA6D-9C197A4CE41B}.Debug|x64.ActiveCfg = Release|Win32
+		{92759BAC-4B53-4502-AA6D-9C197A4CE41B}.Debug|x86.ActiveCfg = Release|Win32
+		{92759BAC-4B53-4502-AA6D-9C197A4CE41B}.Release|x64.ActiveCfg = Release|Win32
+		{92759BAC-4B53-4502-AA6D-9C197A4CE41B}.Release|x86.ActiveCfg = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
