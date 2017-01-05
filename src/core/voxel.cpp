@@ -8,6 +8,10 @@
 
 // close pointers are always relative, far pointers always absolute
 
+// TO DO: - external reading access method
+//		  - voxel setter testing
+//		  - voxel sparse tree transversal
+
 VoxelBuffer::VoxelBuffer() {
 	buffer = (uint32_t*)malloc(sizeof(uint32_t) * VOXEL_BUFFER_LENGTH);
 	size = VOXEL_BUFFER_LENGTH;
@@ -96,10 +100,12 @@ void VoxelBuffer::clearVoxel(uint32_t index, bool clearParent, bool clearChildre
 	uint32_t Pointer;
 
 	if (clearChildren && ((Voxel & 0x0000FF00) >> 8) != 0) { // Voxel has children that are to be cleared
-		Pointer = (((Voxel & 0x00010000) == 0) ? (index + (int16_t)(((Voxel >> 17) & 0x00003FFF) * ((Voxel & 0x80000000) ? -1 : 1))) : (buffer[index + (int16_t)(((Voxel >> 17) & 0x00003FFF) * ((Voxel & 0x80000000) ? -1 : 1))])); // First child pointer
-
+		Pointer = index + (int16_t)((Voxel & 0x7FFE0000) >> 17 | (Voxel & 0x80000000) >> 16); // First child pointer
+		
 		if ((Voxel & 0x00010000) == 1) {
-			freeBufferSpace(index + (int16_t)(((Voxel >> 17) & 0x00003FFF) * ((Voxel & 0x80000000) ? -1 : 1)), 1); // Free the pointer to the first child
+			freeBufferSpace(Pointer, 1); // Free the pointer to the first child
+
+			Pointer = buffer[Pointer];
 		}
 
 		for (; Pointer < (Pointer + 8); ++Pointer) {
@@ -107,7 +113,7 @@ void VoxelBuffer::clearVoxel(uint32_t index, bool clearParent, bool clearChildre
 		}
 
 		if ((buffer[Pointer] & 0x00000001) == 1) {
-			freeBufferSpace(index + (int16_t)(((buffer[Pointer] & 0x00007FFE) >> 1) * ((buffer[Pointer] & 0x00008000) ? -1 : 1)), 1); // Remove the parent header's pointer to the voxel
+			freeBufferSpace(index + (int16_t)((buffer[Pointer] & 0x00007FFE) >> 1 | (buffer[Pointer] & 0x00008000)), 1); // Remove the parent header's pointer to the voxel
 		}
 
 		freeBufferSpace(Pointer - 8, 9); // Free the buffer of the children
@@ -122,7 +128,11 @@ void VoxelBuffer::clearVoxel(uint32_t index, bool clearParent, bool clearChildre
 			i++; // Get the distance to the parent header
 		}
 
-		Pointer = (((buffer[index + i] & 0x00000001) == 0) ? (index + (int16_t)(((buffer[index + i] & 0x00007FFE) >> 1) * ((buffer[index + i] & 0x00008000) ? -1 : 1))) : buffer[index + (int16_t)(((buffer[index + i] & 0x00007FFE) >> 1) * ((buffer[index + i] & 0x00008000) ? -1 : 1))]); // Pointer to the voxel's parent
+		Pointer = index + (int16_t)((buffer[index + i] & 0x00007FFE) >> 1 | (buffer[index + i] & 0x00008000)); // Pointer to the voxel's parent
+		
+		if (buffer[index + i] & 0x00000001) {
+			Pointer = buffer[Pointer];
+		}
 
 		if (clearParent && (((buffer[Pointer] & (~(0x01 << (8 + i - 1)))) & 0x0000FF00) >> 8) == 0) {
 			clearVoxel(Pointer, true, clearChildren); // Clear the voxel's parent
@@ -157,33 +167,38 @@ bool VoxelBuffer::setVoxel(uint32_t parent, uint8_t position, uint32_t voxel) {
 		Parent |= (0x01 << (8 + 7 - position)); // Update the parent's children mask
 
 		FirstChild = allocBufferSpace(9);
-
-		if ((((FirstChild > parent) ? (FirstChild - parent) : (parent - FirstChild)) & 0xFFFFC000) > 0) { // Check if a pointer to the first child is necessary
+		
+		if (!(((FirstChild - parent) & 0xFFFFC000) ^ 0xFFFFC000)) { // Check if a pointer to the first child is necessary
 			Pointer = allocBufferSpace(1);
 			buffer[Pointer] = FirstChild;
 
-			Parent = ((Parent & 0x0000FFFF) | (((Pointer > parent) ? (Pointer - parent) : (parent - Pointer)) << 17) | 0x00010000 | ((Pointer < parent) << 31)); // Update the parent's first child pointer
+			Parent = ((Parent & 0x0000FFFF) | 0x00010000 | ((Pointer - parent) & 0x00007FFF) << 17); // Update the parent's first child pointer
 		}
 		else {
-			Parent = ((Parent & 0x0000FFFF) | (((FirstChild > parent) ? (FirstChild - parent) : (parent - FirstChild)) << 17) | ((FirstChild < parent) << 31)); // Update the parent's first child pointer
+			Parent = ((Parent & 0x0000FFFF) | ((FirstChild - parent) & 0x00007FFF) << 17); // Update the parent's first child pointer
 		}
 
 		buffer[parent] = Parent;
-		buffer[FirstChild] = buffer[FirstChild + 1] = buffer[FirstChild + 2] = buffer[FirstChild + 3] = buffer[FirstChild + 4] = buffer[FirstChild + 5] = buffer[FirstChild + 6] = buffer[FirstChild + 7] = 0x00000000;
+		buffer[FirstChild] = buffer[FirstChild + 1] = buffer[FirstChild + 2] = buffer[FirstChild + 3] = buffer[FirstChild + 4]
+						   = buffer[FirstChild + 5] = buffer[FirstChild + 6] = buffer[FirstChild + 7] = 0x00000000;
 
-		if (((((FirstChild + 8) > parent) ? ((FirstChild + 8) - parent) : (parent - (FirstChild + 8))) & 0xFFFFC000) > 0) { // Check if a pointer back to the parent is necessary
+		if (!(((parent - (FirstChild + 8)) & 0xFFFFC000) ^ 0xFFFFC000)) { // Check if a pointer back to the parent is necessary
 			Pointer = allocBufferSpace(1);
 			buffer[Pointer] = parent;
 
-			buffer[(FirstChild + 8)] = (0x00010001 | ((((FirstChild + 8) > parent) ? ((FirstChild + 8) - parent) : (parent - (FirstChild + 8))) << 1) | ((parent < (FirstChild + 8)) << 15)); // Update the parent header's pointer
+			buffer[(FirstChild + 8)] = (0x00010001 | ((parent - Pointer) & 0x00007FFF) << 1); // Update the parent header's pointer
 		}
 		else {
-			buffer[(FirstChild + 8)] = (0x00010000 | ((((FirstChild + 8) > parent) ? ((FirstChild + 8) - parent) : (parent - (FirstChild + 8))) << 1) | ((parent < (FirstChild + 8)) << 15)); // Update the parent header's pointer
+			buffer[(FirstChild + 8)] = (0x00010000 | ((parent - (FirstChild + 8)) & 0x00007FFF) << 1); // Update the parent header's pointer
 		}
 	}
 	else {
-		FirstChild = (((Parent & 0x00010000) == 0) ? (parent + (int16_t)(((Parent >> 17) & 0x00003FFF) * ((Parent & 0x80000000) ? -1 : 1))) : (buffer[parent + (int16_t)(((Parent >> 17) & 0x00003FFF) * ((Parent & 0x80000000) ? -1 : 1))]));
+		FirstChild = parent + (int16_t)((Parent & 0x7FFE0000) >> 17 | (Parent & 0x80000000) >> 16);
 		
+		if (Parent & 0x00010000) {
+			FirstChild = buffer[FirstChild];
+		}
+
 		if ((((Parent & 0x0000FF00) >> 8) & (0x01 << (7 - position))) > 0) { // Check if the parent already has a child at the position
 			if (buffer[FirstChild + position] == voxel) {
 				return true; // Return true if the child hasn't changed
@@ -242,7 +257,11 @@ bool VoxelBuffer::movVoxel(uint32_t parentF, uint8_t positionF, uint32_t parentT
 			i++;
 		}
 
-		pointer = (((buffer[pointer + i] & 0x00000001) == 0) ? (pointer + (int16_t)(((buffer[pointer + i] & 0x00007FFE) >> 1) * ((buffer[pointer + i] & 0x00008000) ? -1 : 1))) : buffer[pointer + (int16_t)(((buffer[pointer + i] & 0x00007FFE) >> 1) * ((buffer[pointer + i] & 0x00008000) ? -1 : 1))]); // Traverse the tree from parentF to the root
+		pointer += (int16_t)((buffer[pointer + i] & 0x00007FFE) >> 1 | (buffer[pointer + i] & 0x00008000)); // Traverse the tree from parentF to the root
+
+		if (buffer[pointer + i] & 0x00000001) {
+			pointer = buffer[pointer];
+		}
 
 		layerF++;
 	}
@@ -256,7 +275,7 @@ bool VoxelBuffer::movVoxel(uint32_t parentF, uint8_t positionF, uint32_t parentT
 			i++;
 		}
 
-		pointer = (((buffer[pointer + i] & 0x00000001) == 0) ? (pointer + (int16_t)(((buffer[pointer + i] & 0x00007FFE) >> 1) * ((buffer[pointer + i] & 0x00008000) ? -1 : 1))) : buffer[pointer + (int16_t)(((buffer[pointer + i] & 0x00007FFE) >> 1) * ((buffer[pointer + i] & 0x00008000) ? -1 : 1))]); // Traverse the tree from parentT to the root
+		pointer += (int16_t)((buffer[pointer + i] & 0x00007FFE) >> 1 | (buffer[pointer + i] & 0x00008000)); // Traverse the tree from parentT to the root
 
 		layerT++;
 	}
@@ -265,28 +284,41 @@ bool VoxelBuffer::movVoxel(uint32_t parentF, uint8_t positionF, uint32_t parentT
 		return false; // Return false if the voxel would have to change its layer
 	}
 
-	uint32_t voxel = (((ParentF & 0x00010000) == 0) ? (parentF + (int16_t)(((ParentF >> 17) & 0x00003FFF) * ((ParentF & 0x80000000) ? -1 : 1))) : (buffer[parentF + (int16_t)(((ParentF >> 17) & 0x00003FFF) * ((ParentF & 0x80000000) ? -1 : 1))])) + positionF;
+	uint32_t voxel = parentF + (int16_t)((ParentF & 0x7FFE0000) >> 17 | (ParentF & 0x80000000) >> 16);
+
+	if (ParentF & 0x00010000) {
+		voxel = buffer[voxel];
+	}
 
 	if (!setVoxel(parentT, positionT, buffer[voxel] & 0xFFFF00FF)) {
 		return false;
 	}
 
 	if (((buffer[voxel] & 0x0000FF00) >> 8) > 0) {
-		parentF = (((buffer[voxel] & 0x00010000) == 0) ? (voxel + (int16_t)(((buffer[voxel] >> 17) & 0x00003FFF) * ((buffer[voxel] & 0x80000000) ? -1 : 1))) : (buffer[voxel + (int16_t)(((buffer[voxel] >> 17) & 0x00003FFF) * ((buffer[voxel] & 0x80000000) ? -1 : 1))])); // Pointer to the voxel's first child
-		parentT = (((ParentT & 0x00010000) == 0) ? (parentT + (int16_t)(((ParentT >> 17) & 0x00003FFF) * ((ParentT & 0x80000000) ? -1 : 1))) : (buffer[parentT + (int16_t)(((ParentT >> 17) & 0x00003FFF) * ((ParentT & 0x80000000) ? -1 : 1))])) + positionT; // Pointer to new position of the voxel
+		parentF = voxel + (int16_t)((buffer[voxel] & 0x7FFE0000) >> 17 | (buffer[voxel] & 0x80000000) >> 16); // Pointer to the voxel's first child
 
-		if ((buffer[parentF + 8] & 0x00000001) == 1) {
-			freeBufferSpace((((buffer[parentF + 8] & 0x00000001) == 0) ? (parentF + (int16_t)(((buffer[parentF + 8] & 0x00007FFE) >> 1) * ((buffer[parentF + 8] & 0x00008000) ? -1 : 1))) : buffer[parentF + (int16_t)(((buffer[parentF + 8] & 0x00007FFE) >> 1) * ((buffer[parentF + 8] & 0x00008000) ? -1 : 1))]), 1); // Free the previous pointer to the parent
+		if (buffer[voxel] & 0x00010000) {
+			parentF = buffer[parentF];
 		}
 
-		if (((((parentF + 8) > parentT) ? ((parentF + 8) - parentT) : (parentT - (parentF + 8))) & 0xFFFFC000) > 0) {
+		parentT = parentT + (int16_t)((ParentT & 0x7FFE0000) >> 17 | (ParentT & 0x80000000) >> 16) + positionT; // Pointer to new position of the voxel
+
+		if (ParentT & 0x00010000) {
+			parentT = buffer[parentT];
+		}
+
+		if ((buffer[parentF + 8] & 0x00000001) == 1) {
+			freeBufferSpace(parentF + (int16_t)((buffer[parentF + 8] & 0x00007FFE) >> 1 | (buffer[parentF + 8] & 0x00008000)), 1); // Free the previous pointer to the parent
+		}
+
+		if (!(((parentT - (parentF + 8)) & 0xFFFFC000) ^ 0xFFFFC000)) {
 			pointer = allocBufferSpace(1);
 			buffer[pointer] = parentT;
 
-			buffer[(parentF + 8)] = (0x00010001 | ((((parentF + 8) > parentT) ? ((parentF + 8) - parentT) : (parentT - (parentF + 8))) << 1) | ((parentT < (parentF + 8)) << 15)); // Update the parent header's pointer
+			buffer[(parentF + 8)] = (0x00010001 | ((parentT - pointer) & 0x00007FFF) << 1); // Update the parent header's pointer
 		}
 		else {
-			buffer[(parentF + 8)] = (0x00010000 | ((((parentF + 8) > parentT) ? ((parentF + 8) - parentT) : (parentT - (parentF + 8))) << 1) | ((parentT < (parentF + 8)) << 15)); // Update the parent header's pointer
+			buffer[(parentF + 8)] = (0x00010000 | ((parentT - (parentF + 8)) & 0x00007FFF) << 1); // Update the parent header's pointer
 		}
 	}
 
