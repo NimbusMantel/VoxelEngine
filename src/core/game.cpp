@@ -1,8 +1,11 @@
 #include "game.h"
+
 #include "buffer.h"
 #include "platform_gl.h"
-#include "asset_utils.h"
 #include "platform_log.h"
+#include "asset_utils.h"
+#include "voxel.h"
+
 #include <assert.h>
 #include <stdlib.h>
 
@@ -58,6 +61,8 @@ static const float rect[] = { -1.0f, -1.0f, 0.0f, 0.0f,
 							  1.0f, -1.0f, 1.0f, 0.0f,
 							  1.0f,  1.0f, 1.0f, 0.5625f };
 
+static VoxelBuffer voxels = VoxelBuffer();
+
 void draw_pixels() {
 	for (int h = 0; h < winHeight; ++h) {
 		for (int w = 0; w < winWidth; ++w) {
@@ -66,8 +71,77 @@ void draw_pixels() {
 	}
 }
 
+void testVoxels() {
+	// Log the root voxel and its header
+
+	DEBUG_LOG_RAW("VoxelBuffer Test", "%s", "Log the root voxel and its header");
+
+	voxels.logVoxel(0); // V 0
+	voxels.logVoxel(1); // H 0:0
+
+	// Add two voxels to the root
+
+	DEBUG_LOG_RAW("VoxelBuffer Test", "%s", "Add two voxels to the root");
+
+	voxels.setVoxel(0, 0, VoxelBuffer::constructVoxel(255)); // V 0-0
+	voxels.setVoxel(0, 7, VoxelBuffer::constructVoxel(255)); // V 0-7
+
+	voxels.logVoxel(0); // V 0
+	voxels.logVoxel(2); // V 0-0
+	voxels.logVoxel(9); // V 0-7
+	voxels.logVoxel(10); // H 0-0:0-7
+
+	// Add two voxels to (2) with one having a child
+
+	DEBUG_LOG_RAW("VoxelBuffer Test", "%s", "Add two voxels to (2) with one having a child");
+
+	voxels.setVoxel(2, 0, VoxelBuffer::constructVoxel(170)); // V 0-0-0
+	voxels.setVoxel(2, 1, VoxelBuffer::constructVoxel(255)); // V 0-0-1
+	voxels.setVoxel(11, 0, VoxelBuffer::constructVoxel(0)); // V 0-0-0-0
+
+	voxels.logVoxel(2); // V 0-0
+	voxels.logVoxel(9); // V 0-7
+	voxels.logVoxel(10); // H 0-0:0-7
+	voxels.logVoxel(11); // V 0-0-0
+	voxels.logVoxel(12); // V 0-0-1
+	voxels.logVoxel(19); // H 0-0-0:0-0-7
+	voxels.logVoxel(20); // V 0-0-0-0
+	voxels.logVoxel(28); // H 0-0-0-0:0-0-0-7
+
+	// Move the first child of (2) to the first child of (9)
+
+	DEBUG_LOG_RAW("VoxelBuffer Test", "%s", "Move the first child of (2) to the first child of (9)");
+
+	voxels.movVoxel(2, 0, 9, 0); // V 0-0-0 -> V 0-7-0
+
+	voxels.logVoxel(2); // V 0-0
+	voxels.logVoxel(9); // V 0-7
+	voxels.logVoxel(10); // H 0-0:0-7
+	voxels.logVoxel(11); // Empty
+	voxels.logVoxel(12); // V 0-0-1
+	voxels.logVoxel(19); // H 0-0-0:0-0-7
+	voxels.logVoxel(29); // V 0-7-0
+	voxels.logVoxel(37); // H 0-7-0:0-7-7
+	voxels.logVoxel(20); // V 0-7-0-0
+	voxels.logVoxel(28); // H 0-7-0-0:0-7-0-7
+
+	// Delete the remaining child of (2)
+
+	DEBUG_LOG_RAW("VoxelBuffer Test", "%s", "Delete the remaining child of (2)");
+
+	voxels.delVoxel(2, 1); // V 0-0-1
+
+	voxels.logVoxel(0); // V 0
+	voxels.logVoxel(2); // Empty
+	voxels.logVoxel(11); // Empty
+	voxels.logVoxel(12); // Empty
+	voxels.logVoxel(19); // Empty
+}
+
 void on_surface_created() {
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+
+	testVoxels();
 }
 
 void on_surface_changed() {

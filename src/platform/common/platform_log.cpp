@@ -25,3 +25,12 @@ void _debug_log_w(const char *tag, const char *fmt, ...) {
 void _debug_log_e(const char *tag, const char *fmt, ...) {
 	LOG_VPRINTF("ERROR");
 }
+
+void _debug_log_r(const char *tag, const char *fmt, ...) {
+	printf("%s: ", tag);
+	va_list arg_ptr;
+	va_start(arg_ptr, fmt);
+	vprintf(fmt, arg_ptr);
+	va_end(arg_ptr);
+	printf("\n");
+}
