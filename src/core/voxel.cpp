@@ -12,9 +12,7 @@
 
 // close pointers are always relative, far pointers always absolute
 
-// TO DO: - external reading access method
-//		  - voxel setter testing
-//		  - voxel sparse tree transversal
+// TO DO: - voxel sparse tree transversal
 
 VoxelBuffer::VoxelBuffer() {
 	buffer = (uint32_t*)malloc(sizeof(uint32_t) * VOXEL_BUFFER_LENGTH);
@@ -67,6 +65,10 @@ uint32_t VoxelBuffer::allocBufferSpace(uint32_t length) {
 }
 
 void VoxelBuffer::freeBufferSpace(uint32_t index, uint32_t length) {
+	for (uint32_t i = index; i < (index + length); ++i) {
+		buffer[i] = 0x00000000;
+	}
+	
 	spots[index] = length;
 
 	std::map<uint32_t, uint32_t>::iterator it = spots.find(index);
@@ -96,23 +98,30 @@ void VoxelBuffer::freeBufferSpace(uint32_t index, uint32_t length) {
 
 void VoxelBuffer::clearVoxel(uint32_t index, bool clearParent, bool clearChildren) {
 	uint32_t Voxel = buffer[index];
-
+	
 	if (!Voxel || (Voxel >> 17) == 0) {
 		return;
 	}
-
+	
 	uint32_t Pointer;
+	uint8_t i;
 
 	if (clearChildren && ((Voxel & 0x0000FF00) >> 8) != 0) { // Voxel has children that are to be cleared
 		Pointer = index + (int16_t)((Voxel & 0x7FFE0000) >> 17 | (Voxel & 0x80000000) >> 16 | (Voxel & 0x80000000) >> 17); // First child pointer
 		
 		if ((Voxel & 0x00010000) == 1) {
+			Voxel = buffer[Pointer];
+
 			freeBufferSpace(Pointer, 1); // Free the pointer to the first child
 
-			Pointer = buffer[Pointer];
-		}
+			Pointer = Voxel;
 
-		for (; Pointer < (Pointer + 8); ++Pointer) {
+			Voxel = buffer[index];
+		}
+		
+		for (i = 0; i < 8; ++i) {
+			Pointer++;
+
 			clearVoxel(Pointer, clearParent, true); // Clear the voxel's children
 		}
 
@@ -126,7 +135,7 @@ void VoxelBuffer::clearVoxel(uint32_t index, bool clearParent, bool clearChildre
 	if (index > 1) { // Voxel isn't the root
 		buffer[index] = 0x00000000;
 
-		uint8_t i = 0;
+		i = 0;
 
 		while ((buffer[index + i] >> 16) != 1) {
 			i++; // Get the distance to the parent header
@@ -137,11 +146,12 @@ void VoxelBuffer::clearVoxel(uint32_t index, bool clearParent, bool clearChildre
 		if (buffer[index + i] & 0x00000001) {
 			Pointer = buffer[Pointer];
 		}
-
-		buffer[Pointer] &= ~(0x01 << (8 + i - 1)); // Update the parent's children mask
-
+		
 		if (clearParent && (((buffer[Pointer] & (~(0x01 << (8 + i - 1)))) & 0x0000FF00) >> 8) == 0) {
 			clearVoxel(Pointer, true, clearChildren); // Clear the voxel's parent
+		}
+		else {
+			buffer[Pointer] &= ~(0x01 << (8 + i - 1)); // Update the parent's children mask
 		}
 	}
 	else {
