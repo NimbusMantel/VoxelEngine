@@ -47,7 +47,7 @@ for /f "tokens=1*" %%a in ("%t%") do (
    )
    set p=%m:.cpp=.o%
    
-   call emcc%HEADERS% %m% -o %p%
+   call emcc%HEADERS% %m% -o %p% -std=c++11
    
    set SOURCES=%SOURCES% %p%
 if defined t goto :sloop

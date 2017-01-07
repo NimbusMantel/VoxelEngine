@@ -363,3 +363,11 @@ uint32_t VoxelBuffer::getVoxel(uint32_t index) {
 void VoxelBuffer::logVoxel(uint32_t index) {
 	DEBUG_LOG_RAW("VoxelBuffer", "(%d) %s", index, std::bitset<32>(getVoxel(index)).to_string().c_str());
 }
+
+void VoxelBuffer::renderFrame(uint16_t width, uint16_t height, uint8_t* pixels) {
+	for (uint16_t h = 0; h < height; ++h) {
+		for (uint16_t w = 0; w < width; ++w) {
+			pixels[w + h * width] = rand() * 255.0f / RAND_MAX;
+		}
+	}
+}

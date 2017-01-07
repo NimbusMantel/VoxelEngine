@@ -6,17 +6,15 @@
 #include "asset_utils.h"
 #include "voxel.h"
 
-#include <assert.h>
-#include <stdlib.h>
+//#include <stdlib.h>
 
-static const GLsizei texWidth = 1024;
-static const GLsizei texHeight = 1024;
+static const GLsizei winWidth = 16;
+static const GLsizei winHeight = 9;
 
-static const GLsizei winWidth = 1024;
-static const GLsizei winHeight = 576;
+static const GLsizei texSize = [](GLsizei v){ v--; v |= v >> 1; v |= v >> 2; v |= v >> 4; v |= v >> 8; v++; return v; }((winWidth > winHeight) ? winWidth : winHeight);
 
-static GLbyte pixels[texWidth * texHeight];
-static GLbyte colours[256 * 3] = {	0, 0, 0, 128, 0, 0, 0, 128, 0, 128, 128, 0, 0, 0, 128, 128, 0, 128, 0, 128, 128, 192, 192, 192, 128, 128, 128, 255,
+static GLubyte pixels[winWidth * winHeight];
+static GLubyte colours[256 * 3] = {	0, 0, 0, 128, 0, 0, 0, 128, 0, 128, 128, 0, 0, 0, 128, 128, 0, 128, 0, 128, 128, 192, 192, 192, 128, 128, 128, 255,
 									0, 0, 0, 255, 0, 255, 255, 0, 0, 0, 255, 255, 0, 255, 0, 255, 255, 255, 255, 255, 0, 0, 0, 0, 0, 95, 0, 0, 135, 0,
 									0, 175, 0, 0, 215, 0, 0, 255, 0, 95, 0, 0, 95, 95, 0, 95, 135, 0, 95, 175, 0, 95, 215, 0, 95, 255, 0, 135, 0, 0, 135,
 									95, 0, 135, 135, 0, 135, 175, 0, 135, 215, 0, 135, 255, 0, 175, 0, 0, 175, 95, 0, 175, 135, 0, 175, 175, 0, 175, 215,
@@ -57,19 +55,11 @@ static GLint u_texture_unit_location;
 static GLint u_texture_palette;
 
 static const float rect[] = { -1.0f, -1.0f, 0.0f, 0.0f,
-							  -1.0f,  1.0f, 0.0f, 0.5625f,
-							  1.0f, -1.0f, 1.0f, 0.0f,
-							  1.0f,  1.0f, 1.0f, 0.5625f };
+							  -1.0f,  1.0f, 0.0f, winHeight / (float)texSize,
+							  1.0f, -1.0f, winWidth / (float)texSize, 0.0f,
+							  1.0f,  1.0f, winWidth / (float)texSize, winHeight / (float)texSize };
 
 static VoxelBuffer voxels = VoxelBuffer();
-
-void draw_pixels() {
-	for (int h = 0; h < winHeight; ++h) {
-		for (int w = 0; w < winWidth; ++w) {
-			pixels[w + h * winWidth] = rand() * 255.0f / RAND_MAX;
-		}
-	}
-}
 
 void testVoxels() {
 	// Log the root voxel and its header
@@ -140,28 +130,27 @@ void testVoxels() {
 
 void on_surface_created() {
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-
-	testVoxels();
+	
+	//testVoxels();
 }
 
 void on_surface_changed() {
-	draw_pixels();
-
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 	glGenTextures(1, &texture);
 	glBindTexture(GL_TEXTURE_2D, texture);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, texWidth, texHeight, 0, GL_ALPHA, GL_UNSIGNED_BYTE, pixels);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, texSize, texSize, 0, GL_ALPHA, GL_UNSIGNED_BYTE, nullptr);
 	glBindTexture(GL_TEXTURE_2D, 0);
 
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 	glGenTextures(1, &palette);
 	glBindTexture(GL_TEXTURE_2D, palette);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 256, 1, 0, GL_RGB, GL_UNSIGNED_BYTE, colours);
 	glBindTexture(GL_TEXTURE_2D, 0);
 
-	buffer = create_vbo(sizeof(rect), rect, GL_DYNAMIC_DRAW);
+	buffer = create_vbo(sizeof(rect), rect, GL_STATIC_DRAW);
 
 	program = build_program_from_assets("shader.vsh", "shader.fsh");
 
@@ -180,7 +169,7 @@ void update() {
 void on_draw_frame() {
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	draw_pixels();
+	voxels.renderFrame(winWidth, winHeight, pixels);
 	update();
 
 	glUseProgram(program);

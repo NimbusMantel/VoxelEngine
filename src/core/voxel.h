@@ -22,6 +22,8 @@ public:
 
 	void logVoxel(uint32_t index);
 
+	void renderFrame(uint16_t width, uint16_t height, uint8_t* pixels);
+
 private:
 
 	uint32_t* buffer;
