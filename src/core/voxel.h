@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 
 #define VOXEL_BUFFER_LENGTH 128
@@ -22,7 +23,7 @@ public:
 
 	void logVoxel(uint32_t index);
 
-	void renderFrame(uint16_t width, uint16_t height, uint8_t* pixels);
+	std::function<void()> getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint8_t* buffer);
 
 private:
 

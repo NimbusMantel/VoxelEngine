@@ -5,8 +5,10 @@
 #include "platform_log.h"
 #include "asset_utils.h"
 #include "voxel.h"
+#include "camera.h"
 
 //#include <stdlib.h>
+#include <functional>
 
 static const GLsizei winWidth = 16;
 static const GLsizei winHeight = 9;
@@ -60,6 +62,7 @@ static const float rect[] = { -1.0f, -1.0f, 0.0f, 0.0f,
 							  1.0f,  1.0f, winWidth / (float)texSize, winHeight / (float)texSize };
 
 static VoxelBuffer voxels = VoxelBuffer();
+static Camera camera = Camera(voxels.getRenderFunction(winWidth, winHeight, 70, pixels));
 
 void testVoxels() {
 	// Log the root voxel and its header
@@ -169,7 +172,7 @@ void update() {
 void on_draw_frame() {
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	voxels.renderFrame(winWidth, winHeight, pixels);
+	camera.render();
 	update();
 
 	glUseProgram(program);

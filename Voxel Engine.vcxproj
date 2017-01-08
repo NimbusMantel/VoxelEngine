@@ -72,6 +72,7 @@
   <ItemGroup>
     <ClCompile Include="src\core\asset_utils.cpp" />
     <ClCompile Include="src\core\buffer.cpp" />
+    <ClCompile Include="src\core\camera.cpp" />
     <ClCompile Include="src\core\game.cpp" />
     <ClCompile Include="src\core\shader.cpp" />
     <ClCompile Include="src\core\voxel.cpp" />
@@ -83,6 +84,7 @@
   <ItemGroup>
     <ClInclude Include="src\core\asset_utils.h" />
     <ClInclude Include="src\core\buffer.h" />
+    <ClInclude Include="src\core\camera.h" />
     <ClInclude Include="src\core\config.h" />
     <ClInclude Include="src\core\game.h" />
     <ClInclude Include="src\core\shader.h" />
