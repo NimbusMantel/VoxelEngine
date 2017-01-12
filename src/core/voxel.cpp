@@ -364,11 +364,11 @@ void VoxelBuffer::logVoxel(uint32_t index) {
 	DEBUG_LOG_RAW("VoxelBuffer", "(%d) %s", index, std::bitset<32>(getVoxel(index)).to_string().c_str());
 }
 
-std::function<void()> VoxelBuffer::getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint8_t* buffer) {
+std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint8_t* buffer) {
 	if (fov < 1) fov = 1;
 	if (fov > 360) fov = 360;
 	
-	return [this, width, height, fov, buffer]() {
+	return [this, width, height, fov, buffer](mat4 cm) {
 		for (uint16_t h = 0; h < height; ++h) {
 			for (uint16_t w = 0; w < width; ++w) {
 				buffer[w + h * width] = rand() * 255.0f / RAND_MAX;

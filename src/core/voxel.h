@@ -1,5 +1,7 @@
 #pragma once
 
+#include "mat4.h"
+
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -23,7 +25,7 @@ public:
 
 	void logVoxel(uint32_t index);
 
-	std::function<void()> getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint8_t* buffer);
+	std::function<void(mat4)> getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint8_t* buffer);
 
 private:
 

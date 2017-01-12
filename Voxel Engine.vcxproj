@@ -74,6 +74,7 @@
     <ClCompile Include="src\core\buffer.cpp" />
     <ClCompile Include="src\core\camera.cpp" />
     <ClCompile Include="src\core\game.cpp" />
+    <ClCompile Include="src\core\mat4.cpp" />
     <ClCompile Include="src\core\shader.cpp" />
     <ClCompile Include="src\core\voxel.cpp" />
     <ClCompile Include="src\platform\common\platform_file_utils.cpp" />
@@ -87,6 +88,7 @@
     <ClInclude Include="src\core\camera.h" />
     <ClInclude Include="src\core\config.h" />
     <ClInclude Include="src\core\game.h" />
+    <ClInclude Include="src\core\mat4.h" />
     <ClInclude Include="src\core\shader.h" />
     <ClInclude Include="src\core\voxel.h" />
     <ClInclude Include="src\platform\common\platform_asset_utils.h" />
