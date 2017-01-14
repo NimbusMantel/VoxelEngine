@@ -1,10 +1,12 @@
 #include "voxel.h"
 
-#include "config.h"
 #include "platform_log.h"
 
 #include <stdlib.h>
+#include <assert.h>
 #include <bitset>
+
+#define ROUND_2_INT(f) ((int)(f >= 0.0 ? (f + 0.5) : (f - 0.5)))
 
 // Voxel: 15 Bit first child - 1 Bit far pointer - 8 Bit children mask - 8 Bit colour index
 // Parent: 16 Bit 0x0001 - 15 Bit parent - 1 Bit far pointer
@@ -367,12 +369,50 @@ void VoxelBuffer::logVoxel(uint32_t index) {
 std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint8_t* buffer) {
 	if (fov < 1) fov = 1;
 	if (fov > 360) fov = 360;
-	
+
 	return [this, width, height, fov, buffer](mat4 cm) {
-		for (uint16_t h = 0; h < height; ++h) {
-			for (uint16_t w = 0; w < width; ++w) {
-				buffer[w + h * width] = rand() * 255.0f / RAND_MAX;
-			}
-		}
+		this->depthFirst(0x00000000, 0, 0, 0, 0xFFFF, ROUND_2_INT(cm[3]), ROUND_2_INT(cm[7]), ROUND_2_INT(cm[11]));
 	};
+}
+
+void VoxelBuffer::depthFirst(uint32_t index, int16_t posX, int16_t posY, int16_t posZ, uint16_t size, const int16_t eyeX, const int16_t eyeY, const int16_t eyeZ) {
+	size >>= 1;
+
+	uint8_t children = (buffer[index] & 0x0000FF00) >> 8;
+
+	if (children) {
+		uint32_t firstChild = index + (int16_t)((buffer[index] & 0x7FFE0000) >> 17 | (buffer[index] & 0x80000000) >> 16 | (buffer[index] & 0x80000000) >> 17);
+		uint8_t first = ((eyeX < posX) ? 1 : 0) | ((eyeY < posY) ? 2 : 0) | ((eyeZ < posZ) ? 4 : 0);
+
+		if (buffer[index] & 0x00010000) {
+			firstChild = buffer[firstChild];
+		}
+
+		if (children & (0x01 << (7 - first))) {
+			depthFirst(firstChild + first, posX + (((first)& 0x01) ? size : -size), posY + (((first)& 0x02) ? size : -size), posZ + (((first)& 0x04) ? size : -size), size, eyeX, eyeY, eyeZ);
+		}
+		if (children & (0x01 << (7 - first ^ 1))) {
+			depthFirst(firstChild + first ^ 1, posX + (((first ^ 1) & 0x01) ? size : -size), posY + (((first ^ 1) & 0x02) ? size : -size), posZ + (((first ^ 1) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ);
+		}
+		if (children & (0x01 << (7 - first ^ 2))) {
+			depthFirst(firstChild + first ^ 2, posX + (((first ^ 2) & 0x01) ? size : -size), posY + (((first ^ 2) & 0x02) ? size : -size), posZ + (((first ^ 2) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ);
+		}
+		if (children & (0x01 << (7 - first ^ 3))) {
+			depthFirst(firstChild + first ^ 3, posX + (((first ^ 3) & 0x01) ? size : -size), posY + (((first ^ 3) & 0x02) ? size : -size), posZ + (((first ^ 3) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ);
+		}
+		if (children & (0x01 << (7 - first ^ 4))) {
+			depthFirst(firstChild + first ^ 4, posX + (((first ^ 4) & 0x01) ? size : -size), posY + (((first ^ 4) & 0x02) ? size : -size), posZ + (((first ^ 4) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ);
+		}
+		if (children & (0x01 << (7 - first ^ 5))) {
+			depthFirst(firstChild + first ^ 5, posX + (((first ^ 5) & 0x01) ? size : -size), posY + (((first ^ 5) & 0x02) ? size : -size), posZ + (((first ^ 5) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ);
+		}
+		if (children & (0x01 << (7 - first ^ 6))) {
+			depthFirst(firstChild + first ^ 6, posX + (((first ^ 6) & 0x01) ? size : -size), posY + (((first ^ 6) & 0x02) ? size : -size), posZ + (((first ^ 6) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ);
+		}
+		if (children & (0x01 << (7 - first ^ 7))) {
+			depthFirst(firstChild + first ^ 7, posX + (((first ^ 7) & 0x01) ? size : -size), posY + (((first ^ 7) & 0x02) ? size : -size), posZ + (((first ^ 7) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ);
+		}
+	}
+
+	logVoxel(index);
 }

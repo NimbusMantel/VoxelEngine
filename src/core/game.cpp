@@ -65,6 +65,8 @@ static VoxelBuffer voxels = VoxelBuffer();
 static Camera camera = Camera(voxels.getRenderFunction(winWidth, winHeight, 70, pixels));
 
 void testVoxels() {
+	DEBUG_LOG_RAW("", "%s", "");
+	
 	// Log the root voxel and its header
 
 	DEBUG_LOG_RAW("VoxelBuffer Test", "%s", "Log the root voxel and its header");
@@ -129,12 +131,20 @@ void testVoxels() {
 	voxels.logVoxel(11); // Empty
 	voxels.logVoxel(12); // Empty
 	voxels.logVoxel(19); // Empty
+
+	DEBUG_LOG_RAW("", "%s", "");
 }
 
 void on_surface_created() {
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	
 	//testVoxels();
+
+	voxels.setVoxel(0, 0, VoxelBuffer::constructVoxel(255));
+	voxels.setVoxel(0, 7, VoxelBuffer::constructVoxel(255));
+	voxels.setVoxel(2, 0, VoxelBuffer::constructVoxel(170));
+	voxels.setVoxel(2, 1, VoxelBuffer::constructVoxel(255));
+	voxels.setVoxel(11, 0, VoxelBuffer::constructVoxel(0));
 }
 
 void on_surface_changed() {

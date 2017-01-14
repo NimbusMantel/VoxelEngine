@@ -1,5 +1,7 @@
 #include "mat4.h"
 
+#include "platform_log.h"
+
 mat4::mat4(double v11, double v12, double v13, double v14, double v21, double v22, double v23, double v24, double v31, double v32, double v33, double v34, double v41, double v42, double v43, double v44) : matrix{ v11, v12, v13, v14, v21, v22, v23, v24, v31, v32, v33, v34, v41, v42, v43, v44 } {
 	
 }
@@ -62,4 +64,8 @@ mat4 mat4::inverse() {
 	}
 
 	return inv;
+}
+
+void mat4::log() {
+	DEBUG_LOG_RAW("Matrix", "%f %f %f %f\n        %f %f %f %f\n        %f %f %f %f\n        %f %f %f %f", matrix[0], matrix[1], matrix[2], matrix[3], matrix[4], matrix[5], matrix[6], matrix[7], matrix[8], matrix[9], matrix[10], matrix[11], matrix[12], matrix[13], matrix[14], matrix[15]);
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 class mat4
 {
 public:
@@ -14,8 +16,11 @@ public:
 	~mat4();
 
 	mat4 operator*(const mat4& m);
+	const double& operator[](std::size_t idx) const { return matrix[idx]; }
 
 	mat4 inverse();
+
+	void log();
 
 private:
 
