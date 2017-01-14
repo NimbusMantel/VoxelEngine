@@ -137,6 +137,9 @@ void testVoxels() {
 
 void on_surface_created() {
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+
+	camera.setPositionX(10.0f);
+	camera.setPositionZ(-5.0f);
 	
 	//testVoxels();
 
