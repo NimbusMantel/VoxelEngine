@@ -1,7 +1,5 @@
 #include "camera.h"
 
-#include "mat4.h"
-
 #include <math.h>
 
 Camera::Camera(std::function<void(mat4)> r) : x(0), y(0), z(0), r(0), p(0), a(0), renderFunction(r) {

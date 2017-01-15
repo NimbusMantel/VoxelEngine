@@ -1,6 +1,6 @@
 #pragma once
 
-#include "mat4.h"
+#include "geo.h"
 
 #include <cstdint>
 #include <functional>
@@ -38,5 +38,5 @@ private:
 
 	void clearVoxel(uint32_t index, bool clearParent, bool clearChildren);
 
-	void frontToBack(uint32_t index, int16_t posX, int16_t posY, int16_t posZ, uint16_t size, const int16_t eyeX, const int16_t eyeY, const int16_t eyeZ);
+	void frontToBack(uint32_t index, int16_t posX, int16_t posY, int16_t posZ, uint16_t size, const int16_t eyeX, const int16_t eyeY, const int16_t eyeZ, std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint8_t, bool)>& render);
 };

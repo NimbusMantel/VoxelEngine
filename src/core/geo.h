@@ -2,6 +2,25 @@
 
 #include <cstddef>
 
+class vec2
+{
+public:
+
+	double x;
+	double y;
+
+};
+
+class vec3
+{
+public:
+
+	double x;
+	double y;
+	double z;
+
+};
+
 class mat4
 {
 public:

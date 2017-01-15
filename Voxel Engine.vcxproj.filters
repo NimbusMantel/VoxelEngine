@@ -45,7 +45,7 @@
     <ClCompile Include="src\core\camera.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\core\mat4.cpp">
+    <ClCompile Include="src\core\geo.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -86,7 +86,7 @@
     <ClInclude Include="src\core\camera.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="src\core\mat4.h">
+    <ClInclude Include="src\core\geo.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

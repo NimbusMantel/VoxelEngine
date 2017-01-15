@@ -8,7 +8,7 @@ set HEADERS=..\src\core ..\src\platform\common ..\src\platform\emscripten
 
 REM List the source files
 
-set SOURCES=..\src\platform\emscripten\main.cpp ..\src\core\game.cpp ..\src\platform\emscripten\platform_asset_utils.cpp ..\src\platform\common\platform_log.cpp ..\src\platform\common\platform_file_utils.cpp ..\src\core\asset_utils.cpp ..\src\core\buffer.cpp ..\src\core\shader.cpp ..\src\core\voxel.cpp ..\src\core\camera.cpp ..\src\core\mat4.cpp
+set SOURCES=..\src\platform\emscripten\main.cpp ..\src\core\game.cpp ..\src\platform\emscripten\platform_asset_utils.cpp ..\src\platform\common\platform_log.cpp ..\src\platform\common\platform_file_utils.cpp ..\src\core\asset_utils.cpp ..\src\core\buffer.cpp ..\src\core\shader.cpp ..\src\core\voxel.cpp ..\src\core\camera.cpp ..\src\core\geo.cpp
 
 REM Set a folder with files to embed
 
