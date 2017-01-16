@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <bitset>
+#include <math.h>
 
 #define ROUND_2_INT(f) ((int)(f >= 0.0 ? (f + 0.5) : (f - 0.5)))
 
@@ -370,12 +371,23 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 	if (fov < 1) fov = 1;
 	if (fov > 360) fov = 360;
 
-	mat4 perMat = mat4(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1); // Correct calculation: https://people.cs.clemson.edu/~dhouse/courses/405/notes/projections.pdf p. 8 / http://www.codinglabs.net/article_world_view_projection_matrix.aspx
+	double a = ((fov / 180.0) * M_PI) / 2.0;
+
+	mat4 perMat = mat4(1.0 / ((width / (double)height) * tan(a)), 0, 0, 0, 0, 1.0 / tan(a), 0, 0, 0, 0, 1, -1, 0, 0, 1, 0); // http://ogldev.atspace.co.uk/www/tutorial12/tutorial12.html
 
 	return [this, perMat, width, height, buffer](mat4 cm) {
 		mat4 perPro = ((mat4)perMat) * cm.inverse();
 
 		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint8_t, bool)> render = [perPro, width, height, buffer](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint8_t colour, bool children)->bool {
+			vec2 v1 = ((mat4)perPro) * vec3(posX - size, posY - size, posZ - size);
+			vec2 v2 = ((mat4)perPro) * vec3(posX + size, posY - size, posZ - size);
+			vec2 v3 = ((mat4)perPro) * vec3(posX - size, posY + size, posZ - size);
+			vec2 v4 = ((mat4)perPro) * vec3(posX + size, posY + size, posZ - size);
+			vec2 v5 = ((mat4)perPro) * vec3(posX - size, posY - size, posZ + size);
+			vec2 v6 = ((mat4)perPro) * vec3(posX + size, posY - size, posZ + size);
+			vec2 v7 = ((mat4)perPro) * vec3(posX - size, posY + size, posZ + size);
+			vec2 v8 = ((mat4)perPro) * vec3(posX + size, posY + size, posZ + size);
+			
 			// Project the voxel vertices into screen space -> if all of them are off return false
 			// Check if the voxel is covered -> if so return false
 			// Draw the pixels if the voxel is smaller than a pixel or hasn't got any children

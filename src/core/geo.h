@@ -1,10 +1,22 @@
 #pragma once
 
+#define M_PI 3.14159265359
+
 #include <cstddef>
+
+class vec2;
+class vec3;
+class vec4;
+class mat4;
 
 class vec2
 {
 public:
+
+	vec2(double x, double y);
+	vec2();
+
+	~vec2();
 
 	double x;
 	double y;
@@ -15,9 +27,32 @@ class vec3
 {
 public:
 
+	vec3(double x, double y, double z);
+	vec3();
+
+	~vec3();
+
 	double x;
 	double y;
 	double z;
+
+	operator vec2() const;
+
+};
+
+class vec4
+{
+public:
+
+	vec4(double x, double y, double z, double w);
+	vec4();
+
+	~vec4();
+
+	double x;
+	double y;
+	double z;
+	double w;
 
 };
 
@@ -35,6 +70,10 @@ public:
 	~mat4();
 
 	mat4 operator*(const mat4& m);
+	vec4 operator*(const vec4& v);
+	vec3 operator*(const vec3& v);
+	vec2 operator*(const vec2& v);
+
 	const double& operator[](std::size_t idx) const { return matrix[idx]; }
 
 	mat4 inverse();

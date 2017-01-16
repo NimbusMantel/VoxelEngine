@@ -2,11 +2,51 @@
 
 #include "platform_log.h"
 
+vec2::vec2(double xPos, double yPos) : x(xPos), y(yPos) {
+
+}
+
+vec2::vec2() : x(0), y(0) {
+
+}
+
+vec2::~vec2() {
+
+}
+
+vec3::vec3(double xPos, double yPos, double zPos) : x(xPos), y(yPos), z(zPos) {
+
+}
+
+vec3::vec3() : x(0), y(0), z(0) {
+
+}
+
+vec3::~vec3() {
+
+}
+
+vec3::operator vec2() const {
+	return vec2(x, y);
+}
+
+vec4::vec4(double xPos, double yPos, double zPos, double wPos) : x(xPos), y(yPos), z(zPos), w(wPos) {
+
+}
+
+vec4::vec4() : x(0), y(0), z(0), w(0) {
+
+}
+
+vec4::~vec4() {
+
+}
+
 mat4::mat4(double v11, double v12, double v13, double v14, double v21, double v22, double v23, double v24, double v31, double v32, double v33, double v34, double v41, double v42, double v43, double v44) : matrix{ v11, v12, v13, v14, v21, v22, v23, v24, v31, v32, v33, v34, v41, v42, v43, v44 } {
 	
 }
 
-mat4::mat4() : mat4(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) {
+mat4::mat4() : mat4(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1) {
 
 }
 
@@ -68,4 +108,22 @@ mat4 mat4::inverse() {
 
 void mat4::log() {
 	DEBUG_LOG_RAW("Matrix", "%f %f %f %f\n        %f %f %f %f\n        %f %f %f %f\n        %f %f %f %f", matrix[0], matrix[1], matrix[2], matrix[3], matrix[4], matrix[5], matrix[6], matrix[7], matrix[8], matrix[9], matrix[10], matrix[11], matrix[12], matrix[13], matrix[14], matrix[15]);
+}
+
+vec4 mat4::operator*(const vec4& v) {
+	return vec4(matrix[0] * v.x + matrix[1] * v.y + matrix[2] * v.z + matrix[3] * v.w,
+				matrix[4] * v.x + matrix[5] * v.y + matrix[6] * v.z + matrix[7] * v.w,
+				matrix[8] * v.x + matrix[9] * v.y + matrix[10] * v.z + matrix[11] * v.w,
+				matrix[12] * v.x + matrix[13] * v.y + matrix[14] * v.z + matrix[15] * v.w);
+}
+
+vec3 mat4::operator*(const vec3& v) {
+	return vec3(matrix[0] * v.x + matrix[1] * v.y + matrix[2] * v.z + matrix[3],
+		matrix[4] * v.x + matrix[5] * v.y + matrix[6] * v.z + matrix[7],
+		matrix[8] * v.x + matrix[9] * v.y + matrix[10] * v.z + matrix[11]);
+}
+
+vec2 mat4::operator*(const vec2& v) {
+	return vec2(matrix[0] * v.x + matrix[1] * v.y + matrix[3],
+		matrix[4] * v.x + matrix[5] * v.y + matrix[7]);
 }
