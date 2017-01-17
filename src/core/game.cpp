@@ -10,12 +10,13 @@
 //#include <stdlib.h>
 #include <functional>
 
-static const GLsizei winWidth = 16;
-static const GLsizei winHeight = 9;
+static const GLsizei winWidth = 640;
+static const GLsizei winHeight = 360;
 
 static const GLsizei texSize = [](GLsizei v){ v--; v |= v >> 1; v |= v >> 2; v |= v >> 4; v |= v >> 8; v++; return v; }((winWidth > winHeight) ? winWidth : winHeight);
 
 static GLubyte pixels[winWidth * winHeight];
+static bool mask[winWidth * winHeight];
 static GLubyte colours[256 * 3] = {	0, 0, 0, 128, 0, 0, 0, 128, 0, 128, 128, 0, 0, 0, 128, 128, 0, 128, 0, 128, 128, 192, 192, 192, 128, 128, 128, 255,
 									0, 0, 0, 255, 0, 255, 255, 0, 0, 0, 255, 255, 0, 255, 0, 255, 255, 255, 255, 255, 0, 0, 0, 0, 0, 95, 0, 0, 135, 0,
 									0, 175, 0, 0, 215, 0, 0, 255, 0, 95, 0, 0, 95, 95, 0, 95, 135, 0, 95, 175, 0, 95, 215, 0, 95, 255, 0, 135, 0, 0, 135,
@@ -62,7 +63,7 @@ static const float rect[] = { -1.0f, -1.0f, 0.0f, 0.0f,
 							  1.0f,  1.0f, winWidth / (float)texSize, winHeight / (float)texSize };
 
 static VoxelBuffer voxels = VoxelBuffer();
-static Camera camera = Camera(voxels.getRenderFunction(winWidth, winHeight, 70, pixels));
+static Camera camera = Camera(voxels.getRenderFunction(winWidth, winHeight, 70, pixels, mask));
 
 void testVoxels() {
 	DEBUG_LOG_RAW("", "%s", "");

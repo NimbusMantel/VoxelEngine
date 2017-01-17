@@ -23,8 +23,8 @@ int main(void)
 
 int init_gl()
 {
-	const int width = 16,
-		height = 9;
+	const int width = 640,
+		height = 360;
 
 	if (glfwInit() != GL_TRUE) {
 		printf("glfwInit() failed\n");

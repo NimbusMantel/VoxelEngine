@@ -8,6 +8,8 @@
 #include <math.h>
 
 #define ROUND_2_INT(f) ((int)(f >= 0.0 ? (f + 0.5) : (f - 0.5)))
+#define MIN(a, b) ((a > b) ? b : a)
+#define MAX(a, b) ((a < b) ? b : a)
 
 // Voxel: 15 Bit first child - 1 Bit far pointer - 8 Bit children mask - 8 Bit colour index
 // Parent: 16 Bit 0x0001 - 15 Bit parent - 1 Bit far pointer
@@ -367,45 +369,124 @@ void VoxelBuffer::logVoxel(uint32_t index) {
 	DEBUG_LOG_RAW("VoxelBuffer", "(%d) %s", index, std::bitset<32>(getVoxel(index)).to_string().c_str());
 }
 
-std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint8_t* buffer) {
+std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint8_t* buffer, bool* mask) {
 	if (fov < 1) fov = 1;
 	if (fov > 360) fov = 360;
 
 	double a = ((fov / 180.0) * M_PI) / 2.0;
+	double ar = width / (double)height;
 
-	mat4 perMat = mat4(1.0 / ((width / (double)height) * tan(a)), 0, 0, 0, 0, 1.0 / tan(a), 0, 0, 0, 0, 1, -1, 0, 0, 1, 0); // http://ogldev.atspace.co.uk/www/tutorial12/tutorial12.html
+	mat4 perMat = mat4(1.0 / (ar * tan(a)), 0, 0, 0, 0, 1.0 / tan(a), 0, 0, 0, 0, 1, -0, 0, 0, 1, 0); // http://ogldev.atspace.co.uk/www/tutorial12/tutorial12.html
 
-	return [this, perMat, width, height, buffer](mat4 cm) {
+	return [this, perMat, width, height, ar, buffer, mask](mat4 cm) {
 		mat4 perPro = ((mat4)perMat) * cm.inverse();
 
-		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint8_t, bool)> render = [perPro, width, height, buffer](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint8_t colour, bool children)->bool {
-			vec2 v1 = ((mat4)perPro) * vec3(posX - size, posY - size, posZ - size);
-			vec2 v2 = ((mat4)perPro) * vec3(posX + size, posY - size, posZ - size);
-			vec2 v3 = ((mat4)perPro) * vec3(posX - size, posY + size, posZ - size);
-			vec2 v4 = ((mat4)perPro) * vec3(posX + size, posY + size, posZ - size);
-			vec2 v5 = ((mat4)perPro) * vec3(posX - size, posY - size, posZ + size);
-			vec2 v6 = ((mat4)perPro) * vec3(posX + size, posY - size, posZ + size);
-			vec2 v7 = ((mat4)perPro) * vec3(posX - size, posY + size, posZ + size);
-			vec2 v8 = ((mat4)perPro) * vec3(posX + size, posY + size, posZ + size);
-			
+		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint8_t, bool, uint8_t)> render = [perPro, width, height, ar, buffer, mask](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint8_t colour, bool children, uint8_t first)->bool {
 			// Project the voxel vertices into screen space -> if all of them are off return false
 			// Check if the voxel is covered -> if so return false
 			// Draw the pixels if the voxel is smaller than a pixel or hasn't got any children
 			// Return whether the voxel hasn't been drawn
+			
+			vec2 vs[6] = { ((mat4)perPro) * vec3(posX + (((first ^ 1) & 0x01) ? size : -size), posY + (((first ^ 1) & 0x02) ? size : -size), posZ + (((first ^ 1) & 0x04) ? size : -size)),
+						   ((mat4)perPro) * vec3(posX + (((first ^ 2) & 0x01) ? size : -size), posY + (((first ^ 2) & 0x02) ? size : -size), posZ + (((first ^ 2) & 0x04) ? size : -size)),
+						   ((mat4)perPro) * vec3(posX + (((first ^ 4) & 0x01) ? size : -size), posY + (((first ^ 4) & 0x02) ? size : -size), posZ + (((first ^ 4) & 0x04) ? size : -size)),
+						   ((mat4)perPro) * vec3(posX + (((first ^ 3) & 0x01) ? size : -size), posY + (((first ^ 3) & 0x02) ? size : -size), posZ + (((first ^ 3) & 0x04) ? size : -size)),
+						   ((mat4)perPro) * vec3(posX + (((first ^ 5) & 0x01) ? size : -size), posY + (((first ^ 5) & 0x02) ? size : -size), posZ + (((first ^ 5) & 0x04) ? size : -size)),
+						   ((mat4)perPro) * vec3(posX + (((first ^ 6) & 0x01) ? size : -size), posY + (((first ^ 6) & 0x02) ? size : -size), posZ + (((first ^ 6) & 0x04) ? size : -size)) };
 
-			return children;
+			vs[0].x = ROUND_2_INT((vs[0].x + ar) * 0.5 * height);
+			vs[0].y = ROUND_2_INT((vs[0].y + 1.0) * 0.5 * height);
+			vs[1].x = ROUND_2_INT((vs[1].x + ar) * 0.5 * height);
+			vs[1].y = ROUND_2_INT((vs[1].y + 1.0) * 0.5 * height);
+			vs[2].x = ROUND_2_INT((vs[2].x + ar) * 0.5 * height);
+			vs[2].y = ROUND_2_INT((vs[2].y + 1.0) * 0.5 * height);
+			vs[3].x = ROUND_2_INT((vs[3].x + ar) * 0.5 * height);
+			vs[3].y = ROUND_2_INT((vs[3].y + 1.0) * 0.5 * height);
+			vs[4].x = ROUND_2_INT((vs[4].x + ar) * 0.5 * height);
+			vs[4].y = ROUND_2_INT((vs[4].y + 1.0) * 0.5 * height);
+			vs[5].x = ROUND_2_INT((vs[5].x + ar) * 0.5 * height);
+			vs[5].y = ROUND_2_INT((vs[5].y + 1.0) * 0.5 * height);
+
+			vec2 min = vec2(MIN(vs[0].x, MIN(vs[1].x, MIN(vs[2].x, MIN(vs[3].x, MIN(vs[4].x, vs[5].x))))), MIN(vs[0].y, MIN(vs[1].y, MIN(vs[2].y, MIN(vs[3].y, MIN(vs[4].y, vs[5].y))))));
+			vec2 max = vec2(MAX(vs[0].x, MAX(vs[1].x, MAX(vs[2].x, MAX(vs[3].x, MAX(vs[4].x, vs[5].x))))), MAX(vs[0].y, MAX(vs[1].y, MAX(vs[2].y, MAX(vs[3].y, MAX(vs[4].y, vs[5].y))))));
+
+			if (min.x >= width || min.y >= height || max.x < 0 || max.y < 0) {
+				return false;
+			}
+
+			min.x = MAX(min.x, 0);
+			min.y = MAX(min.y, 0);
+			max.x = MIN(max.x, width - 1);
+			max.y = MIN(max.y, height - 1);
+
+			vec2 med = vec2();
+			uint8_t i, j;
+
+			for (i = 0; i < 6; ++i) {
+				med.x += vs[i].x;
+				med.y += vs[i].y;
+			}
+
+			med.x /= 6.0;
+			med.y /= 6.0;
+
+			vec2 tmp;
+
+			for (i = 0; i < 5; ++i) {
+				for (j = 0; j < (5 - i); ++j) {
+					if (atan2(vs[j].y - med.y, vs[j].x - med.x) > atan2(vs[j + 1].y - med.y, vs[j + 1].x - med.x)) {
+						tmp = vs[j + 1];
+						vs[j + 1] = vs[j];
+						vs[j] = tmp;
+					}
+				}
+			}
+
+			bool c;
+			bool draw = !children || (min.x == max.x && min.y == max.y);
+
+			for (uint16_t y = min.y; y <= max.y; ++y) {
+				for (uint16_t x = min.x; x <= max.x; ++x) {
+					c = false;
+
+					for (i = 0, j = 5; i < 6; j = i++) {
+						if (((vs[i].y >= y) != (vs[j].y >= y)) && (x <= (vs[j].x - vs[i].x) * (y - vs[i].y) / (vs[j].y - vs[i].y) + vs[i].x)) {
+							c = !c;
+						}
+					}
+
+					if (c) {
+						if (!mask[y * width + x]) {
+							if (!draw) {
+								return true;
+							}
+
+							mask[y * width + x] = true;
+							buffer[y * width + x] = colour;
+						}
+					}
+				}
+			}
+
+			return false;
 		};
+
+		for (uint16_t y = 0; y < height; ++y) {
+			for (uint16_t x = 0; x <= width; ++x) {
+				mask[y * width + x] = false;
+			}
+		}
 
 		this->frontToBack(0x00000000, 0, 0, 0, 0x8000, ROUND_2_INT(cm[3]), ROUND_2_INT(cm[7]), ROUND_2_INT(cm[11]), render);
 	};
 }
 
-void VoxelBuffer::frontToBack(uint32_t index, int16_t posX, int16_t posY, int16_t posZ, uint16_t size, const int16_t eyeX, const int16_t eyeY, const int16_t eyeZ, std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint8_t, bool)>& render) {
+void VoxelBuffer::frontToBack(uint32_t index, int16_t posX, int16_t posY, int16_t posZ, uint16_t size, const int16_t eyeX, const int16_t eyeY, const int16_t eyeZ, std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint8_t, bool, uint8_t)>& render) {
 	uint8_t children = (buffer[index] & 0x0000FF00) >> 8;
+	uint8_t first = ((eyeX < posX) ? 1 : 0) | ((eyeY < posY) ? 2 : 0) | ((eyeZ < posZ) ? 4 : 0);
 
-	if (render(posX, posY, posZ, size, buffer[index] & 0x000000FF, children)) {
+	if (render(posX, posY, posZ, size, buffer[index] & 0x000000FF, children, first)) {
 		uint32_t firstChild = index + (int16_t)((buffer[index] & 0x7FFE0000) >> 17 | (buffer[index] & 0x80000000) >> 16 | (buffer[index] & 0x80000000) >> 17);
-		uint8_t first = ((eyeX < posX) ? 1 : 0) | ((eyeY < posY) ? 2 : 0) | ((eyeZ < posZ) ? 4 : 0);
 		
 		size >>= 1;
 
