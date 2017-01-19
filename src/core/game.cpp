@@ -7,8 +7,9 @@
 #include "voxel.h"
 #include "camera.h"
 
-//#include <stdlib.h>
+#include <stdlib.h>
 #include <functional>
+#include <math.h>
 
 static const GLsizei winWidth = 640;
 static const GLsizei winHeight = 360;
@@ -64,6 +65,8 @@ static const float rect[] = { -1.0f, -1.0f, 0.0f, 0.0f,
 
 static VoxelBuffer voxels = VoxelBuffer();
 static Camera camera = Camera(voxels.getRenderFunction(winWidth, winHeight, 70, pixels, mask));
+
+static double timer = 0.0;
 
 void testVoxels() {
 	DEBUG_LOG_RAW("", "%s", "");
@@ -139,16 +142,23 @@ void testVoxels() {
 void on_surface_created() {
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
-	camera.setPositionX(10.0f);
-	camera.setPositionZ(-5.0f);
+	camera.setPositionX(-16);
+	camera.setPositionY(-16);
+	camera.setPositionZ(100-16);
 	
 	//testVoxels();
 
-	voxels.setVoxel(0, 0, VoxelBuffer::constructVoxel(255));
-	voxels.setVoxel(0, 7, VoxelBuffer::constructVoxel(255));
-	voxels.setVoxel(2, 0, VoxelBuffer::constructVoxel(170));
-	voxels.setVoxel(2, 1, VoxelBuffer::constructVoxel(255));
-	voxels.setVoxel(11, 0, VoxelBuffer::constructVoxel(0));
+	voxels.setVoxel(0, 0, VoxelBuffer::constructVoxel(0));
+	voxels.setVoxel(2, 7, VoxelBuffer::constructVoxel(0));
+	voxels.setVoxel(18, 7, VoxelBuffer::constructVoxel(0));
+	voxels.setVoxel(27, 7, VoxelBuffer::constructVoxel(0));
+	voxels.setVoxel(36, 7, VoxelBuffer::constructVoxel(0));
+	voxels.setVoxel(45, 7, VoxelBuffer::constructVoxel(0));
+	voxels.setVoxel(54, 7, VoxelBuffer::constructVoxel(0));
+	voxels.setVoxel(63, 7, VoxelBuffer::constructVoxel(0));
+	voxels.setVoxel(72, 7, VoxelBuffer::constructVoxel(0));
+	voxels.setVoxel(81, 7, VoxelBuffer::constructVoxel(0));
+	voxels.setVoxel(90, 7, VoxelBuffer::constructVoxel(21));
 }
 
 void on_surface_changed() {
@@ -185,6 +195,13 @@ void update() {
 
 void on_draw_frame() {
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	timer += 1.0 / 60.0;
+
+	camera.setPositionX(sin(timer * 2.0 * M_PI / 30.0) * 100.0 - 16.0);
+	camera.setPositionZ(cos(timer * 2.0 * M_PI / 30.0) * 100.0 - 16.0);
+	
+	camera.setRotationY(timer * 2.0 * M_PI / 30.0);
 
 	camera.render();
 	update();

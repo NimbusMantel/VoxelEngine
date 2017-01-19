@@ -29,16 +29,16 @@ void Camera::setPositionZ(float p) {
 	z = p;
 }
 
-void Camera::setRotationRoll(float t) {
-	r = t;
+void Camera::setRotationX(float x) {
+	r = x;
 }
 
-void Camera::setRotationPitch(float t) {
-	p = t;
+void Camera::setRotationY(float y) {
+	p = y;
 }
 
-void Camera::setRotationYaw(float t) {
-	a = t;
+void Camera::setRotationZ(float z) {
+	a = z;
 }
 
 float Camera::getPositionX() {
@@ -53,14 +53,14 @@ float Camera::getPositionZ() {
 	return z;
 }
 
-float Camera::getRotationRoll() {
+float Camera::getRotationX() {
 	return r;
 }
 
-float Camera::getRotationPitch() {
+float Camera::getRotationY() {
 	return p;
 }
 
-float Camera::getRotationYaw() {
+float Camera::getRotationZ() {
 	return a;
 }

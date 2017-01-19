@@ -72,7 +72,6 @@ public:
 	mat4 operator*(const mat4& m);
 	vec4 operator*(const vec4& v);
 	vec3 operator*(const vec3& v);
-	vec2 operator*(const vec2& v);
 
 	const double& operator[](std::size_t idx) const { return matrix[idx]; }
 

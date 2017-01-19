@@ -17,17 +17,17 @@ public:
 	void setPositionY(float y);
 	void setPositionZ(float z);
 
-	void setRotationRoll(float r);
-	void setRotationPitch(float p);
-	void setRotationYaw(float y);
+	void setRotationX(float x);
+	void setRotationY(float y);
+	void setRotationZ(float z);
 
 	float getPositionX();
 	float getPositionY();
 	float getPositionZ();
 
-	float getRotationRoll();
-	float getRotationPitch();
-	float getRotationYaw();
+	float getRotationX();
+	float getRotationY();
+	float getRotationZ();
 
 private:
 

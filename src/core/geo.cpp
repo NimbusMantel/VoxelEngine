@@ -118,12 +118,7 @@ vec4 mat4::operator*(const vec4& v) {
 }
 
 vec3 mat4::operator*(const vec3& v) {
-	return vec3(matrix[0] * v.x + matrix[1] * v.y + matrix[2] * v.z + matrix[3],
-		matrix[4] * v.x + matrix[5] * v.y + matrix[6] * v.z + matrix[7],
-		matrix[8] * v.x + matrix[9] * v.y + matrix[10] * v.z + matrix[11]);
-}
-
-vec2 mat4::operator*(const vec2& v) {
-	return vec2(matrix[0] * v.x + matrix[1] * v.y + matrix[3],
-		matrix[4] * v.x + matrix[5] * v.y + matrix[7]);
+	return vec3((matrix[0] * v.x + matrix[1] * v.y + matrix[2] * v.z + matrix[3]) / (matrix[12] * v.x + matrix[13] * v.y + matrix[14] * v.z + matrix[15]),
+		(matrix[4] * v.x + matrix[5] * v.y + matrix[6] * v.z + matrix[7]) / (matrix[12] * v.x + matrix[13] * v.y + matrix[14] * v.z + matrix[15]),
+		(matrix[8] * v.x + matrix[9] * v.y + matrix[10] * v.z + matrix[11]) / (matrix[12] * v.x + matrix[13] * v.y + matrix[14] * v.z + matrix[15]));
 }
