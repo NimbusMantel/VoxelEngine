@@ -483,16 +483,16 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			bool c;
 			bool draw = !children || (min.x == max.x && min.y == max.y);
 
-			/*for (i = 0; i < k; ++i) {
+			for (i = 0; i < k; ++i) {
 				if (!mask[((int)vs[i].y) * width + (int)vs[i].x]) {
 					if (!draw) {
 						return true;
 					}
 
-					mask[((int)vs[i].y) * width + (int)vs[i].x] = true;
-					buffer[((int)vs[i].y) * width + (int)vs[i].x] = 15;
+					//mask[((int)vs[i].y) * width + (int)vs[i].x] = true;
+					//buffer[((int)vs[i].y) * width + (int)vs[i].x] = 15;
 				}
-			}*/
+			}
 			
 			for (uint16_t y = min.y; y <= max.y; ++y) {
 				for (uint16_t x = min.x; x <= max.x; ++x) {
