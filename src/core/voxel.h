@@ -20,6 +20,7 @@ public:
 	bool setVoxel(uint32_t parent, uint8_t position, uint32_t voxel);
 	bool delVoxel(uint32_t parent, uint8_t position) { return setVoxel(parent, position, 0x00000000); };
 	bool movVoxel(uint32_t parentF, uint8_t positionF, uint32_t parentT, uint8_t positionT);
+	bool addVoxel(int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t voxel);
 
 	uint32_t getVoxel(uint32_t index);
 

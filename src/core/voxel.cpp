@@ -483,7 +483,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			bool c;
 			bool draw = !children || (min.x == max.x && min.y == max.y);
 
-			for (i = 0; i < k; ++i) {
+			/*for (i = 0; i < k; ++i) {
 				if (!mask[((int)vs[i].y) * width + (int)vs[i].x]) {
 					if (!draw) {
 						return true;
@@ -492,7 +492,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 					mask[((int)vs[i].y) * width + (int)vs[i].x] = true;
 					buffer[((int)vs[i].y) * width + (int)vs[i].x] = 15;
 				}
-			}
+			}*/
 			
 			for (uint16_t y = min.y; y <= max.y; ++y) {
 				for (uint16_t x = min.x; x <= max.x; ++x) {
@@ -529,7 +529,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 
 void VoxelBuffer::frontToBack(uint32_t index, int16_t posX, int16_t posY, int16_t posZ, uint16_t size, const int16_t eyeX, const int16_t eyeY, const int16_t eyeZ, std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint8_t, bool)>& render) {
 	uint8_t children = (buffer[index] & 0x0000FF00) >> 8;
-	uint8_t first = ((eyeX < posX) ? 1 : 0) | ((eyeY < posY) ? 2 : 0) | ((eyeZ < posZ) ? 4 : 0);
+	uint8_t first = ((eyeX > posX) ? 1 : 0) | ((eyeY > posY) ? 2 : 0) | ((eyeZ > posZ) ? 4 : 0);
 
 	if (render(posX, posY, posZ, size, buffer[index] & 0x000000FF, children)) {
 		uint32_t firstChild = index + (int16_t)((buffer[index] & 0x7FFE0000) >> 17 | (buffer[index] & 0x80000000) >> 16 | (buffer[index] & 0x80000000) >> 17);
@@ -565,4 +565,43 @@ void VoxelBuffer::frontToBack(uint32_t index, int16_t posX, int16_t posY, int16_
 			frontToBack(firstChild + (first ^ 7), posX + (((first ^ 7) & 0x01) ? size : -size), posY + (((first ^ 7) & 0x02) ? size : -size), posZ + (((first ^ 7) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
 		}
 	}
+}
+
+bool VoxelBuffer::addVoxel(int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t voxel) {
+	uint16_t csize = 0x8000;
+
+	if (posX < (-csize + 1) || posX >(csize - 1) || posY < (-csize + 1) || posY >(csize - 1) || posZ < (-csize + 1) || posZ >(csize - 1)) {
+		return false;
+	}
+
+	if (!(size == 0x0001 || size == 0x0002 || size == 0x0004 || size == 0x0008 || size == 0x0010 || size == 0x0020 || size == 0x0040 || size == 0x0080 || size == 0x0100 || size == 0x0200 || size == 0x0400 || size == 0x0800 || size == 0x1000 || size == 0x2000 || size == 0x4000)) {
+		return false;
+	}
+
+	csize >>= 1;
+
+	int16_t cposX = 0, cposY = 0, cposZ = 0;
+
+	uint32_t index = 0;
+	uint8_t child = 0;
+
+	uint32_t defVox = VoxelBuffer::constructVoxel(0);
+
+	while (csize > size) {
+		child = ((posX < cposX) ? 0 : 1) + ((posY < cposY) ? 0 : 2) + ((posZ < cposZ) ? 0 : 4);
+
+		setVoxel(index, child, defVox);
+
+		index = index + (int16_t)((buffer[index] & 0x7FFE0000) >> 17 | (buffer[index] & 0x80000000) >> 16 | (buffer[index] & 0x80000000) >> 17) + child;
+		
+		cposX += (posX < cposX) ? -csize : csize;
+		cposY += (posY < cposY) ? -csize : csize;
+		cposZ += (posZ < cposZ) ? -csize : csize;
+		
+		csize >>= 1;
+	}
+
+	child = ((posX < cposX) ? 0 : 1) + ((posY < cposY) ? 0 : 2) + ((posZ < cposZ) ? 0 : 4);
+	
+	return setVoxel(index, child, voxel);
 }

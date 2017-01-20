@@ -139,6 +139,17 @@ void testVoxels() {
 	DEBUG_LOG_RAW("", "%s", "");
 }
 
+void fragmentedTest() {
+	voxels.addVoxel(-8, -24, -24, 8, VoxelBuffer::constructVoxel(27));
+	voxels.addVoxel(-24, -8, -24, 8, VoxelBuffer::constructVoxel(33));
+	voxels.addVoxel(-8, -8, -24, 8, VoxelBuffer::constructVoxel(21));
+	voxels.addVoxel(-24, -24, -8, 8, VoxelBuffer::constructVoxel(27));
+	voxels.addVoxel(-8, -24, -8, 8, VoxelBuffer::constructVoxel(21));
+	voxels.addVoxel(-24, -8, -8, 8, VoxelBuffer::constructVoxel(21));
+	voxels.addVoxel(-8, -8, -8, 8, VoxelBuffer::constructVoxel(21));
+	voxels.addVoxel(-40, -40, -40, 8, VoxelBuffer::constructVoxel(63));
+}
+
 void on_surface_created() {
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
@@ -146,19 +157,7 @@ void on_surface_created() {
 	camera.setPositionY(-16);
 	camera.setPositionZ(100-16);
 	
-	//testVoxels();
-
-	voxels.setVoxel(0, 0, VoxelBuffer::constructVoxel(0));
-	voxels.setVoxel(2, 7, VoxelBuffer::constructVoxel(0));
-	voxels.setVoxel(18, 7, VoxelBuffer::constructVoxel(0));
-	voxels.setVoxel(27, 7, VoxelBuffer::constructVoxel(0));
-	voxels.setVoxel(36, 7, VoxelBuffer::constructVoxel(0));
-	voxels.setVoxel(45, 7, VoxelBuffer::constructVoxel(0));
-	voxels.setVoxel(54, 7, VoxelBuffer::constructVoxel(0));
-	voxels.setVoxel(63, 7, VoxelBuffer::constructVoxel(0));
-	voxels.setVoxel(72, 7, VoxelBuffer::constructVoxel(0));
-	voxels.setVoxel(81, 7, VoxelBuffer::constructVoxel(0));
-	voxels.setVoxel(90, 7, VoxelBuffer::constructVoxel(21));
+	fragmentedTest();
 }
 
 void on_surface_changed() {
