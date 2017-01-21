@@ -89,6 +89,7 @@
     <ClInclude Include="src\core\config.h" />
     <ClInclude Include="src\core\game.h" />
     <ClInclude Include="src\core\geo.h" />
+    <ClInclude Include="src\core\json.h" />
     <ClInclude Include="src\core\shader.h" />
     <ClInclude Include="src\core\voxel.h" />
     <ClInclude Include="src\platform\common\platform_asset_utils.h" />
@@ -99,6 +100,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="shd\shader.fsh" />
+    <None Include="shd\teapot.json" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="shd\shader.vsh" />

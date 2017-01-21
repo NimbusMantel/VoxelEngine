@@ -569,7 +569,7 @@ void VoxelBuffer::frontToBack(uint32_t index, int16_t posX, int16_t posY, int16_
 
 bool VoxelBuffer::addVoxel(int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t voxel) {
 	uint16_t csize = 0x8000;
-
+	
 	if (posX < (-csize + 1) || posX >(csize - 1) || posY < (-csize + 1) || posY >(csize - 1) || posZ < (-csize + 1) || posZ >(csize - 1)) {
 		return false;
 	}

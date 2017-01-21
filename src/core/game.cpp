@@ -6,6 +6,10 @@
 #include "asset_utils.h"
 #include "voxel.h"
 #include "camera.h"
+#include "platform_file_utils.h"
+
+#include "json.h"
+using json = nlohmann::json;
 
 #include <stdlib.h>
 #include <functional>
@@ -66,7 +70,10 @@ static const float rect[] = { -1.0f, -1.0f, 0.0f, 0.0f,
 static VoxelBuffer voxels = VoxelBuffer();
 static Camera camera = Camera(voxels.getRenderFunction(winWidth, winHeight, 70, pixels, mask));
 
-static double timer = 0.0;
+static vec2 drag_origin;
+
+static double rotX = 0.0;
+static double rotY = 0.0;
 
 void testVoxels() {
 	DEBUG_LOG_RAW("", "%s", "");
@@ -150,14 +157,22 @@ void fragmentedTest() {
 	voxels.addVoxel(-40, -40, -40, 8, VoxelBuffer::constructVoxel(63));
 }
 
+void teapotTest() {
+	json teapot = json::parse(get_file_data("teapot.json").data);
+
+	for (json::iterator it = teapot["voxels"].begin(); it != teapot["voxels"].end(); ++it) {
+		voxels.addVoxel((*it)["x"], (*it)["y"], (*it)["z"], 1, VoxelBuffer::constructVoxel((*it)["colour"]));
+	}
+}
+
 void on_surface_created() {
 	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
-	camera.setPositionX(-16);
-	camera.setPositionY(-16);
-	camera.setPositionZ(100-16);
+	camera.setPositionX(0);
+	camera.setPositionY(0);
+	camera.setPositionZ(75);
 	
-	fragmentedTest();
+	teapotTest();
 }
 
 void on_surface_changed() {
@@ -192,15 +207,15 @@ void update() {
 	glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-void on_draw_frame() {
+void on_draw_frame(float dt) {
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	timer += 1.0 / 60.0;
-
-	camera.setPositionX(sin(timer * 2.0 * M_PI / 30.0) * 100.0 - 16.0);
-	camera.setPositionZ(cos(timer * 2.0 * M_PI / 30.0) * 100.0 - 16.0);
+	camera.setPositionX(sin(rotY) * 75.0);
+	camera.setPositionY(sin(rotX) * cos(rotY) * 75.0);
+	camera.setPositionZ(cos(rotX) * cos(rotY) * 75.0);
 	
-	camera.setRotationY(timer * 2.0 * M_PI / 30.0);
+	camera.setRotationX(-rotX);
+	camera.setRotationY(rotY);
 
 	camera.render();
 	update();
@@ -223,4 +238,17 @@ void on_draw_frame() {
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+void on_touch_press(float x, float y) {
+	drag_origin.x = x;
+	drag_origin.y = y;
+}
+
+void on_touch_drag(float x, float y) {
+	rotY -= 1.0 - pow(3.0, drag_origin.x - x);
+	rotX -= 1.0 - pow(3.0, drag_origin.y - y);
+	
+	drag_origin.x = x;
+	drag_origin.y = y;
 }

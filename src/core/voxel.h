@@ -6,7 +6,7 @@
 #include <functional>
 #include <map>
 
-#define VOXEL_BUFFER_LENGTH 128
+#define VOXEL_BUFFER_LENGTH 1024 * 8
 
 class VoxelBuffer
 {

@@ -89,9 +89,15 @@
     <ClInclude Include="src\core\geo.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\core\json.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="shd\shader.fsh">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="shd\teapot.json">
       <Filter>Resource Files</Filter>
     </None>
   </ItemGroup>

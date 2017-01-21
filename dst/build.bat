@@ -12,7 +12,7 @@ set SOURCES=..\src\platform\emscripten\main.cpp ..\src\core\game.cpp ..\src\plat
 
 REM Set a folder with files to embed
 
-set EMBED=../shd
+set EMBED=../ext
 
 REM Set the export target file
 
@@ -62,12 +62,13 @@ goto :skp
 
 :skp
 call emcc%SOURCES% -o %TARGET%%EMBED% -s FULL_ES2=1 -O3
+rem -s ALLOW_MEMORY_GROWTH=1
 
 set t=%SOURCES%
 
 :cloop
 for /f "tokens=1*" %%a in ("%t%") do (
-   call del %%a
+rem   call del %%a
    
    set t=%%b
    )

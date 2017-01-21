@@ -29,6 +29,18 @@
             
             canvas.requestFullscreen = (canvas.requestFullScreen || canvas.mozRequestFullScreen || canvas.webkitRequestFullscreen || canvas.msRequestFullscreen);
             
+            canvas.requestPointerLock = (canvas.requestPointerLock || canvas.mozRequestPointerLock || canvas.webkitRequestPointerLock || canvas.msRequestPointerLock);
+            
+            document.exitPointerLock = (document.exitPointerLock || document.mozExitPointerLock || document.webkitExitPointerLock || document.msExitPointerLock);
+            
+            canvas.onmousedown = function() {
+                canvas.requestPointerLock();
+            }
+            
+            canvas.onmouseup = function() {
+                document.exitPointerLock();
+            }
+            
             var Module = {"canvas" : canvas};
             
             window.requestAnimationFrame = (window.requestAnimationFrame || window.mozRequestAnimationFrame || window.webkitRequestAnimationFrame || window.msRequestAnimationFrame);
