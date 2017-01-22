@@ -1,95 +1,73 @@
-#include <stdlib.h>
 #include <stdio.h>
-#include <GL/glfw.h>
+#include <functional>
+
 #include <emscripten/emscripten.h>
+#include <SDL/SDL.h>
+
 #include "game.h"
 
-#include <chrono>
+#include "platform_log.h"
 
-int init_gl(void);
-void do_frame();
-void shutdown_gl();
-void handle_input();
-
-static int is_dragging;
+void update();
+void input();
 
 const int width = 640, height = 360;
 
-typedef std::chrono::high_resolution_clock Time;
+static SDL_Surface* screen;
+static Uint32* buffer;
+static bool mask[width * height];
 
-static std::chrono::time_point<Time> currFrame;
-static std::chrono::time_point<Time> lastFrame;
-static std::chrono::duration<double> deltaTime;
+Uint32 currFrame;
+Uint32 prevFrame;
 
-int main(void)
-{
-	lastFrame = Time::now();
-	
-	if (init_gl() == GL_TRUE) {
-		on_surface_created();
-		on_surface_changed();
-		emscripten_set_main_loop(do_frame, 0, 1);
-	}
+bool isDragging = false;
 
-	shutdown_gl();
+int main(void) {
+	SDL_Init(SDL_INIT_VIDEO);
+
+	screen = SDL_SetVideoMode(width, height, 32, SDL_SWSURFACE);
+	buffer = (Uint32*)screen->pixels;
+	SDL_PixelFormat* format = screen->format;
+
+	prevFrame = SDL_GetTicks();
+
+	on_init(width, height, buffer, mask, [format](Uint32 rgba) -> Uint32 {return SDL_MapRGBA(format, (rgba & 0xFF000000) >> 24, (rgba & 0x00FF0000) >> 16, (rgba & 0x0000FF00) >> 8, rgba & 0x000000FF); });
+
+	emscripten_set_main_loop(update, 0, 1);
+
+	SDL_Quit();
 
 	return 0;
 }
 
-int init_gl()
-{
-	if (glfwInit() != GL_TRUE) {
-		printf("glfwInit() failed\n");
-		return GL_FALSE;
+void update() {
+	if (SDL_MUSTLOCK(screen)) {
+		SDL_LockSurface(screen);
 	}
 
-	if (glfwOpenWindow(width, height, 8, 8, 8, 8, 16, 0, GLFW_WINDOW) != GL_TRUE) {
-		printf("glfwOpenWindow() failed\n");
-		return GL_FALSE;
+	currFrame = SDL_GetTicks();
+
+	input();
+	on_update((currFrame - prevFrame) / 1000.0f);
+
+	prevFrame = currFrame;
+
+	if (SDL_MUSTLOCK(screen)) {
+		SDL_UnlockSurface(screen);
 	}
 
-	return GL_TRUE;
+	SDL_Flip(screen);
 }
 
-void do_frame()
-{
-	currFrame = Time::now();
-	deltaTime = currFrame - lastFrame;
-	
-	handle_input();
-	on_draw_frame(deltaTime.count());
-	glfwSwapBuffers();
+void input() {
+	SDL_Event event;
 
-	lastFrame = currFrame;
-}
-
-void shutdown_gl()
-{
-	glfwTerminate();
-}
-
-void handle_input() {
-	glfwPollEvents();
-
-
-	const int left_mouse_button_state = glfwGetMouseButton(GLFW_MOUSE_BUTTON_1);
-	if (left_mouse_button_state == GLFW_PRESS) {
-		int x_pos, y_pos;
-
-		glfwGetMousePos(&x_pos, &y_pos);
-
-		const float normalized_x = ((float)x_pos / (float)width) * 2.f - 1.f;
-		const float normalized_y = -(((float)y_pos / (float)height) * 2.f - 1.f);
-
-		if (is_dragging == 0) {
-			is_dragging = 1;
-			on_touch_press(normalized_x, normalized_y);
+	while (SDL_PollEvent(&event)) {
+		switch (event.type) {
+			case SDL_MOUSEBUTTONDOWN: if (event.button.button == SDL_BUTTON_LEFT) { isDragging = true;  on_touch_down(event.button.x, height - event.button.y - 1); } break;
+			case SDL_MOUSEBUTTONUP: if (event.button.button == SDL_BUTTON_LEFT) { isDragging = false; on_touch_up(event.button.x, height - event.button.y - 1); } break;
+			case SDL_MOUSEMOTION: if (isDragging) { on_touch_move(event.motion.x, height - event.motion.y - 1, event.motion.xrel, -event.motion.yrel); } break;
+			case SDL_MOUSEWHEEL: on_mouse_scroll(event.wheel.x, event.wheel.y); break;
 		}
-		else {
-			on_touch_drag(normalized_x, normalized_y);
-		}
-	}
-	else {
-		is_dragging = 0;
 	}
 }

@@ -24,17 +24,18 @@ VoxelBuffer::VoxelBuffer() {
 	size = VOXEL_BUFFER_LENGTH;
 	
 	buffer[0] = 0xFFFF0000; // empty root voxel
-	buffer[1] = 0x0001FFFE; // parent header pointing to the root voxel
+	buffer[1] = 0x00000000;
+	buffer[2] = 0x0001FFFC; // parent header pointing to the root voxel
 
-	spots[2] = VOXEL_BUFFER_LENGTH - 2;
+	spots[3] = VOXEL_BUFFER_LENGTH - 3;
 }
 
 VoxelBuffer::~VoxelBuffer() {
 	free(buffer);
 }
 
-uint32_t VoxelBuffer::constructVoxel(uint8_t colour) {
-	return (0xFFFF0000 | colour);
+uint64_t VoxelBuffer::constructVoxel(uint32_t colour) {
+	return ((uint64_t)0xFFFF000000000000 | colour);
 }
 
 uint32_t VoxelBuffer::allocBufferSpace(uint32_t length) {
@@ -46,21 +47,7 @@ uint32_t VoxelBuffer::allocBufferSpace(uint32_t length) {
 		}
 	}
 
-	if (it == spots.end()) {
-		void* ptr = realloc(buffer, size + ((VOXEL_BUFFER_LENGTH > length) ? VOXEL_BUFFER_LENGTH : length)); // Request additional buffer
-
-		if (ptr == nullptr) {
-			throw "Voxel buffer size increase error";
-		}
-
-		buffer = (uint32_t*)ptr;
-
-		freeBufferSpace(size, (VOXEL_BUFFER_LENGTH > length) ? VOXEL_BUFFER_LENGTH : length); // Update the spots
-
-		size += (VOXEL_BUFFER_LENGTH > length) ? VOXEL_BUFFER_LENGTH : length;
-
-		it = spots.end()--; // Set the found spot to the last one, which has the newly allocated space
-	}
+	assert("Voxel buffer size increase error" && it != spots.end());
 
 	spots[it->first + length] = it->second - length;
 
@@ -125,25 +112,25 @@ void VoxelBuffer::clearVoxel(uint32_t index, bool clearParent, bool clearChildre
 		}
 		
 		for (i = 0; i < 8; ++i) {
-			Pointer++;
-
 			clearVoxel(Pointer, clearParent, true); // Clear the voxel's children
+
+			Pointer += 2;
 		}
 
 		if ((buffer[Pointer] & 0x00000001) == 1) {
 			freeBufferSpace(index + (int16_t)((buffer[Pointer] & 0x00007FFE) >> 1 | (buffer[Pointer] & 0x00008000) | (buffer[Pointer] & 0x00008000) >> 1), 1); // Remove the parent header's pointer to the voxel
 		}
 
-		freeBufferSpace(Pointer - 8, 9); // Free the buffer of the children
+		freeBufferSpace(Pointer - 16, 17); // Free the buffer of the children
 	}
 
 	if (index > 1) { // Voxel isn't the root
-		buffer[index] = 0x00000000;
+		buffer[index] = buffer[index + 1] = 0x00000000;
 
 		i = 0;
 
 		while ((buffer[index + i] >> 16) != 1) {
-			i++; // Get the distance to the parent header
+			i += 2; // Get the distance to the parent header
 		}
 
 		Pointer = index + i + (int16_t)((buffer[index + i] & 0x00007FFE) >> 1 | (buffer[index + i] & 0x00008000) | (buffer[index + i] & 0x00008000) >> 1); // Pointer to the voxel's parent
@@ -152,11 +139,11 @@ void VoxelBuffer::clearVoxel(uint32_t index, bool clearParent, bool clearChildre
 			Pointer = buffer[Pointer];
 		}
 		
-		if (clearParent && (((buffer[Pointer] & (~(0x01 << (8 + i - 1)))) & 0x0000FF00) >> 8) == 0) {
+		if (clearParent && (((buffer[Pointer] & (~(0x01 << (8 + (i >> 1) - 1)))) & 0x0000FF00) >> 8) == 0) {
 			clearVoxel(Pointer, true, clearChildren); // Clear the voxel's parent
 		}
 		else {
-			buffer[Pointer] &= ~(0x01 << (8 + i - 1)); // Update the parent's children mask
+			buffer[Pointer] &= ~(0x01 << (8 + (i >> 1) - 1)); // Update the parent's children mask
 		}
 	}
 	else {
@@ -164,8 +151,8 @@ void VoxelBuffer::clearVoxel(uint32_t index, bool clearParent, bool clearChildre
 	}
 }
 
-bool VoxelBuffer::setVoxel(uint32_t parent, uint8_t position, uint32_t voxel) {
-	if ((voxel >> 16) == 1 || position > 7 || (voxel & 0x0000FF00) > 0) {
+bool VoxelBuffer::setVoxel(uint32_t parent, uint8_t position, uint64_t voxel) {
+	if ((voxel >> 48) == 1 || position > 7 || (voxel & 0x0000FF0000000000) > 0) {
 		return false;
 	}
 
@@ -178,13 +165,13 @@ bool VoxelBuffer::setVoxel(uint32_t parent, uint8_t position, uint32_t voxel) {
 	uint32_t FirstChild, Pointer;
 
 	if (((Parent & 0x0000FF00) >> 8) == 0) { // Check if the parent still has no children
-		if ((voxel >> 16) == 0) {
+		if ((voxel >> 48) == 0) {
 			return true;
 		}
 
 		Parent |= (0x01 << (8 + 7 - position)); // Update the parent's children mask
 
-		FirstChild = allocBufferSpace(9);
+		FirstChild = allocBufferSpace(17);
 		
 		if (((FirstChild - parent) & 0xFFFFC000) && ((FirstChild - parent) & 0xFFFFC000) ^ 0xFFFFC000) { // Check if a pointer to the first child is necessary
 			Pointer = allocBufferSpace(1);
@@ -198,16 +185,18 @@ bool VoxelBuffer::setVoxel(uint32_t parent, uint8_t position, uint32_t voxel) {
 
 		buffer[parent] = Parent;
 		buffer[FirstChild] = buffer[FirstChild + 1] = buffer[FirstChild + 2] = buffer[FirstChild + 3] = buffer[FirstChild + 4]
-						   = buffer[FirstChild + 5] = buffer[FirstChild + 6] = buffer[FirstChild + 7] = 0x00000000;
+						   = buffer[FirstChild + 5] = buffer[FirstChild + 6] = buffer[FirstChild + 6] = buffer[FirstChild + 8]
+						   = buffer[FirstChild + 9] = buffer[FirstChild + 10] = buffer[FirstChild + 11] = buffer[FirstChild + 12]
+						   = buffer[FirstChild + 13] = buffer[FirstChild + 14] = buffer[FirstChild + 15] = 0x00000000;
 		
-		if (((parent - (FirstChild + 8)) & 0xFFFFC000) && ((parent - (FirstChild + 8)) & 0xFFFFC000) ^ 0xFFFFC000) { // Check if a pointer back to the parent is necessary
+		if (((parent - (FirstChild + 16)) & 0xFFFFC000) && ((parent - (FirstChild + 16)) & 0xFFFFC000) ^ 0xFFFFC000) { // Check if a pointer back to the parent is necessary
 			Pointer = allocBufferSpace(1);
 			buffer[Pointer] = parent;
 
-			buffer[(FirstChild + 8)] = (0x00010001 | ((parent - Pointer) & 0x00007FFF) << 1); // Update the parent header's pointer
+			buffer[(FirstChild + 16)] = (0x00010001 | ((parent - Pointer) & 0x00007FFF) << 1); // Update the parent header's pointer
 		}
 		else {
-			buffer[(FirstChild + 8)] = (0x00010000 | ((parent - (FirstChild + 8)) & 0x00007FFF) << 1); // Update the parent header's pointer
+			buffer[(FirstChild + 16)] = (0x00010000 | ((parent - (FirstChild + 16)) & 0x00007FFF) << 1); // Update the parent header's pointer
 		}
 	}
 	else {
@@ -218,7 +207,7 @@ bool VoxelBuffer::setVoxel(uint32_t parent, uint8_t position, uint32_t voxel) {
 		}
 
 		if ((((Parent & 0x0000FF00) >> 8) & (0x01 << (7 - position))) > 0) { // Check if the parent already has a child at the position
-			if (buffer[FirstChild + position] == voxel) {
+			if (buffer[FirstChild + (position << 1)] == (voxel >> 32) && buffer[FirstChild + (position << 1) + 1] == (voxel & 0x00000000FFFFFFFF)) {
 				return true; // Return true if the child hasn't changed
 			}
 
@@ -240,7 +229,8 @@ bool VoxelBuffer::setVoxel(uint32_t parent, uint8_t position, uint32_t voxel) {
 		buffer[parent] = Parent;
 	}
 
-	buffer[FirstChild + position] = voxel; // Set the voxel in the buffer
+	buffer[FirstChild + (position << 1)] = voxel >> 32; // Set the voxel in the buffer
+	buffer[FirstChild + (position << 1) + 1] = voxel & 0x00000000FFFFFFFF; // Set the colour in the buffer
 	
 	return true;
 }
@@ -272,7 +262,7 @@ bool VoxelBuffer::movVoxel(uint32_t parentF, uint8_t positionF, uint32_t parentT
 		i = 0;
 		
 		while ((buffer[pointer + i] >> 16) != 1) {
-			i++;
+			i += 2;
 		}
 
 		pointer = pointer + i + (int16_t)((buffer[pointer + i] & 0x00007FFE) >> 1 | (buffer[pointer + i] & 0x00008000) | (buffer[pointer + i] & 0x00008000) >> 1); // Traverse the tree from parentF to the root
@@ -290,7 +280,7 @@ bool VoxelBuffer::movVoxel(uint32_t parentF, uint8_t positionF, uint32_t parentT
 		i = 0;
 
 		while ((buffer[pointer + i] >> 16) != 1) {
-			i++;
+			i += 2;
 		}
 
 		pointer = pointer + i + (int16_t)((buffer[pointer + i] & 0x00007FFE) >> 1 | (buffer[pointer + i] & 0x00008000) | (buffer[pointer + i] & 0x00008000) >> 1); // Traverse the tree from parentT to the root
@@ -308,10 +298,10 @@ bool VoxelBuffer::movVoxel(uint32_t parentF, uint8_t positionF, uint32_t parentT
 		voxel = buffer[voxel];
 	}
 
-	if (!setVoxel(parentT, positionT, buffer[voxel] & 0xFFFF00FF)) {
+	if (!setVoxel(parentT, positionT, ((uint64_t)(buffer[voxel] & 0xFFFF00FF) << 32) | buffer[voxel + 1])) {
 		return false;
 	}
-
+	
 	ParentT = buffer[parentT];
 
 	if (((buffer[voxel] & 0x0000FF00) >> 8) > 0) {
@@ -341,18 +331,18 @@ bool VoxelBuffer::movVoxel(uint32_t parentF, uint8_t positionF, uint32_t parentT
 			buffer[parentT] = ((buffer[parentT] & 0x0000FFFF) | ((parentF - parentT) & 0x00007FFF) << 17); // Update the parent's first child pointer
 		}
 
-		if (buffer[parentF + 8] & 0x00000001) {
-			freeBufferSpace(parentF + (int16_t)((buffer[parentF + 8] & 0x00007FFE) >> 1 | (buffer[parentF + 8] & 0x00008000) | (buffer[parentF + 8] & 0x00008000) >> 1), 1); // Free the previous pointer to the parent
+		if (buffer[parentF + 16] & 0x00000001) {
+			freeBufferSpace(parentF + (int16_t)((buffer[parentF + 16] & 0x00007FFE) >> 1 | (buffer[parentF + 16] & 0x00008000) | (buffer[parentF + 16] & 0x00008000) >> 1), 1); // Free the previous pointer to the parent
 		}
 		
-		if (((parentT - (parentF + 8)) & 0xFFFFC000) && ((parentT - (parentF + 8)) & 0xFFFFC000) ^ 0xFFFFC000) {
+		if (((parentT - (parentF + 16)) & 0xFFFFC000) && ((parentT - (parentF + 16)) & 0xFFFFC000) ^ 0xFFFFC000) {
 			pointer = allocBufferSpace(1);
 			buffer[pointer] = parentT;
 
-			buffer[(parentF + 8)] = (0x00010001 | ((parentT - pointer) & 0x00007FFF) << 1); // Update the parent header's pointer
+			buffer[(parentF + 16)] = (0x00010001 | ((parentT - pointer) & 0x00007FFF) << 1); // Update the parent header's pointer
 		}
 		else {
-			buffer[(parentF + 8)] = (0x00010000 | ((parentT - (parentF + 8)) & 0x00007FFF) << 1); // Update the parent header's pointer
+			buffer[(parentF + 16)] = (0x00010000 | ((parentT - (parentF + 16)) & 0x00007FFF) << 1); // Update the parent header's pointer
 		}
 	}
 
@@ -361,30 +351,33 @@ bool VoxelBuffer::movVoxel(uint32_t parentF, uint8_t positionF, uint32_t parentT
 	return true;
 }
 
-uint32_t VoxelBuffer::getVoxel(uint32_t index) {
-	return ((index < size) ? buffer[index] : 0x00000000);
+uint64_t VoxelBuffer::getVoxel(uint32_t index) {
+	return (((index + 1) < size) ? (((uint64_t)buffer[index] << 32) | buffer[index + 1]) : 0x0000000000000000);
 }
 
 void VoxelBuffer::logVoxel(uint32_t index) {
-	DEBUG_LOG_RAW("VoxelBuffer", "(%d) %s", index, std::bitset<32>(getVoxel(index)).to_string().c_str());
+	DEBUG_LOG_RAW("VoxelBuffer", "(%d) %s", index, std::bitset<64>(getVoxel(index)).to_string().c_str());
 }
 
-std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint8_t* buffer, bool* mask) {
+std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint32_t* buffer, bool* mask) {
 	if (fov < 1) fov = 1;
 	if (fov > 360) fov = 360;
-
+	
 	double a = ((fov / 180.0) * M_PI) / 2.0;
 	double ar = width / (double)height;
 	double near = 1.0;
 
-	mat4 perMat = mat4(1.0 / (ar * tan(a)), 0, 0, 0, 0, 1.0 / tan(a), 0, 0, 0, 0, -1, -near, 0, 0, -1, 0); // http://ogldev.atspace.co.uk/www/tutorial12/tutorial12.html http://www.terathon.com/gdc07_lengyel.pdf
-																										   // https://www.scratchapixel.com/lessons/3d-basic-rendering/perspective-and-orthographic-projection-matrix/building-basic-perspective-projection-matrix
+	mat4 perMat = mat4(1.0 / (ar * tan(a)), 0, 0, 0, 0, -1.0 / tan(a), 0, 0, 0, 0, -1, -near, 0, 0, -1, 0); // http://ogldev.atspace.co.uk/www/tutorial12/tutorial12.html http://www.terathon.com/gdc07_lengyel.pdf
+																										    // https://www.scratchapixel.com/lessons/3d-basic-rendering/perspective-and-orthographic-projection-matrix/building-basic-perspective-projection-matrix
 	vec4* vs = (vec4*)malloc(sizeof(vec4) * 8);
 	
 	return [this, perMat, width, height, ar, vs, buffer, mask](mat4 cm) {
 		mat4 perPro = ((mat4)perMat) * cm.inverse();
+
+		uint32_t drawCounter = 0;
+		uint32_t testCounter = 0;
 		
-		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint8_t, bool)> render = [perPro, width, height, ar, vs, buffer, mask](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint8_t colour, bool children)->bool {
+		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [perPro, width, height, ar, vs, buffer, mask, &drawCounter, &testCounter](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
 			// Project the voxel vertices into screen space -> if all of them are off return false
 			// Check if the voxel is covered -> if so return false
 			// Draw the pixels if the voxel is smaller than a pixel or hasn't got any children
@@ -488,16 +481,21 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 					if (!draw) {
 						return true;
 					}
-
-					//mask[((int)vs[i].y) * width + (int)vs[i].x] = true;
-					//buffer[((int)vs[i].y) * width + (int)vs[i].x] = 15;
 				}
 			}
 			
+			if (!draw && ((max.x - min.x) * (max.y - min.y)) > drawCounter) {
+				return true;
+			}
+
+			if (drawCounter >= (width * height)) {
+				return false;
+			}
+
 			for (uint16_t y = min.y; y <= max.y; ++y) {
 				for (uint16_t x = min.x; x <= max.x; ++x) {
 					c = false;
-					
+					testCounter++;
 					for (i = 0, j = (k - 1); i < k; j = i++) {
 						if (((vs[i].y >= y) != (vs[j].y >= y)) && (x <= (vs[j].x - vs[i].x) * (y - vs[i].y) / (vs[j].y - vs[i].y) + vs[i].x)) {
 							c = !c;
@@ -512,6 +510,8 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 							
 							mask[y * width + x] = true;
 							buffer[y * width + x] = colour;
+
+							drawCounter++;
 						}
 					}
 				}
@@ -520,18 +520,20 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			return false;
 		};
 
-		memset(buffer, 0x0, width * height);
+		memset(buffer, 0x0, width * height * 4);
 		memset(mask, 0x0, width * height);
-
+		
 		this->frontToBack(0x00000000, 0, 0, 0, 0x8000, ROUND_2_INT(cm[3]), ROUND_2_INT(cm[7]), ROUND_2_INT(cm[11]), render);
+
+		//DEBUG_LOG_RAW("Draw", "%u", testCounter);
 	};
 }
 
-void VoxelBuffer::frontToBack(uint32_t index, int16_t posX, int16_t posY, int16_t posZ, uint16_t size, const int16_t eyeX, const int16_t eyeY, const int16_t eyeZ, std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint8_t, bool)>& render) {
+void VoxelBuffer::frontToBack(uint32_t index, int16_t posX, int16_t posY, int16_t posZ, uint16_t size, const int16_t eyeX, const int16_t eyeY, const int16_t eyeZ, std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)>& render) {
 	uint8_t children = (buffer[index] & 0x0000FF00) >> 8;
 	uint8_t first = ((eyeX > posX) ? 1 : 0) | ((eyeY > posY) ? 2 : 0) | ((eyeZ > posZ) ? 4 : 0);
 
-	if (render(posX, posY, posZ, size, buffer[index] & 0x000000FF, children)) {
+	if (render(posX, posY, posZ, size, buffer[index + 1], children)) {
 		uint32_t firstChild = index + (int16_t)((buffer[index] & 0x7FFE0000) >> 17 | (buffer[index] & 0x80000000) >> 16 | (buffer[index] & 0x80000000) >> 17);
 		
 		size >>= 1;
@@ -541,33 +543,33 @@ void VoxelBuffer::frontToBack(uint32_t index, int16_t posX, int16_t posY, int16_
 		}
 
 		if (children & (0x01 << (7 - first))) {
-			frontToBack(firstChild + first, posX + (((first)& 0x01) ? size : -size), posY + (((first)& 0x02) ? size : -size), posZ + (((first)& 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
+			frontToBack(firstChild + (first << 1), posX + ((first & 0x01) ? size : -size), posY + ((first & 0x02) ? size : -size), posZ + ((first & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
 		}
 		if (children & (0x01 << (7 - (first ^ 1)))) {
-			frontToBack(firstChild + (first ^ 1), posX + (((first ^ 1) & 0x01) ? size : -size), posY + (((first ^ 1) & 0x02) ? size : -size), posZ + (((first ^ 1) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
+			frontToBack(firstChild + ((first ^ 1) << 1), posX + (((first ^ 1) & 0x01) ? size : -size), posY + (((first ^ 1) & 0x02) ? size : -size), posZ + (((first ^ 1) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
 		}
 		if (children & (0x01 << (7 - (first ^ 2)))) {
-			frontToBack(firstChild + (first ^ 2), posX + (((first ^ 2) & 0x01) ? size : -size), posY + (((first ^ 2) & 0x02) ? size : -size), posZ + (((first ^ 2) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
+			frontToBack(firstChild + ((first ^ 2) << 1), posX + (((first ^ 2) & 0x01) ? size : -size), posY + (((first ^ 2) & 0x02) ? size : -size), posZ + (((first ^ 2) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
 		}
 		if (children & (0x01 << (7 - (first ^ 4)))) {
-			frontToBack(firstChild + (first ^ 4), posX + (((first ^ 4) & 0x01) ? size : -size), posY + (((first ^ 4) & 0x02) ? size : -size), posZ + (((first ^ 4) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
+			frontToBack(firstChild + ((first ^ 4) << 1), posX + (((first ^ 4) & 0x01) ? size : -size), posY + (((first ^ 4) & 0x02) ? size : -size), posZ + (((first ^ 4) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
 		}
 		if (children & (0x01 << (7 - (first ^ 3)))) {
-			frontToBack(firstChild + (first ^ 3), posX + (((first ^ 3) & 0x01) ? size : -size), posY + (((first ^ 3) & 0x02) ? size : -size), posZ + (((first ^ 3) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
+			frontToBack(firstChild + ((first ^ 3) << 1), posX + (((first ^ 3) & 0x01) ? size : -size), posY + (((first ^ 3) & 0x02) ? size : -size), posZ + (((first ^ 3) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
 		}
 		if (children & (0x01 << (7 - (first ^ 5)))) {
-			frontToBack(firstChild + (first ^ 5), posX + (((first ^ 5) & 0x01) ? size : -size), posY + (((first ^ 5) & 0x02) ? size : -size), posZ + (((first ^ 5) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
+			frontToBack(firstChild + ((first ^ 5) << 1), posX + (((first ^ 5) & 0x01) ? size : -size), posY + (((first ^ 5) & 0x02) ? size : -size), posZ + (((first ^ 5) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
 		}
 		if (children & (0x01 << (7 - (first ^ 6)))) {
-			frontToBack(firstChild + (first ^ 6), posX + (((first ^ 6) & 0x01) ? size : -size), posY + (((first ^ 6) & 0x02) ? size : -size), posZ + (((first ^ 6) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
+			frontToBack(firstChild + ((first ^ 6) << 1), posX + (((first ^ 6) & 0x01) ? size : -size), posY + (((first ^ 6) & 0x02) ? size : -size), posZ + (((first ^ 6) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
 		}
 		if (children & (0x01 << (7 - (first ^ 7)))) {
-			frontToBack(firstChild + (first ^ 7), posX + (((first ^ 7) & 0x01) ? size : -size), posY + (((first ^ 7) & 0x02) ? size : -size), posZ + (((first ^ 7) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
+			frontToBack(firstChild + ((first ^ 7) << 1), posX + (((first ^ 7) & 0x01) ? size : -size), posY + (((first ^ 7) & 0x02) ? size : -size), posZ + (((first ^ 7) & 0x04) ? size : -size), size, eyeX, eyeY, eyeZ, render);
 		}
 	}
 }
 
-bool VoxelBuffer::addVoxel(int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t voxel) {
+bool VoxelBuffer::addVoxel(int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint64_t voxel) {
 	uint16_t csize = 0x8000;
 	
 	if (posX < (-csize + 1) || posX >(csize - 1) || posY < (-csize + 1) || posY >(csize - 1) || posZ < (-csize + 1) || posZ >(csize - 1)) {
@@ -585,14 +587,14 @@ bool VoxelBuffer::addVoxel(int16_t posX, int16_t posY, int16_t posZ, uint16_t si
 	uint32_t index = 0;
 	uint8_t child = 0;
 
-	uint32_t defVox = VoxelBuffer::constructVoxel(0);
+	uint64_t defVox = VoxelBuffer::constructVoxel(0);
 
 	while (csize > size) {
 		child = ((posX < cposX) ? 0 : 1) + ((posY < cposY) ? 0 : 2) + ((posZ < cposZ) ? 0 : 4);
 
 		setVoxel(index, child, defVox);
 
-		index = index + (int16_t)((buffer[index] & 0x7FFE0000) >> 17 | (buffer[index] & 0x80000000) >> 16 | (buffer[index] & 0x80000000) >> 17) + child;
+		index = index + (int16_t)((buffer[index] & 0x7FFE0000) >> 17 | (buffer[index] & 0x80000000) >> 16 | (buffer[index] & 0x80000000) >> 17) + (child << 1);
 		
 		cposX += (posX < cposX) ? -csize : csize;
 		cposY += (posY < cposY) ? -csize : csize;
