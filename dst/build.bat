@@ -61,7 +61,7 @@ set EMBED= --preload-file %EMBED%@/
 goto :skp
 
 :skp
-call emcc%SOURCES% -o %TARGET%%EMBED% -s FULL_ES2=1 -O3 -s TOTAL_MEMORY=268435456
+call emcc%SOURCES% -o %TARGET%%EMBED% -s FULL_ES2=1 -O3 -s TOTAL_MEMORY=268435456 -s ASSERTIONS=2
 
 set t=%SOURCES%
 

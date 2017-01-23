@@ -360,6 +360,10 @@ void VoxelBuffer::logVoxel(uint32_t index) {
 }
 
 std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint32_t* buffer, bool* mask) {
+	// TO DO:
+	// - missing horizontal lines
+	// - triangles inside the teapot
+	
 	if (fov < 1) fov = 1;
 	if (fov > 360) fov = 360;
 	
@@ -370,14 +374,16 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 	mat4 perMat = mat4(1.0 / (ar * tan(a)), 0, 0, 0, 0, -1.0 / tan(a), 0, 0, 0, 0, -1, -near, 0, 0, -1, 0); // http://ogldev.atspace.co.uk/www/tutorial12/tutorial12.html http://www.terathon.com/gdc07_lengyel.pdf
 																										    // https://www.scratchapixel.com/lessons/3d-basic-rendering/perspective-and-orthographic-projection-matrix/building-basic-perspective-projection-matrix
 	vec4* vs = (vec4*)malloc(sizeof(vec4) * 8);
+
+	uint8_t* sm = (uint8_t*)malloc(sizeof(uint8_t) * height);
 	
-	return [this, perMat, width, height, ar, vs, buffer, mask](mat4 cm) {
+	return [this, perMat, width, height, ar, vs, buffer, mask, sm](mat4 cm) {
 		mat4 perPro = ((mat4)perMat) * cm.inverse();
 
 		uint32_t drawCounter = 0;
 		uint32_t testCounter = 0;
 		
-		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [perPro, width, height, ar, vs, buffer, mask, &drawCounter, &testCounter](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
+		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [perPro, width, height, ar, vs, buffer, mask, sm, &drawCounter, &testCounter](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
 			// Project the voxel vertices into screen space -> if all of them are off return false
 			// Check if the voxel is covered -> if so return false
 			// Draw the pixels if the voxel is smaller than a pixel or hasn't got any children
@@ -475,7 +481,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			
 			bool c;
 			bool draw = !children || (min.x == max.x && min.y == max.y);
-
+			
 			for (i = 0; i < k; ++i) {
 				if (!mask[((int)vs[i].y) * width + (int)vs[i].x]) {
 					if (!draw) {
@@ -492,27 +498,57 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 				return false;
 			}
 
+			uint16_t sx, ex;
+
 			for (uint16_t y = min.y; y <= max.y; ++y) {
-				for (uint16_t x = min.x; x <= max.x; ++x) {
-					c = false;
+				if (sm[height] >= width) continue;
+
+				c = false;
+
+				for (sx = min.x; sx <= max.x; ++sx) {
+					if (mask[y * width + sx]) continue;
+
 					testCounter++;
+
 					for (i = 0, j = (k - 1); i < k; j = i++) {
-						if (((vs[i].y >= y) != (vs[j].y >= y)) && (x <= (vs[j].x - vs[i].x) * (y - vs[i].y) / (vs[j].y - vs[i].y) + vs[i].x)) {
+						if (((vs[i].y >= y) != (vs[j].y >= y)) && (sx <= (vs[j].x - vs[i].x) * (y - vs[i].y) / (vs[j].y - vs[i].y) + vs[i].x)) {
 							c = !c;
 						}
 					}
 
-					if (c) {
-						if (!mask[y * width + x]) {
-							if (!draw) {
-								return true;
-							}
-							
-							mask[y * width + x] = true;
-							buffer[y * width + x] = colour;
+					if (c) break;
+				}
 
-							drawCounter++;
+				if (!c) continue;
+
+				c = false;
+				
+				for (ex = max.x; ex >= sx; ex--) {
+					if (mask[y * width + ex]) continue;
+					
+					testCounter++;
+					
+					for (i = 0, j = (k - 1); i < k; j = i++) {
+						if (((vs[i].y >= y) != (vs[j].y >= y)) && (ex <= (vs[j].x - vs[i].x) * (y - vs[i].y) / (vs[j].y - vs[i].y) + vs[i].x)) {
+							c = !c;
 						}
+					}
+					
+					if (c) break;
+				}
+				
+				for (uint16_t x = sx; x <= ex; ++x) {
+					if (!mask[y * width + x]) {
+						if (!draw) {
+							return true;
+						}
+
+						mask[y * width + x] = true;
+						buffer[y * width + x] = colour;
+
+						sm[height] += 1; 
+
+						drawCounter++;
 					}
 				}
 			}
@@ -522,10 +558,11 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 
 		memset(buffer, 0x0, width * height * 4);
 		memset(mask, 0x0, width * height);
+		memset(sm, 0x0, height);
 		
 		this->frontToBack(0x00000000, 0, 0, 0, 0x8000, ROUND_2_INT(cm[3]), ROUND_2_INT(cm[7]), ROUND_2_INT(cm[11]), render);
 
-		//DEBUG_LOG_RAW("Draw", "%u", testCounter);
+		//DEBUG_LOG_RAW("Debug", "Test: %u - Draw: %u", testCounter, drawCounter);
 	};
 }
 
