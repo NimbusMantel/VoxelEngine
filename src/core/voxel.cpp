@@ -366,35 +366,21 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 
 	mat4 perMat = mat4(1.0 / (ar * tan(a)), 0, 0, 0, 0, -1.0 / tan(a), 0, 0, 0, 0, -1, -near, 0, 0, -1, 0); // http://ogldev.atspace.co.uk/www/tutorial12/tutorial12.html http://www.terathon.com/gdc07_lengyel.pdf
 																										    // https://www.scratchapixel.com/lessons/3d-basic-rendering/perspective-and-orthographic-projection-matrix/building-basic-perspective-projection-matrix
-	vec4* vs = (vec4*)malloc(sizeof(vec4) * 8);
-	vec4* ch = (vec4*)malloc(sizeof(vec4) * 16);
-
 	uint8_t* sm = (uint8_t*)malloc(sizeof(uint8_t) * height);
-
-	mat4 perPro;
-	uint32_t drawCounter, testCounter, objectCounter;
-
-	vec3 min, max;
-
-	int8_t i, j, k;
-
-	vec4 tmp;
-
-	bool c, draw;
-
-	uint16_t sx, ex, x, y;
 	
-	return [this, perMat, width, height, ar, vs, ch, buffer, mask, sm, convert, &perPro, &drawCounter, &testCounter, &objectCounter, &min, &max, &i, &j, &k, &tmp, &c, &draw, &sx, &ex, &x, &y](mat4 cm) {
-		perPro = ((mat4)perMat) * cm.inverse();
+	return [this, perMat, width, height, ar, buffer, mask, sm, convert](mat4 cm) {
+		mat4 perPro = ((mat4)perMat) * cm.inverse();
 
-		drawCounter = testCounter = objectCounter = 0;
+		uint32_t drawCounter = 0, testCounter = 0, objectCounter = 0;
 		
-		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [perPro, width, height, ar, vs, ch, buffer, mask, sm, convert, &drawCounter, &testCounter, &objectCounter, &min, &max, &i, &j, &k, &tmp, &c, &draw, &sx, &ex, &x, &y](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
+		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [perPro, width, height, ar, buffer, mask, sm, convert, &drawCounter, &testCounter, &objectCounter](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
 			// Project the voxel vertices into screen space -> if all of them are off return false
 			// Check if the voxel is covered -> if so return false
 			// Draw the pixels if the voxel is smaller than a pixel or hasn't got any children
 			// Return whether the voxel hasn't been drawn
 			
+			vec4 vs[8];
+
 			vs[0] = ((mat4)perPro) * vec4(posX - size, posY - size, posZ - size, 1);
 			vs[1] = ((mat4)perPro) * vec4(posX + size, posY - size, posZ - size, 1);
 			vs[2] = ((mat4)perPro) * vec4(posX - size, posY + size, posZ - size, 1);
@@ -429,8 +415,8 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			vs[7].y = ROUND_2_INT((1.0 + vs[7].y / vs[7].w) * 0.5 * height);
 			vs[7].z /= vs[7].w;
 
-			min = vec3(MIN(vs[0].x, MIN(vs[1].x, MIN(vs[2].x, MIN(vs[3].x, MIN(vs[4].x, MIN(vs[5].x, MIN(vs[6].x, vs[7].x))))))), MIN(vs[0].y, MIN(vs[1].y, MIN(vs[2].y, MIN(vs[3].y, MIN(vs[4].y, MIN(vs[5].y, MIN(vs[6].y, vs[7].y))))))), MIN(vs[0].z, MIN(vs[1].z, MIN(vs[2].z, MIN(vs[3].z, MIN(vs[4].z, MIN(vs[5].z, MIN(vs[6].z, vs[7].z))))))));
-			max = vec3(MAX(vs[0].x, MAX(vs[1].x, MAX(vs[2].x, MAX(vs[3].x, MAX(vs[4].x, MAX(vs[5].x, MAX(vs[6].x, vs[7].x))))))), MAX(vs[0].y, MAX(vs[1].y, MAX(vs[2].y, MAX(vs[3].y, MAX(vs[4].y, MAX(vs[5].y, MAX(vs[6].y, vs[7].y))))))), MAX(vs[0].z, MAX(vs[1].z, MAX(vs[2].z, MAX(vs[3].z, MAX(vs[4].z, MAX(vs[5].z, MAX(vs[6].z, vs[7].z))))))));
+			vec3 min = vec3(MIN(vs[0].x, MIN(vs[1].x, MIN(vs[2].x, MIN(vs[3].x, MIN(vs[4].x, MIN(vs[5].x, MIN(vs[6].x, vs[7].x))))))), MIN(vs[0].y, MIN(vs[1].y, MIN(vs[2].y, MIN(vs[3].y, MIN(vs[4].y, MIN(vs[5].y, MIN(vs[6].y, vs[7].y))))))), MIN(vs[0].z, MIN(vs[1].z, MIN(vs[2].z, MIN(vs[3].z, MIN(vs[4].z, MIN(vs[5].z, MIN(vs[6].z, vs[7].z))))))));
+			vec3 max = vec3(MAX(vs[0].x, MAX(vs[1].x, MAX(vs[2].x, MAX(vs[3].x, MAX(vs[4].x, MAX(vs[5].x, MAX(vs[6].x, vs[7].x))))))), MAX(vs[0].y, MAX(vs[1].y, MAX(vs[2].y, MAX(vs[3].y, MAX(vs[4].y, MAX(vs[5].y, MAX(vs[6].y, vs[7].y))))))), MAX(vs[0].z, MAX(vs[1].z, MAX(vs[2].z, MAX(vs[3].z, MAX(vs[4].z, MAX(vs[5].z, MAX(vs[6].z, vs[7].z))))))));
 			
 			if (min.x >= width || min.y >= height || max.x < 0 || max.y < 0 || max.z < 0) {
 				return false;
@@ -445,6 +431,10 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			max.x = MIN(max.x, width - 1);
 			max.y = MIN(max.y, height - 1);
 
+			int8_t i, j, k;
+
+			vec4 tmp;
+
 			for (i = 0; i < 7; ++i) {
 				for (j = 0; j < (7 - i); ++j) {
 					if (!(vs[j].x < vs[j+1].x || (vs[j].x == vs[j+1].x && vs[j].y < vs[j+1].y))) {
@@ -456,6 +446,8 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			}
 
 			k = 0;
+
+			vec4 ch[16];
 			
 			for (i = 0; i < 8; i++) {
 				while (k >= 2 && ((ch[k - 1].x - ch[k - 2].x) * (vs[i].y - ch[k - 2].y) - (ch[k - 1].y - ch[k - 2].y) * (vs[i].x - ch[k - 2].x)) <= 0) k--;
@@ -486,7 +478,9 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 				objectCounter++;
 			}
 
-			for (y = min.y; y <= max.y; ++y) {
+			uint32_t sx, ex;
+
+			for (uint32_t y = min.y; y <= max.y; ++y) {
 				if (sm[y] >= width) continue;
 
 				c = false;
@@ -528,7 +522,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 					if (c) break;
 				}
 				
-				for (x = sx; x <= ex; ++x) {
+				for (uint32_t x = sx; x <= ex; ++x) {
 					if (!mask[y * width + x]) {
 						if (!draw) {
 							return true;
