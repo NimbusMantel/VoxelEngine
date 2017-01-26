@@ -8,6 +8,10 @@
 
 #define VOXEL_BUFFER_LENGTH 2000000
 
+#define ROUND_2_INT(f) ((int)(f >= 0.0 ? (f + 0.5) : (f - 0.5)))
+#define MIN(a, b) ((a > b) ? b : a)
+#define MAX(a, b) ((a < b) ? b : a)
+
 class VoxelBuffer
 {
 public:
@@ -26,12 +30,13 @@ public:
 
 	void logVoxel(uint32_t index);
 
-	std::function<void(mat4)> getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint32_t* buffer, bool* mask);
+	std::function<void(mat4)> getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint32_t* buffer, bool* mask, std::function<uint32_t(uint32_t)> convert);
 
 private:
 
 	uint32_t* buffer;
 	uint32_t size;
+
 	std::map<uint32_t, uint32_t> spots;
 
 	uint32_t allocBufferSpace(uint32_t length);
@@ -39,5 +44,5 @@ private:
 
 	void clearVoxel(uint32_t index, bool clearParent, bool clearChildren);
 
-	void frontToBack(uint32_t index, int16_t posX, int16_t posY, int16_t posZ, uint16_t size, const int16_t eyeX, const int16_t eyeY, const int16_t eyeZ, std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)>& render);
+	void frontToBack(uint32_t index, int16_t posX, int16_t posY, int16_t posZ, uint16_t size, const float eyeX, const float eyeY, const float eyeZ, std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)>& render);
 };

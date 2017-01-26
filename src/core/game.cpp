@@ -38,7 +38,34 @@ void teapotTest() {
 		hex = (*it)["colour"].get<std::string>();
 		colour = std::stoul(hex, nullptr, 16);
 		
-		voxels.addVoxel((*it)["x"], (*it)["y"], (*it)["z"], 1, VoxelBuffer::constructVoxel(convert(colour)));
+		voxels.addVoxel((*it)["x"], (*it)["y"], (*it)["z"], 1, VoxelBuffer::constructVoxel(colour));
+	}
+}
+
+void axisTest() {
+	for (uint8_t i = 0; i < 8; ++i) {
+		voxels.addVoxel((i & 0x01) ? 1 : -1, (i & 0x02) ? 1 : -1, (i & 0x04) ? 1 : -1, 1, VoxelBuffer::constructVoxel(convert(0xFFFFFFFF)));
+	}
+
+	for (uint8_t i = 3; i < 17; i += 2) {
+		voxels.addVoxel(i, 1, 1, 1, VoxelBuffer::constructVoxel(convert(0xFF0000FF)));
+		voxels.addVoxel(i, -1, 1, 1, VoxelBuffer::constructVoxel(convert(0xFF0000FF)));
+		voxels.addVoxel(i, 1, -1, 1, VoxelBuffer::constructVoxel(convert(0xFF0000FF)));
+		voxels.addVoxel(i, -1, -1, 1, VoxelBuffer::constructVoxel(convert(0xFF0000FF)));
+	}
+	
+	for (uint8_t i = 3; i < 17; i += 2) {
+		voxels.addVoxel(1, i, 1, 1, VoxelBuffer::constructVoxel(convert(0x00FF00FF)));
+		voxels.addVoxel(-1, i, 1, 1, VoxelBuffer::constructVoxel(convert(0x00FF00FF)));
+		voxels.addVoxel(1, i, -1, 1, VoxelBuffer::constructVoxel(convert(0x00FF00FF)));
+		voxels.addVoxel(-1, i, -1, 1, VoxelBuffer::constructVoxel(convert(0x00FF00FF)));
+	}
+
+	for (uint8_t i = 3; i < 17; i += 2) {
+		voxels.addVoxel(1, 1, i, 1, VoxelBuffer::constructVoxel(convert(0x0000FFFF)));
+		voxels.addVoxel(-1, 1, i, 1, VoxelBuffer::constructVoxel(convert(0x0000FFFF)));
+		voxels.addVoxel(1, -1, i, 1, VoxelBuffer::constructVoxel(convert(0x0000FFFF)));
+		voxels.addVoxel(-1, -1, i, 1, VoxelBuffer::constructVoxel(convert(0x0000FFFF)));
 	}
 }
 
@@ -49,9 +76,11 @@ void on_init(int w, int h, uint32_t* b, bool* m, std::function<uint32_t(uint32_t
 	mask = m;
 	convert = c;
 
-	camera = Camera(voxels.getRenderFunction(width, height, 70, buffer, mask));
+	camera = Camera(voxels.getRenderFunction(width, height, 70, buffer, mask, convert));
 
 	teapotTest();
+
+	//axisTest();
 }
 
 void on_update(float dt) {
@@ -84,5 +113,5 @@ void on_touch_up(int x, int y) {
 }
 
 void on_mouse_scroll(int x, int y) {
-	distance += (double)y;
+	distance = MAX(distance + y / 3.0, 0);
 }

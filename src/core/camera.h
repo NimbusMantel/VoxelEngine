@@ -9,7 +9,7 @@ class Camera
 public:
 
 	Camera(std::function<void(mat4)> render);
-	Camera() : Camera([](mat4) {return; }) {};
+	Camera() : Camera([](mat4)->void { return; }) {};
 
 	~Camera();
 
