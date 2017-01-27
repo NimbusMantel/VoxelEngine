@@ -8,7 +8,7 @@ set HEADERS=..\src\core ..\src\platform\common ..\src\platform\emscripten
 
 REM List the source files
 
-set SOURCES=..\src\platform\emscripten\main.cpp ..\src\core\game.cpp ..\src\platform\common\platform_log.cpp ..\src\platform\common\platform_file_utils.cpp ..\src\core\voxel.cpp ..\src\core\camera.cpp ..\src\core\geo.cpp
+set SOURCES=..\src\platform\emscripten\main.cpp ..\src\core\game.cpp ..\src\platform\common\platform_log.cpp ..\src\platform\common\platform_file_utils.cpp ..\src\core\voxel.cpp ..\src\core\camera.cpp ..\src\core\geo.cpp ..\src\core\colour.cpp
 
 REM Set a folder with files to embed
 
@@ -61,7 +61,7 @@ set EMBED= --preload-file %EMBED%@/
 goto :skp
 
 :skp
-call emcc%SOURCES% -o %TARGET%%EMBED% -s FULL_ES2=1 -O3 -s TOTAL_MEMORY=268435456 -s ASSERTIONS=2
+call emcc%SOURCES% -o %TARGET%%EMBED% -s FULL_ES2=1 -O3 -s TOTAL_MEMORY=268435456
 
 set t=%SOURCES%
 

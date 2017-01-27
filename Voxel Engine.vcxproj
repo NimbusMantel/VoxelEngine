@@ -71,6 +71,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\core\camera.cpp" />
+    <ClCompile Include="src\core\colour.cpp" />
     <ClCompile Include="src\core\game.cpp" />
     <ClCompile Include="src\core\geo.cpp" />
     <ClCompile Include="src\core\voxel.cpp" />
@@ -80,6 +81,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\core\camera.h" />
+    <ClInclude Include="src\core\colour.h" />
     <ClInclude Include="src\core\config.h" />
     <ClInclude Include="src\core\game.h" />
     <ClInclude Include="src\core\geo.h" />

@@ -45,4 +45,6 @@ private:
 	void clearVoxel(uint32_t index, bool clearParent, bool clearChildren);
 
 	void frontToBack(uint32_t index, int16_t posX, int16_t posY, int16_t posZ, uint16_t size, const float eyeX, const float eyeY, const float eyeZ, std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)>& render);
+
+	void updateColours(uint32_t index);
 };

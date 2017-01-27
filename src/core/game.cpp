@@ -44,28 +44,28 @@ void teapotTest() {
 
 void axisTest() {
 	for (uint8_t i = 0; i < 8; ++i) {
-		voxels.addVoxel((i & 0x01) ? 1 : -1, (i & 0x02) ? 1 : -1, (i & 0x04) ? 1 : -1, 1, VoxelBuffer::constructVoxel(convert(0xFFFFFFFF)));
+		voxels.addVoxel((i & 0x01) ? 1 : -1, (i & 0x02) ? 1 : -1, (i & 0x04) ? 1 : -1, 1, VoxelBuffer::constructVoxel(0xFFFFFFFF));
 	}
 
 	for (uint8_t i = 3; i < 17; i += 2) {
-		voxels.addVoxel(i, 1, 1, 1, VoxelBuffer::constructVoxel(convert(0xFF0000FF)));
-		voxels.addVoxel(i, -1, 1, 1, VoxelBuffer::constructVoxel(convert(0xFF0000FF)));
-		voxels.addVoxel(i, 1, -1, 1, VoxelBuffer::constructVoxel(convert(0xFF0000FF)));
-		voxels.addVoxel(i, -1, -1, 1, VoxelBuffer::constructVoxel(convert(0xFF0000FF)));
+		voxels.addVoxel(i, 1, 1, 1, VoxelBuffer::constructVoxel(0xFF0000FF));
+		voxels.addVoxel(i, -1, 1, 1, VoxelBuffer::constructVoxel(0xFF0000FF));
+		voxels.addVoxel(i, 1, -1, 1, VoxelBuffer::constructVoxel(0xFF0000FF));
+		voxels.addVoxel(i, -1, -1, 1, VoxelBuffer::constructVoxel(0xFF0000FF));
 	}
 	
 	for (uint8_t i = 3; i < 17; i += 2) {
-		voxels.addVoxel(1, i, 1, 1, VoxelBuffer::constructVoxel(convert(0x00FF00FF)));
-		voxels.addVoxel(-1, i, 1, 1, VoxelBuffer::constructVoxel(convert(0x00FF00FF)));
-		voxels.addVoxel(1, i, -1, 1, VoxelBuffer::constructVoxel(convert(0x00FF00FF)));
-		voxels.addVoxel(-1, i, -1, 1, VoxelBuffer::constructVoxel(convert(0x00FF00FF)));
+		voxels.addVoxel(1, i, 1, 1, VoxelBuffer::constructVoxel(0x00FF00FF));
+		voxels.addVoxel(-1, i, 1, 1, VoxelBuffer::constructVoxel(0x00FF00FF));
+		voxels.addVoxel(1, i, -1, 1, VoxelBuffer::constructVoxel(0x00FF00FF));
+		voxels.addVoxel(-1, i, -1, 1, VoxelBuffer::constructVoxel(0x00FF00FF));
 	}
 
 	for (uint8_t i = 3; i < 17; i += 2) {
-		voxels.addVoxel(1, 1, i, 1, VoxelBuffer::constructVoxel(convert(0x0000FFFF)));
-		voxels.addVoxel(-1, 1, i, 1, VoxelBuffer::constructVoxel(convert(0x0000FFFF)));
-		voxels.addVoxel(1, -1, i, 1, VoxelBuffer::constructVoxel(convert(0x0000FFFF)));
-		voxels.addVoxel(-1, -1, i, 1, VoxelBuffer::constructVoxel(convert(0x0000FFFF)));
+		voxels.addVoxel(1, 1, i, 1, VoxelBuffer::constructVoxel(0x0000FFFF));
+		voxels.addVoxel(-1, 1, i, 1, VoxelBuffer::constructVoxel(0x0000FFFF));
+		voxels.addVoxel(1, -1, i, 1, VoxelBuffer::constructVoxel(0x0000FFFF));
+		voxels.addVoxel(-1, -1, i, 1, VoxelBuffer::constructVoxel(0x0000FFFF));
 	}
 }
 
@@ -113,5 +113,5 @@ void on_touch_up(int x, int y) {
 }
 
 void on_mouse_scroll(int x, int y) {
-	distance = MAX(distance + y / 3.0, 0);
+	distance = MAX(distance + y, 0);
 }
