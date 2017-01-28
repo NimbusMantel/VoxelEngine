@@ -92,6 +92,7 @@
     <ClInclude Include="src\platform\common\platform_macros.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="ext\monkey.json" />
     <None Include="ext\teapot.json" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
