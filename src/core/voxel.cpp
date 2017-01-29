@@ -355,7 +355,7 @@ void VoxelBuffer::logVoxel(uint32_t index) {
 	DEBUG_LOG_RAW("VoxelBuffer", "(%d) %s", index, std::bitset<64>(getVoxel(index)).to_string().c_str());
 }
 
-std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint32_t* buffer, bool* mask, std::function<uint32_t(uint32_t)> convert) {
+std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint32_t* buffer, uint8_t* mask, std::function<uint32_t(uint32_t)> toPixel, std::function<uint32_t(uint32_t)> fromPixel) {
 	// TO DO:
 	// - drawing behind the camera (axis test)
 	// - regular frame drops
@@ -388,12 +388,12 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 
 	uint16_t sx, ex, x, y;
 	
-	return [this, perMat, width, height, ar, vs, ch, buffer, mask, sm, convert, &perPro, &drawCounter, &testCounter, &objectCounter, &min, &max, &i, &j, &k, &tmp, &c, &draw, &sx, &ex, &x, &y](mat4 cm) {
+	return [this, perMat, width, height, ar, vs, ch, buffer, mask, sm, toPixel, fromPixel, &perPro, &drawCounter, &testCounter, &objectCounter, &min, &max, &i, &j, &k, &tmp, &c, &draw, &sx, &ex, &x, &y](mat4 cm) {
 		perPro = ((mat4)perMat) * cm.inverse();
 
 		drawCounter = testCounter = objectCounter = 0;
 		
-		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [perPro, width, height, ar, vs, ch, buffer, mask, sm, convert, &drawCounter, &testCounter, &objectCounter, &min, &max, &i, &j, &k, &tmp, &c, &draw, &sx, &ex, &x, &y](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
+		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [perPro, width, height, ar, vs, ch, buffer, mask, sm, toPixel, fromPixel, &drawCounter, &testCounter, &objectCounter, &min, &max, &i, &j, &k, &tmp, &c, &draw, &sx, &ex, &x, &y](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
 			// Project the voxel vertices into screen space -> if all of them are off return false
 			// Check if the voxel is covered -> if so return false
 			// Draw the pixels if the voxel is smaller than a pixel or hasn't got any children
@@ -477,8 +477,6 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 
 			if (draw) {
 				objectCounter++;
-
-				colour = convert(colour);
 			}
 
 			for (y = min.y; y <= max.y; ++y) {
@@ -487,7 +485,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 				c = false;
 
 				for (sx = min.x; sx <= max.x; ++sx) {
-					if (mask[y * width + sx]) continue;
+					if (mask[y * width + sx] == 0xFF) continue;
 
 					testCounter++;
 
@@ -510,7 +508,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 				c = false;
 				
 				for (ex = max.x; ex >= sx; --ex) {
-					if (mask[y * width + ex]) continue;
+					if (mask[y * width + ex] == 0xFF) continue;
 					
 					testCounter++;
 					
@@ -524,15 +522,17 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 				}
 				
 				for (x = sx; x <= ex; ++x) {
-					if (!mask[y * width + x]) {
+					if (mask[y * width + x] != 0xFF) {
 						if (!draw) {
 							return true;
 						}
 
-						mask[y * width + x] = true;
-						buffer[y * width + x] = colour; //Front to back: convert(((255 - (uint8_t)MIN(objectCounter * 0.225, 255)) << 24) | ((255 - (uint8_t)MIN(objectCounter * 0.225, 255)) << 16) | ((255 - (uint8_t)MIN(objectCounter * 0.225, 255)) << 8) | 255);
+						uint32_t mcol = ((buffer[y * width + x] == 0x00000000) ? colour : colourMix(fromPixel(buffer[y * width + x]), colour));
+						//DEBUG_LOG_RAW("Debug", "base: %u - colour: %u - result: %u", buffer[y * width + x], colour, mcol);
+						mask[y * width + x] = mcol & 0x000000FF;
+						buffer[y * width + x] = toPixel(mcol); //Front to back: convert(((255 - (uint8_t)MIN(objectCounter * 0.225, 255)) << 24) | ((255 - (uint8_t)MIN(objectCounter * 0.225, 255)) << 16) | ((255 - (uint8_t)MIN(objectCounter * 0.225, 255)) << 8) | 255);
 
-						sm[y] += 1;
+						sm[y] += ((mcol & 0x000000FF) == 255);
 
 						drawCounter++;
 					}

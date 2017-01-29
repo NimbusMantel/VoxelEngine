@@ -15,7 +15,7 @@ const int width = 640, height = 360;
 
 static SDL_Surface* screen;
 static Uint32* buffer;
-static bool mask[width * height];
+static Uint8 mask[width * height];
 
 Uint32 currFrame;
 Uint32 prevFrame;
@@ -31,7 +31,7 @@ int main(void) {
 
 	prevFrame = SDL_GetTicks();
 
-	on_init(width, height, buffer, mask, [format](Uint32 rgba) -> Uint32 {return SDL_MapRGBA(format, (rgba & 0xFF000000) >> 24, (rgba & 0x00FF0000) >> 16, (rgba & 0x0000FF00) >> 8, rgba & 0x000000FF); });
+	on_init(width, height, buffer, mask, [format](Uint32 rgba) -> Uint32 { return SDL_MapRGBA(format, (rgba & 0xFF000000) >> 24, (rgba & 0x00FF0000) >> 16, (rgba & 0x0000FF00) >> 8, rgba & 0x000000FF); }, [format](Uint32 abgr) -> Uint32 { Uint32 rgba;  SDL_GetRGBA(abgr, format, (Uint8*)&rgba + 3, (Uint8*)&rgba + 2, (Uint8*)&rgba + 1, (Uint8*)&rgba + 0); return rgba; });
 
 	emscripten_set_main_loop(update, 0, 1);
 

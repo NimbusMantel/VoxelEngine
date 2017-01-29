@@ -30,7 +30,7 @@ public:
 
 	void logVoxel(uint32_t index);
 
-	std::function<void(mat4)> getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint32_t* buffer, bool* mask, std::function<uint32_t(uint32_t)> convert);
+	std::function<void(mat4)> getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint32_t* buffer, uint8_t* mask, std::function<uint32_t(uint32_t)> toPixel, std::function<uint32_t(uint32_t)> fromPixel);
 
 private:
 

@@ -15,8 +15,9 @@ using json = nlohmann::json;
 
 static int width, height;
 static uint32_t* buffer;
-static bool* mask;
-static std::function<uint32_t(uint32_t)> convert;
+static uint8_t* mask;
+static std::function<uint32_t(uint32_t)> toPixel;
+static std::function<uint32_t(uint32_t)> fromPixel;
 
 static VoxelBuffer voxels = VoxelBuffer();
 static Camera camera;
@@ -83,16 +84,28 @@ void axisTest() {
 	}
 }
 
-void on_init(int w, int h, uint32_t* b, bool* m, std::function<uint32_t(uint32_t)> c) {
+void alphaTest() {
+	voxels.addVoxel(-1, 1, 1, 1, VoxelBuffer::constructVoxel(0xFFFFFFFF));
+	voxels.addVoxel(-1, -1, -1, 1, VoxelBuffer::constructVoxel(0xFFED00DF));
+	voxels.addVoxel(1, -1, -1, 1, VoxelBuffer::constructVoxel(0xFF0000BF));
+	voxels.addVoxel(-1, 1, -1, 1, VoxelBuffer::constructVoxel(0xFF00AB9F));
+	voxels.addVoxel(1, 1, -1, 1, VoxelBuffer::constructVoxel(0x0047AB80));
+	voxels.addVoxel(-1, -1, 1, 1, VoxelBuffer::constructVoxel(0x00EDFF60));
+	voxels.addVoxel(1, -1, 1, 1, VoxelBuffer::constructVoxel(0x00B50040));
+	voxels.addVoxel(1, 1, 1, 1, VoxelBuffer::constructVoxel(0x00000020));
+}
+
+void on_init(int w, int h, uint32_t* b, uint8_t* m, std::function<uint32_t(uint32_t)> t, std::function<uint32_t(uint32_t)> f) {
 	width = w;
 	height = h;
 	buffer = b;
 	mask = m;
-	convert = c;
+	toPixel = t;
+	fromPixel = f;
 
-	camera = Camera(voxels.getRenderFunction(width, height, 70, buffer, mask, convert));
+	camera = Camera(voxels.getRenderFunction(width, height, 70, buffer, mask, toPixel, fromPixel));
 
-	monkeyTest();
+	alphaTest();
 }
 
 void on_update(float dt) {
