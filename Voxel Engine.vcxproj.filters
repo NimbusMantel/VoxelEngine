@@ -71,6 +71,9 @@
     <ClInclude Include="src\core\colour.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\core\macros.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="ext\teapot.json">

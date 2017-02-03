@@ -9,6 +9,7 @@
 
 #include "voxel.h"
 #include "camera.h"
+#include "colour.h"
 
 #include "json.h"
 using json = nlohmann::json;
@@ -84,7 +85,7 @@ void axisTest() {
 	}
 }
 
-void alphaTest() {
+void transparencyTest() {
 	voxels.addVoxel(-1, 1, 1, 1, VoxelBuffer::constructVoxel(0xFFFFFFFF));
 	voxels.addVoxel(-1, -1, -1, 1, VoxelBuffer::constructVoxel(0xFFED00DF));
 	voxels.addVoxel(1, -1, -1, 1, VoxelBuffer::constructVoxel(0xFF0000BF));
@@ -105,7 +106,7 @@ void on_init(int w, int h, uint32_t* b, uint8_t* m, std::function<uint32_t(uint3
 
 	camera = Camera(voxels.getRenderFunction(width, height, 70, buffer, mask, toPixel, fromPixel));
 
-	alphaTest();
+	transparencyTest();
 }
 
 void on_update(float dt) {

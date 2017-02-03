@@ -86,6 +86,7 @@
     <ClInclude Include="src\core\game.h" />
     <ClInclude Include="src\core\geo.h" />
     <ClInclude Include="src\core\json.h" />
+    <ClInclude Include="src\core\macros.h" />
     <ClInclude Include="src\core\voxel.h" />
     <ClInclude Include="src\platform\common\platform_file_utils.h" />
     <ClInclude Include="src\platform\common\platform_log.h" />

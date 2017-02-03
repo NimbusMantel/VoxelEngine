@@ -1,5 +1,6 @@
 #pragma once
 
+#include "macros.h"
 #include "geo.h"
 
 #include <cstdint>
@@ -7,10 +8,6 @@
 #include <map>
 
 #define VOXEL_BUFFER_LENGTH 2000000
-
-#define ROUND_2_INT(f) ((int)(f >= 0.0 ? (f + 0.5) : (f - 0.5)))
-#define MIN(a, b) ((a > b) ? b : a)
-#define MAX(a, b) ((a < b) ? b : a)
 
 class VoxelBuffer
 {

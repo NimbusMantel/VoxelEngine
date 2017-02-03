@@ -1,5 +1,7 @@
 #pragma once
 
+#include "macros.h"
+
 #include <cstdint>
 #include <functional>
 
