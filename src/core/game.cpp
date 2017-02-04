@@ -17,8 +17,6 @@ using json = nlohmann::json;
 static int width, height;
 static uint32_t* buffer;
 static uint8_t* mask;
-static std::function<uint32_t(uint32_t)> toPixel;
-static std::function<uint32_t(uint32_t)> fromPixel;
 
 static VoxelBuffer voxels = VoxelBuffer();
 static Camera camera;
@@ -96,15 +94,13 @@ void transparencyTest() {
 	voxels.addVoxel(1, 1, 1, 1, VoxelBuffer::constructVoxel(0x00000020));
 }
 
-void on_init(int w, int h, uint32_t* b, uint8_t* m, std::function<uint32_t(uint32_t)> t, std::function<uint32_t(uint32_t)> f) {
+void on_init(int w, int h, uint32_t* b, uint8_t* m) {
 	width = w;
 	height = h;
 	buffer = b;
 	mask = m;
-	toPixel = t;
-	fromPixel = f;
 
-	camera = Camera(voxels.getRenderFunction(width, height, 70, buffer, mask, toPixel, fromPixel));
+	camera = Camera(voxels.getRenderFunction(width, height, 70, buffer, mask));
 
 	transparencyTest();
 }

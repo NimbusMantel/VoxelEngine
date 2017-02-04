@@ -1,8 +1,8 @@
 #include <stdio.h>
 #include <functional>
 
+#include <SDL2/SDL.h>
 #include <emscripten/emscripten.h>
-#include <SDL/SDL.h>
 
 #include "game.h"
 
@@ -13,8 +13,11 @@ void input();
 
 const int width = 640, height = 360;
 
-static SDL_Surface* screen;
-static Uint32* buffer;
+static SDL_Window* window;
+static SDL_Renderer* renderer;
+static SDL_Texture* screen;
+
+static Uint32 buffer[width * height];
 static Uint8 mask[width * height];
 
 Uint32 currFrame;
@@ -25,13 +28,13 @@ bool isDragging = false;
 int main(void) {
 	SDL_Init(SDL_INIT_VIDEO);
 
-	screen = SDL_SetVideoMode(width, height, 32, SDL_SWSURFACE);
-	buffer = (Uint32*)screen->pixels;
-	SDL_PixelFormat* format = screen->format;
+	SDL_CreateWindowAndRenderer(width, height, 0, &window, &renderer);
+
+	screen = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, width, height);
 
 	prevFrame = SDL_GetTicks();
 
-	on_init(width, height, buffer, mask, [format](Uint32 rgba) -> Uint32 { return SDL_MapRGBA(format, (rgba & 0xFF000000) >> 24, (rgba & 0x00FF0000) >> 16, (rgba & 0x0000FF00) >> 8, rgba & 0x000000FF); }, [format](Uint32 abgr) -> Uint32 { Uint32 rgba;  SDL_GetRGBA(abgr, format, (Uint8*)&rgba + 3, (Uint8*)&rgba + 2, (Uint8*)&rgba + 1, (Uint8*)&rgba + 0); return rgba; });
+	on_init(width, height, buffer, mask);
 
 	emscripten_set_main_loop(update, 0, 1);
 
@@ -41,10 +44,6 @@ int main(void) {
 }
 
 void update() {
-	if (SDL_MUSTLOCK(screen)) {
-		SDL_LockSurface(screen);
-	}
-
 	currFrame = SDL_GetTicks();
 
 	input();
@@ -52,11 +51,11 @@ void update() {
 
 	prevFrame = currFrame;
 
-	if (SDL_MUSTLOCK(screen)) {
-		SDL_UnlockSurface(screen);
-	}
+	SDL_UpdateTexture(screen, NULL, buffer, width * sizeof(Uint32));
 
-	SDL_Flip(screen);
+	SDL_RenderClear(renderer);
+	SDL_RenderCopy(renderer, screen, NULL, NULL);
+	SDL_RenderPresent(renderer);
 }
 
 void input() {
@@ -64,10 +63,40 @@ void input() {
 
 	while (SDL_PollEvent(&event)) {
 		switch (event.type) {
-			case SDL_MOUSEBUTTONDOWN: if (event.button.button == SDL_BUTTON_LEFT) { isDragging = true;  on_touch_down(event.button.x, height - event.button.y - 1); } break;
-			case SDL_MOUSEBUTTONUP: if (event.button.button == SDL_BUTTON_LEFT) { isDragging = false; on_touch_up(event.button.x, height - event.button.y - 1); } break;
-			case SDL_MOUSEMOTION: if (isDragging) { on_touch_move(event.motion.x, height - event.motion.y - 1, event.motion.xrel, -event.motion.yrel); } break;
-			case SDL_MOUSEWHEEL: on_mouse_scroll(event.wheel.x, event.wheel.y); break;
+		case SDL_MOUSEBUTTONDOWN: if (event.button.button == SDL_BUTTON_LEFT) { isDragging = true;  on_touch_down(event.button.x, height - event.button.y - 1); } break;
+		case SDL_MOUSEBUTTONUP: if (event.button.button == SDL_BUTTON_LEFT) { isDragging = false; on_touch_up(event.button.x, height - event.button.y - 1); } break;
+		case SDL_MOUSEMOTION: if (isDragging) { on_touch_move(event.motion.x, height - event.motion.y - 1, event.motion.xrel, -event.motion.yrel); } break;
+		case SDL_MOUSEWHEEL: on_mouse_scroll(event.wheel.x, event.wheel.y); break;
 		}
 	}
 }
+
+/*
+precision mediump float;
+uniform sampler2D u_Texture;
+varying vec2 v_Coordinate;
+
+void main() {
+	vec4 hwba = texture2D(u_TextureUnit, v_TextureCoordinates);
+
+	hwba.x /= 60.0f;
+
+	vec4 rgba = vce4(hueTOrgb(hwb.x + 2.0f), hueTOrgb(hwb.x), hueTOrgb(hwb.x - 2.0f), 255);
+
+	rgba.x = (rgb.x * (1.0f - hwb.y - hwb.z) + hwb.y) * 255.0f;
+	rgba.y = (rgb.y * (1.0f - hwb.y - hwb.z) + hwb.y) * 255.0f;
+	rgba.z = (rgb.z * (1.0f - hwb.y - hwb.z) + hwb.y) * 255.0f;
+
+	gl_FragColor = rgba;
+}
+
+float hueTOrgb(float hue) {
+	if (hue < 0.0f) hue += 6.0f;
+	else if (hue >= 6.0f) hue -= 6.0f;
+
+	if (hue < 1.0f) return hue;
+	else if (hue < 3) return 1.0f;
+	else if (hue < 4) return (4.0f - hue);
+	else return 0.0f;
+}
+*/

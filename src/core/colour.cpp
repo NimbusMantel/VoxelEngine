@@ -66,11 +66,11 @@ col rgbTOhwb(col rgb) {
 col hwbTOrgb(col hwb) {
 	hwb.x /= 60.0f;
 
-	col rgb(hueTOrgb(hwb.x + 2.0f) * 255.0f, hueTOrgb(hwb.x) * 255.0f, hueTOrgb(hwb.x - 2.0f) * 255.0f);
+	col rgb(hueTOrgb(hwb.x + 2.0f), hueTOrgb(hwb.x), hueTOrgb(hwb.x - 2.0f));
 
-	rgb.x = ((rgb.x / 255.0f) * (1.0f - hwb.y - hwb.z) + hwb.y) * 255.0f;
-	rgb.y = ((rgb.y / 255.0f) * (1.0f - hwb.y - hwb.z) + hwb.y) * 255.0f;
-	rgb.z = ((rgb.z / 255.0f) * (1.0f - hwb.y - hwb.z) + hwb.y) * 255.0f;
+	rgb.x = (rgb.x * (1.0f - hwb.y - hwb.z) + hwb.y) * 255.0f;
+	rgb.y = (rgb.y * (1.0f - hwb.y - hwb.z) + hwb.y) * 255.0f;
+	rgb.z = (rgb.z * (1.0f - hwb.y - hwb.z) + hwb.y) * 255.0f;
 
 	return rgb;
 }
