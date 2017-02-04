@@ -9,7 +9,7 @@
 #include <bitset>
 #include <math.h>
 
-// Voxel: 15 Bit first child - 1 Bit far pointer - 8 Bit children mask - 7 Bit unused - 1 Bit colour changed - 32 Bit colour
+// Voxel: 15 Bit first child - 1 Bit far pointer - 8 Bit children mask - 8 Bit unused - 1 Bit colour changed - 9 Bit hue - 7 Bit white - 7 Bit black - 8 Bit alpha
 // Parent: 16 Bit 0x0001 - 15 Bit parent - 1 Bit far pointer
 // Pointer: 32 Bit pointer
 
@@ -31,7 +31,7 @@ VoxelBuffer::~VoxelBuffer() {
 }
 
 uint64_t VoxelBuffer::constructVoxel(uint32_t colour) {
-	return ((uint64_t)0xFFFF000000000000 | colour);
+	return ((uint64_t)0xFFFF000000000000 | rgbaTOhwba(colour));
 }
 
 uint32_t VoxelBuffer::allocBufferSpace(uint32_t length) {
@@ -368,7 +368,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 	double ar = width / (double)height;
 	double near = 1.0;
 
-	mat4 perMat = mat4(1.0 / (ar * tan(a)), 0, 0, 0, 0, -1.0 / tan(a), 0, 0, 0, 0, -1, 0, /*-1, -near,*/ 0, 0, -1, 0); // http://ogldev.atspace.co.uk/www/tutorial12/tutorial12.html http://www.terathon.com/gdc07_lengyel.pdf
+	mat4 perMat = mat4(1.0 / (ar * tan(a)), 0, 0, 0, 0, 1.0 / tan(a), 0, 0, 0, 0, -1, 0, /*-1, -near,*/ 0, 0, -1, 0); // http://ogldev.atspace.co.uk/www/tutorial12/tutorial12.html http://www.terathon.com/gdc07_lengyel.pdf
 																										    // https://www.scratchapixel.com/lessons/3d-basic-rendering/perspective-and-orthographic-projection-matrix/building-basic-perspective-projection-matrix
 	vec4* vs = (vec4*)malloc(sizeof(vec4) * 8);
 	vec4* ch = (vec4*)malloc(sizeof(vec4) * 16);
@@ -376,7 +376,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 	uint8_t* sm = (uint8_t*)malloc(sizeof(uint8_t) * height);
 
 	mat4 perPro;
-	uint32_t drawCounter, testCounter, objectCounter;
+	uint32_t drawCounter, testCounter;
 
 	vec3 min, max;
 
@@ -388,12 +388,12 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 
 	uint16_t sx, ex, x, y;
 	
-	return [this, perMat, width, height, ar, vs, ch, buffer, mask, sm, &perPro, &drawCounter, &testCounter, &objectCounter, &min, &max, &i, &j, &k, &tmp, &c, &draw, &sx, &ex, &x, &y](mat4 cm) {
+	return [this, perMat, width, height, ar, vs, ch, buffer, mask, sm, &perPro, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmp, &c, &draw, &sx, &ex, &x, &y](mat4 cm) {
 		perPro = ((mat4)perMat) * cm.inverse();
 
-		drawCounter = testCounter = objectCounter = 0;
+		drawCounter = testCounter = 0;
 		
-		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [perPro, width, height, ar, vs, ch, buffer, mask, sm, &drawCounter, &testCounter, &objectCounter, &min, &max, &i, &j, &k, &tmp, &c, &draw, &sx, &ex, &x, &y](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
+		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [perPro, width, height, ar, vs, ch, buffer, mask, sm, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmp, &c, &draw, &sx, &ex, &x, &y](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
 			// Project the voxel vertices into screen space -> if all of them are off return false
 			// Check if the voxel is covered -> if so return false
 			// Draw the pixels if the voxel is smaller than a pixel or hasn't got any children
@@ -475,10 +475,6 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			
 			bool c;
 
-			if (draw) {
-				objectCounter++;
-			}
-
 			for (y = min.y; y <= max.y; ++y) {
 				if (sm[y] >= width) continue;
 
@@ -528,9 +524,9 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 						}
 
 						uint32_t mcol = ((buffer[y * width + x] == 0x00000000) ? colour : colourMix(buffer[y * width + x], colour));
-						//DEBUG_LOG_RAW("Debug", "base: %u - colour: %u - result: %u", buffer[y * width + x], colour, mcol);
+						
 						mask[y * width + x] = mcol & 0x000000FF;
-						buffer[y * width + x] = mcol; //Front to back: convert(((255 - (uint8_t)MIN(objectCounter * 0.225, 255)) << 24) | ((255 - (uint8_t)MIN(objectCounter * 0.225, 255)) << 16) | ((255 - (uint8_t)MIN(objectCounter * 0.225, 255)) << 8) | 255);
+						buffer[y * width + x] = mcol;
 
 						sm[y] += ((mcol & 0x000000FF) == 255);
 
@@ -546,7 +542,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 		memset(mask, 0x0, width * height);
 		memset(sm, 0x0, height);
 
-		if (this->buffer[0] & 0x00000080) {
+		if (this->buffer[1] & 0x80000000) {
 			this->updateColours(0);
 		}
 		
@@ -619,7 +615,7 @@ bool VoxelBuffer::addVoxel(int16_t posX, int16_t posY, int16_t posZ, uint16_t si
 
 		setVoxel(index, child, defVox);
 
-		buffer[index] |= 0x00000080;
+		buffer[index + 1] |= 0x80000000;
 
 		index = index + (int16_t)((buffer[index] & 0x7FFE0000) >> 17 | (buffer[index] & 0x80000000) >> 16 | (buffer[index] & 0x80000000) >> 17) + (child << 1);
 		
@@ -630,7 +626,7 @@ bool VoxelBuffer::addVoxel(int16_t posX, int16_t posY, int16_t posZ, uint16_t si
 		csize >>= 1;
 	}
 
-	buffer[index] |= 0x00000080;
+	buffer[index + 1] |= 0x80000000;
 
 	child = ((posX < cposX) ? 0 : 1) + ((posY < cposY) ? 0 : 2) + ((posZ < cposZ) ? 0 : 4);
 
@@ -638,7 +634,7 @@ bool VoxelBuffer::addVoxel(int16_t posX, int16_t posY, int16_t posZ, uint16_t si
 }
 
 void VoxelBuffer::updateColours(uint32_t index) {
-	buffer[index] &= 0xFFFFFF7F;
+	buffer[index + 1] &= 0x7FFFFFFF;
 	
 	uint8_t children = (buffer[index] & 0x0000FF00) >> 8;
 
@@ -657,7 +653,7 @@ void VoxelBuffer::updateColours(uint32_t index) {
 
 	for (uint8_t i = 0; i < 8; ++i) {
 		if (children & (0x01 << (7 - i))) {
-			if (buffer[firstChild + i * 2] & 0x00000080) updateColours(firstChild + i * 2);
+			if (buffer[firstChild + i * 2 + 1] & 0x80000000) updateColours(firstChild + i * 2);
 
 			colours[k++] = buffer[firstChild + i * 2 + 1];
 		}

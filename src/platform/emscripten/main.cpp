@@ -2,6 +2,10 @@
 #include <functional>
 
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_opengles2.h>
+
+#include <GLES2/gl2.h>
+
 #include <emscripten/emscripten.h>
 
 #include "game.h"
@@ -11,13 +15,21 @@
 void update();
 void input();
 
-const int width = 640, height = 360;
+static const int width = 640, height = 360;
+static const GLsizei texSize = [](GLsizei v) { v--; v |= v >> 1; v |= v >> 2; v |= v >> 4; v |= v >> 8; v++; return v; }((width > height) ? width : height);
 
 static SDL_Window* window;
-static SDL_Renderer* renderer;
-static SDL_Texture* screen;
+static SDL_GLContext context;
 
-static Uint32 buffer[width * height];
+static GLuint screen;
+static GLuint buffer;
+static GLuint shader;
+
+static GLint a_Position;
+static GLint a_Coordinate;
+static GLint u_Texture;
+
+static Uint32 pixels[width * height];
 static Uint8 mask[width * height];
 
 Uint32 currFrame;
@@ -28,15 +40,96 @@ bool isDragging = false;
 int main(void) {
 	SDL_Init(SDL_INIT_VIDEO);
 
-	SDL_CreateWindowAndRenderer(width, height, 0, &window, &renderer);
+	window = SDL_CreateWindow(NULL, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, SDL_WINDOW_OPENGL);
+	context = SDL_GL_CreateContext(window);
 
-	screen = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, width, height);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+	glGenTextures(1, &screen);
+	glBindTexture(GL_TEXTURE_2D, screen);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texSize, texSize, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	float rect[] = { -1.0f, -1.0f, 0.0f, 0.0f,
+					 -1.0f,  1.0f, 0.0f, height / (float)texSize,
+					 1.0f, -1.0f, width / (float)texSize, 0.0f,
+					 1.0f,  1.0f, width / (float)texSize, height / (float)texSize };
+
+	glGenBuffers(1, &buffer);
+	glBindBuffer(GL_ARRAY_BUFFER, buffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(rect), (GLvoid*)rect, GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+	const GLchar* vertexSource[] = { 
+									 "attribute vec4 a_Position;"
+									 "attribute vec2 a_Coordinate;"
+									 "varying vec2 v_Coordinate;"
+									 "void main() {"
+									 "	 v_Coordinate = a_Coordinate;"
+									 "	 gl_Position = a_Position;"
+									 "}"
+								   };
+
+	const GLchar* fragmeSource[] = {
+									 "precision mediump float;"
+									 "uniform sampler2D u_Texture;"
+									 "varying vec2 v_Coordinate;"
+									 "float hueTOrgb(float hue) {"
+									 "	 if (hue < 0.0) hue += 1.0;"
+									 "	 else if (hue >= 1.0) hue -= 1.0;"
+									 "	 if ((6.0 * hue) < 1.0) return hue * 6.0;"
+									 "	 else if ((2.0 * hue) < 1.0) return 1.0;"
+									 "	 else if ((3.0 * hue) < 2.0) return (2.0/3.0 - hue) * 6.0;"
+									 "	 else return 0.0;"
+									 "}"
+									 "void main() {"
+									 "	 vec4 hwba = texture2D(u_Texture, v_Coordinate);"
+									 "	 hwba = vec4(hwba.w, hwba.z, hwba.y, hwba.x);"
+									 "	 if (hwba.w == 0.0) {"
+									 "		gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);"
+									 "		return;"
+									 "	 }"
+									 "   hwba.x = ((hwba.x * 255.0 - ((hwba.x >= 0.5) ? 128.0 : 0.0)) * 4.0 + ((hwba.y >= 0.75) ? 3.0 : ((hwba.y >= 0.5) ? 2.0 : ((hwba.y >= 0.25) ? 1.0 : 0.0)))) / 360.0;"
+									 "   hwba.y = ((hwba.y * 255.0 - ((hwba.y >= 0.75) ? 192.0 : ((hwba.y >= 0.5) ? 128.0 : ((hwba.y >= 0.25) ? 64.0 : 0.0)))) * 2.0 + ((hwba.z >= 0.5) ? 1.0 : 0.0)) / 127.0;"
+									 "	 hwba.z = (hwba.z * 255.0 - ((hwba.z >= 0.5) ? 128.0 : 0.0)) / 127.0;"
+									 "	 if (hwba.w < 1.0) {"
+									 "		hwba.y *= (hwba.w / (hwba.w + 1.0));"
+									 "		hwba.z += (1.0 - hwba.z) * (1.0 / (hwba.w + 1.0));"
+									 "	 }"
+									 "	 vec4 rgba = vec4(hueTOrgb(hwba.x + 1.0/3.0), hueTOrgb(hwba.x), hueTOrgb(hwba.x - 1.0/3.0), 1.0);"
+									 "	 rgba.x = (rgba.x * (1.0 - hwba.y - hwba.z) + hwba.y);"
+									 "	 rgba.y = (rgba.y * (1.0 - hwba.y - hwba.z) + hwba.y);"
+									 "	 rgba.z = (rgba.z * (1.0 - hwba.y - hwba.z) + hwba.y);"
+									 "	 gl_FragColor = rgba;"
+									 "}"
+								   };
+
+	GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
+	glShaderSource(vertexShader, 1, vertexSource, NULL);
+	glCompileShader(vertexShader);
+	GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+	glShaderSource(fragmentShader, 1, fragmeSource, NULL);
+	glCompileShader(fragmentShader);
+	shader = glCreateProgram();
+	glAttachShader(shader, vertexShader);
+	glAttachShader(shader, fragmentShader);
+	glLinkProgram(shader);
+
+	a_Position = glGetAttribLocation(shader, "a_Position");
+	a_Coordinate = glGetAttribLocation(shader, "a_Coordinate");
+	u_Texture = glGetUniformLocation(shader, "u_Texture");
+
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
 	prevFrame = SDL_GetTicks();
 
-	on_init(width, height, buffer, mask);
+	on_init(width, height, pixels, mask);
 
 	emscripten_set_main_loop(update, 0, 1);
+
+	SDL_DestroyWindow(window);
+	window = NULL;
 
 	SDL_Quit();
 
@@ -44,6 +137,8 @@ int main(void) {
 }
 
 void update() {
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
 	currFrame = SDL_GetTicks();
 
 	input();
@@ -51,11 +146,25 @@ void update() {
 
 	prevFrame = currFrame;
 
-	SDL_UpdateTexture(screen, NULL, buffer, width * sizeof(Uint32));
+	glBindTexture(GL_TEXTURE_2D, screen);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	glBindTexture(GL_TEXTURE_2D, 0);
 
-	SDL_RenderClear(renderer);
-	SDL_RenderCopy(renderer, screen, NULL, NULL);
-	SDL_RenderPresent(renderer);
+	glUseProgram(shader);
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, screen);
+	glUniform1i(u_Texture, 0);
+
+	glBindBuffer(GL_ARRAY_BUFFER, buffer);
+	glVertexAttribPointer(a_Position, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GL_FLOAT), (void*)(0));
+	glVertexAttribPointer(a_Coordinate, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GL_FLOAT), (void*)(2 * sizeof(GL_FLOAT)));
+	glEnableVertexAttribArray(a_Position);
+	glEnableVertexAttribArray(a_Coordinate);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+	SDL_GL_SwapWindow(window);
 }
 
 void input() {
@@ -70,33 +179,3 @@ void input() {
 		}
 	}
 }
-
-/*
-precision mediump float;
-uniform sampler2D u_Texture;
-varying vec2 v_Coordinate;
-
-void main() {
-	vec4 hwba = texture2D(u_TextureUnit, v_TextureCoordinates);
-
-	hwba.x /= 60.0f;
-
-	vec4 rgba = vce4(hueTOrgb(hwb.x + 2.0f), hueTOrgb(hwb.x), hueTOrgb(hwb.x - 2.0f), 255);
-
-	rgba.x = (rgb.x * (1.0f - hwb.y - hwb.z) + hwb.y) * 255.0f;
-	rgba.y = (rgb.y * (1.0f - hwb.y - hwb.z) + hwb.y) * 255.0f;
-	rgba.z = (rgb.z * (1.0f - hwb.y - hwb.z) + hwb.y) * 255.0f;
-
-	gl_FragColor = rgba;
-}
-
-float hueTOrgb(float hue) {
-	if (hue < 0.0f) hue += 6.0f;
-	else if (hue >= 6.0f) hue -= 6.0f;
-
-	if (hue < 1.0f) return hue;
-	else if (hue < 3) return 1.0f;
-	else if (hue < 4) return (4.0f - hue);
-	else return 0.0f;
-}
-*/

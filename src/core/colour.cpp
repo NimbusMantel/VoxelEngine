@@ -7,6 +7,22 @@
 
 // TO DO: Optimisation
 
+uint32_t rgbaTOhwba(uint32_t rgba) {
+	if (!(rgba & 0x000000FF)) return 0x00000000;
+	
+	col hwb = rgbTOhwb(col((rgba & 0xFF000000) >> 24, (rgba & 0x00FF0000) >> 16, (rgba & 0x0000FF00) >> 8));
+
+	return (((uint32_t)roundf(hwb.x) << 22) | ((uint32_t)roundf(hwb.y * 127.0f) << 15) | ((uint32_t)roundf(hwb.z * 127.0f) << 8) | (rgba & 0x000000FF));
+}
+
+uint32_t hwbaTOrgba(uint32_t hwba) {
+	if (!(hwba & 0x000000FF)) return 0x00000000;
+
+	col rgb = hwbTOrgb(col((hwba & 0x7FC00000) >> 22, ((hwba & 0x003F8000) >> 15) / 127.0f, ((hwba & 0x00007F00) >> 8) / 127.0f));
+
+	return (((uint32_t)roundf(rgb.x) << 24) | ((uint32_t)roundf(rgb.y) << 16) | ((uint32_t)roundf(rgb.z) << 8) | (hwba & 0x000000FF));
+}
+
 uint32_t colourMix(uint32_t colA, uint32_t colB) {
 	float alpA = (colA & 0x000000FF) / 255.0f;
 	float alpB = (colB & 0x000000FF) / 255.0f;
@@ -15,8 +31,8 @@ uint32_t colourMix(uint32_t colA, uint32_t colB) {
 	if (alpB == 0.0f && alpA > 0.0f) return colA;
 	if (alpA == 0.0f && alpB == 0.0f) return 0x0;
 
-	col hwbA = rgbTOhwb(col((colA & 0xFF000000) >> 24, (colA & 0x00FF0000) >> 16, (colA & 0x0000FF00) >> 8));
-	col hwbB = rgbTOhwb(col((colB & 0xFF000000) >> 24, (colB & 0x00FF0000) >> 16, (colB & 0x0000FF00) >> 8));
+	col hwbA = col((colA & 0x7FC00000) >> 22, ((colA & 0x003F8000) >> 15) / 127.0f, ((colA & 0x00007F00) >> 8) / 127.0f);
+	col hwbB = col((colB & 0x7FC00000) >> 22, ((colB & 0x003F8000) >> 15) / 127.0f, ((colB & 0x00007F00) >> 8) / 127.0f);
 
 	if (hwbA.y == 1.0f || hwbA.z == 1.0f) hwbA.x = hwbB.x;
 	else if (hwbB.y == 1.0f || hwbB.z == 1.0f) hwbB.x = hwbA.x;
@@ -27,9 +43,7 @@ uint32_t colourMix(uint32_t colA, uint32_t colB) {
 	float w = hwbA.y + (hwbB.y - hwbA.y) * alpB / (alpA + alpB);
 	float b = hwbA.z + (hwbB.z - hwbA.z) * alpB / (alpA + alpB);
 
-	col rgb = hwbTOrgb(col(h, w, b));
-
-	return (((uint32_t)roundf(rgb.x) << 24) | ((uint32_t)roundf(rgb.y) << 16) | ((uint32_t)roundf(rgb.z) << 8) | (uint32_t)roundf((1.0f - (1.0f - alpA) * (1.0f - alpB)) * 255.0f));
+	return (((uint32_t)roundf(h) << 22) | ((uint32_t)roundf(w * 127.0f) << 15) | ((uint32_t)roundf(b * 127.0f) << 8) | (uint32_t)roundf((1.0f - (1.0f - alpA) * (1.0f - alpB)) * 255.0f));
 }
 
 col rgbTOhwb(col rgb) {

@@ -11,6 +11,9 @@ struct col {
 	float x, y, z;
 };
 
+uint32_t rgbaTOhwba(uint32_t rgba);
+uint32_t hwbaTOrgba(uint32_t hwba);
+
 uint32_t colourMix(uint32_t colA, uint32_t colB);
 
 col rgbTOhwb(col rgb);
