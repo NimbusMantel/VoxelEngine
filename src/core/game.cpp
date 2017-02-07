@@ -94,6 +94,10 @@ void transparencyTest() {
 	voxels.addVoxel(1, 1, 1, 1, VoxelBuffer::constructVoxel(0x00000020));
 }
 
+void cubeTest() {
+	//voxels.addVoxel(-1, 1, 1, 1, VoxelBuffer::constructVoxel(0xFFFFFFFF));
+}
+
 void on_init(int w, int h, uint32_t* b, uint8_t* m) {
 	width = w;
 	height = h;
@@ -102,7 +106,7 @@ void on_init(int w, int h, uint32_t* b, uint8_t* m) {
 
 	camera = Camera(voxels.getRenderFunction(width, height, 70, buffer, mask));
 
-	transparencyTest();
+	cubeTest();
 }
 
 void on_update(float dt) {

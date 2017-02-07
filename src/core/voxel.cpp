@@ -357,7 +357,7 @@ void VoxelBuffer::logVoxel(uint32_t index) {
 
 std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_t height, uint16_t fov, uint32_t* buffer, uint8_t* mask) {
 	// TO DO:
-	// - drawing behind the camera (axis test)
+	// - clipping algorithm
 	// - regular frame drops
 	// - mat4 optimisation
 	
@@ -366,19 +366,25 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 	
 	double a = ((fov / 180.0) * M_PI) / 2.0;
 	double ar = width / (double)height;
-	double near = 1.0;
 
-	mat4 perMat = mat4(1.0 / (ar * tan(a)), 0, 0, 0, 0, 1.0 / tan(a), 0, 0, 0, 0, -1, 0, /*-1, -near,*/ 0, 0, -1, 0); // http://ogldev.atspace.co.uk/www/tutorial12/tutorial12.html http://www.terathon.com/gdc07_lengyel.pdf
-																										    // https://www.scratchapixel.com/lessons/3d-basic-rendering/perspective-and-orthographic-projection-matrix/building-basic-perspective-projection-matrix
+	mat4 perMat = mat4(1.0 / (ar * tan(a)), 0, 0, 0, 0, 1.0 / tan(a), 0, 0, 0, 0, -1, 0, /*-1, -near (= 1.0),*/ 0, 0, -1, 0);
+	
 	vec4* vs = (vec4*)malloc(sizeof(vec4) * 8);
-	vec4* ch = (vec4*)malloc(sizeof(vec4) * 16);
+	uint8_t* cc = (uint8_t*)malloc(sizeof(uint8_t) * 8);
+	vec4* cv = (vec4*)malloc(sizeof(vec4) * 24);
+	vec4* ch = (vec4*)malloc(sizeof(vec4) * 48);
+
+	uint8_t allOutside, allInside;
+
+	float olda, newa, alpha;
+	uint8_t msk, m;
 
 	uint8_t* sm = (uint8_t*)malloc(sizeof(uint8_t) * height);
 
 	mat4 perPro;
 	uint32_t drawCounter, testCounter;
 
-	vec3 min, max;
+	vec2 min, max;
 
 	int8_t i, j, k;
 
@@ -387,13 +393,17 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 	bool c, draw;
 
 	uint16_t sx, ex, x, y;
+
+	vec2 di, dj, rx;
+
+	uint32_t mcol;
 	
-	return [this, perMat, width, height, ar, vs, ch, buffer, mask, sm, &perPro, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmp, &c, &draw, &sx, &ex, &x, &y](mat4 cm) {
+	return [this, perMat, width, height, ar, vs, cc, cv, &allOutside, &allInside, &olda, &newa, &alpha, &msk, &m, ch, buffer, mask, sm, &perPro, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmp, &c, &draw, &sx, &ex, &x, &y, &di, &dj, &rx, &mcol](mat4 cm) {
 		perPro = ((mat4)perMat) * cm.inverse();
 
 		drawCounter = testCounter = 0;
 		
-		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [perPro, width, height, ar, vs, ch, buffer, mask, sm, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmp, &c, &draw, &sx, &ex, &x, &y](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
+		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [this, perPro, width, height, ar, vs, cc, cv, &allOutside, &allInside, &olda, &newa, &alpha, &msk, &m, ch, buffer, mask, sm, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmp, &c, &draw, &sx, &ex, &x, &y, &di, &dj, &rx, &mcol](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
 			// Project the voxel vertices into screen space -> if all of them are off return false
 			// Check if the voxel is covered -> if so return false
 			// Draw the pixels if the voxel is smaller than a pixel or hasn't got any children
@@ -407,37 +417,126 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			vs[5] = ((mat4)perPro) * vec4(posX + size, posY - size, posZ + size, 1);
 			vs[6] = ((mat4)perPro) * vec4(posX - size, posY + size, posZ + size, 1);
 			vs[7] = ((mat4)perPro) * vec4(posX + size, posY + size, posZ + size, 1);
-			
-			vs[0].x = ROUND_2_INT((1.0 + vs[0].x / vs[0].w) * 0.5 * width) * ((vs[0].z < 0) ? -1 : 1);
-			vs[0].y = ROUND_2_INT((1.0 + vs[0].y / vs[0].w) * 0.5 * height) * ((vs[0].z < 0) ? -1 : 1);
-			vs[1].x = ROUND_2_INT((1.0 + vs[1].x / vs[1].w) * 0.5 * width) * ((vs[1].z < 0) ? -1 : 1);
-			vs[1].y = ROUND_2_INT((1.0 + vs[1].y / vs[1].w) * 0.5 * height) * ((vs[1].z < 0) ? -1 : 1);
-			vs[2].x = ROUND_2_INT((1.0 + vs[2].x / vs[2].w) * 0.5 * width) * ((vs[2].z < 0) ? -1 : 1);
-			vs[2].y = ROUND_2_INT((1.0 + vs[2].y / vs[2].w) * 0.5 * height) * ((vs[2].z < 0) ? -1 : 1);
-			vs[3].x = ROUND_2_INT((1.0 + vs[3].x / vs[3].w) * 0.5 * width) * ((vs[3].z < 0) ? -1 : 1);
-			vs[3].y = ROUND_2_INT((1.0 + vs[3].y / vs[3].w) * 0.5 * height) * ((vs[3].z < 0) ? -1 : 1);
-			vs[4].x = ROUND_2_INT((1.0 + vs[4].x / vs[4].w) * 0.5 * width) * ((vs[4].z < 0) ? -1 : 1);
-			vs[4].y = ROUND_2_INT((1.0 + vs[4].y / vs[4].w) * 0.5 * height) * ((vs[4].z < 0) ? -1 : 1);
-			vs[5].x = ROUND_2_INT((1.0 + vs[5].x / vs[5].w) * 0.5 * width) * ((vs[5].z < 0) ? -1 : 1);
-			vs[5].y = ROUND_2_INT((1.0 + vs[5].y / vs[5].w) * 0.5 * height) * ((vs[5].z < 0) ? -1 : 1);
-			vs[6].x = ROUND_2_INT((1.0 + vs[6].x / vs[6].w) * 0.5 * width) * ((vs[6].z < 0) ? -1 : 1);
-			vs[6].y = ROUND_2_INT((1.0 + vs[6].y / vs[6].w) * 0.5 * height) * ((vs[6].z < 0) ? -1 : 1);
-			vs[7].x = ROUND_2_INT((1.0 + vs[7].x / vs[7].w) * 0.5 * width) * ((vs[7].z < 0) ? -1 : 1);
-			vs[7].y = ROUND_2_INT((1.0 + vs[7].y / vs[7].w) * 0.5 * height) * ((vs[7].z < 0) ? -1 : 1);
 
-			min = vec3(MIN(vs[0].x, MIN(vs[1].x, MIN(vs[2].x, MIN(vs[3].x, MIN(vs[4].x, MIN(vs[5].x, MIN(vs[6].x, vs[7].x))))))), MIN(vs[0].y, MIN(vs[1].y, MIN(vs[2].y, MIN(vs[3].y, MIN(vs[4].y, MIN(vs[5].y, MIN(vs[6].y, vs[7].y))))))), MIN(vs[0].z, MIN(vs[1].z, MIN(vs[2].z, MIN(vs[3].z, MIN(vs[4].z, MIN(vs[5].z, MIN(vs[6].z, vs[7].z))))))));
-			max = vec3(MAX(vs[0].x, MAX(vs[1].x, MAX(vs[2].x, MAX(vs[3].x, MAX(vs[4].x, MAX(vs[5].x, MAX(vs[6].x, vs[7].x))))))), MAX(vs[0].y, MAX(vs[1].y, MAX(vs[2].y, MAX(vs[3].y, MAX(vs[4].y, MAX(vs[5].y, MAX(vs[6].y, vs[7].y))))))), MAX(vs[0].z, MAX(vs[1].z, MAX(vs[2].z, MAX(vs[3].z, MAX(vs[4].z, MAX(vs[5].z, MAX(vs[6].z, vs[7].z))))))));
-			
-			if (min.x >= width || min.y >= height || max.x < 0 || max.y < 0 || (!children && min.z == 0) || max.z <= 0) {
+			allOutside = 0xFF, allInside = 0x00;
+
+			for (i = 0; i < 8; ++i) {
+				cc[i] = (((this->dot(0, vs[i]) < 0.0f) ? 0x01 : 0x00) |
+						 ((this->dot(1, vs[i]) < 0.0f) ? 0x02 : 0x00) |
+						 ((this->dot(2, vs[i]) < 0.0f) ? 0x04 : 0x00) |
+						 ((this->dot(3, vs[i]) < 0.0f) ? 0x08 : 0x00) |
+						 ((this->dot(4, vs[i]) < 0.0f) ? 0x10 : 0x00));
+
+				allOutside &= cc[i];
+				allInside |= cc[i];
+			}
+
+			DEBUG_LOG_RAW("Render", "status: %s", (allOutside != 0x00) ? "outside" : ((allInside == 0x00) ? "inside" : "mixed"));
+
+			if (allOutside != 0x00) {
 				return false;
 			}
 
-			bool draw = !children || ((max.x - min.x) < 2 && (max.y - min.y) < 2);
+			if (allInside == 0x00) {
+				for (i = 0; i < 8; ++i) {
+					cv[i] = vs[i];
+				}
 
-			min.x = MAX(min.x, 0);
-			min.y = MAX(min.y, 0);
-			max.x = MIN(max.x, width - 1);
-			max.y = MIN(max.y, height - 1);
+				k = 8;
+			}
+			else {
+				k = 0;
+
+				for (i = 0; i < 8; ++i) {
+					for (j = i + 1; j < 8; ++j) {
+						if ((i ^ j) != 0x01 && (i ^ j) != 0x02 && (i ^ j) != 0x04) {
+							continue;
+						}
+
+						if ((cc[i] & cc[j]) != 0x00) {
+							continue;
+						}
+
+						msk = cc[i] | cc[j];
+
+						if (msk == 0x00) {
+							cv[k++] = vs[i];
+							cv[k++] = vs[j];
+
+							continue;
+						}
+
+						olda = newa = 0.0;
+						m = 1;
+
+						for (x = 0; x < 5; ++x) {
+							if (msk & m) {
+								olda = this->dot(x, vs[i]);
+								newa = this->dot(x, vs[j]);
+								alpha = olda / (olda - newa);
+
+								if (cc[i] & m) {
+									if (olda < alpha) olda = alpha;
+								}
+								else {
+									if (newa > alpha) newa = alpha;
+								}
+
+								if (olda > newa) {
+									break;
+								}
+							}
+
+							m <<= 1;
+						}
+
+						if (x >= 6) {
+							if (cc[i]) {
+								cv[k++] = this->lerp(vs[i], vs[j], olda);
+							}
+
+							if (cc[j]) {
+								cv[k++] = this->lerp(vs[i], vs[j], newa);
+							}
+							else {
+								cv[k++] = vs[j];
+							}
+						}
+					}
+				}
+			}
+
+			min = vec2(width - 1, height - 1);
+			max = vec2(0, 0);
+
+			i = 0;
+
+			while (i < k) {
+				cv[i].x = ROUND_2_INT((1.0 + cv[i].x / cv[i].w) * 0.5 * (width - 1.0));
+				cv[i].y = ROUND_2_INT((1.0 + cv[0].y / cv[0].w) * 0.5 * (height - 1.0));
+
+				min.x = MIN(min.x, cv[i].x);
+				max.x = MAX(max.x, cv[i].x);
+				min.y = MIN(min.y, cv[i].y);
+				max.y = MAX(max.y, cv[i].y);
+
+				for (j = 0; j < i; ++j) {
+					if (cv[i].x == cv[j].x && cv[i].y == cv[j].y) {
+						for (j = i + 1; j < k; ++j) {
+							cv[j - 1] = cv[j];
+						}
+
+						k -= 1;
+						i -= 1;
+
+						break;
+					}
+				}
+
+				i += 1;
+			}
+
+			bool draw = !children || ((max.x - min.x) < 2 && (max.y - min.y) < 2);
 
 			if (!draw && ((max.x - min.x) * (max.y - min.y)) > drawCounter) {
 				return true;
@@ -447,94 +546,92 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 				return false;
 			}
 
-			for (i = 0; i < 7; ++i) {
-				for (j = 0; j < (7 - i); ++j) {
-					if (!(vs[j].x < vs[j+1].x || (vs[j].x == vs[j+1].x && vs[j].y < vs[j+1].y))) {
-						tmp = vs[j + 1];
-						vs[j + 1] = vs[j];
-						vs[j] = tmp;
+			for (i = 0; i < (k - 1); ++i) {
+				for (j = 0; j < (k - 1 - i); ++j) {
+					if (!(cv[j].x < cv[j+1].x || (cv[j].x == cv[j+1].x && cv[j].y < cv[j+1].y))) {
+						tmp = cv[j + 1];
+						cv[j + 1] = cv[j];
+						cv[j] = tmp;
 					}
 				}
 			}
 
+			x = k;
 			k = 0;
 			
-			for (i = 0; i < 8; i++) {
-				while (k >= 2 && ((ch[k - 1].x - ch[k - 2].x) * (vs[i].y - ch[k - 2].y) - (ch[k - 1].y - ch[k - 2].y) * (vs[i].x - ch[k - 2].x)) <= 0) k--;
+			for (i = 0; i < x; i++) {
+				while (k >= 2 && ((ch[k - 1].x - ch[k - 2].x) * (cv[i].y - ch[k - 2].y) - (ch[k - 1].y - ch[k - 2].y) * (cv[i].x - ch[k - 2].x)) <= 0) k--;
 
-				ch[k++] = vs[i];
+				ch[k++] = cv[i];
 			}
 			
-			for (i = 8 - 2, j = k + 1; i >= 0; i--) {
-				while (k >= j && ((ch[k - 1].x - ch[k - 2].x) * (vs[i].y - ch[k - 2].y) - (ch[k - 1].y - ch[k - 2].y) * (vs[i].x - ch[k - 2].x)) <= 0) k--;
+			for (i = x - 2, j = k + 1; i >= 0; i--) {
+				while (k >= j && ((ch[k - 1].x - ch[k - 2].x) * (cv[i].y - ch[k - 2].y) - (ch[k - 1].y - ch[k - 2].y) * (cv[i].x - ch[k - 2].x)) <= 0) k--;
 				
-				ch[k++] = vs[i];
+				ch[k++] = cv[i];
 			}
 			
 			k -= 1;
-			
-			bool c;
 
-			for (y = min.y; y <= max.y; ++y) {
-				if (sm[y] >= width) continue;
-
-				c = false;
-
-				for (sx = min.x; sx <= max.x; ++sx) {
-					if (mask[y * width + sx] == 0xFF) continue;
-
-					testCounter++;
-
-					for (i = 0, j = (k - 1); i < k; j = i++) {
-						if (((ch[i].y >= y) != (ch[j].y >= y)) && (sx <= (ch[j].x - ch[i].x) * (y - ch[i].y) / (ch[j].y - ch[i].y) + ch[i].x)) {
-							c = !c;
-						}
-					}
-
-					if (c) break;
-				}
-
-				if (!c) {
-					continue;
-				}
-				else if (!draw) {
-					return true;
-				}
-
-				c = false;
-				
-				for (ex = max.x; ex >= sx; --ex) {
-					if (mask[y * width + ex] == 0xFF) continue;
-					
-					testCounter++;
-					
-					for (i = 0, j = (k - 1); i < k; j = i++) {
-						if (((ch[i].y >= y) != (ch[j].y >= y)) && (ex <= (ch[j].x - ch[i].x) * (y - ch[i].y) / (ch[j].y - ch[i].y) + ch[i].x)) {
-							c = !c;
-						}
-					}
-					
-					if (c) break;
-				}
-				
-				for (x = sx; x <= ex; ++x) {
-					if (mask[y * width + x] != 0xFF) {
-						if (!draw) {
-							return true;
-						}
-
-						uint32_t mcol = ((buffer[y * width + x] == 0x00000000) ? colour : colourMix(buffer[y * width + x], colour));
-						
-						mask[y * width + x] = mcol & 0x000000FF;
-						buffer[y * width + x] = mcol;
-
-						sm[y] += ((mcol & 0x000000FF) == 255);
-
-						drawCounter++;
-					}
-				}
+			for (j = 0; j < k; ++j) {
+				if (ch[j].y == min.y) break;
 			}
 
+			i = (j + k - 1) % k;
+			j = (j + 1) % k;
+
+			di = vec2(ch[i].x - ch[(i + 1) % k].x, ch[i].y - ch[(i + 1) % k].y);
+			dj = vec2(ch[j].x - ch[(j + k - 1) % k].x, ch[j].y - ch[(j + k - 1) % k].y);
+
+			testCounter++;
+			
+			for (y = min.y; y <= max.y; ++y) {
+				if (sm[y] < width && ((ch[i].y >= y) != (ch[(i + 1) % k].y >= y)) && ((ch[j].y >= y) != (ch[(j + k - 1) % k].y >= y))) {
+					rx.x = ((di.y == 0.0) ? ch[i].x : (ch[(i + 1) % k].x + (y - ch[(i + 1) % k].y) * di.x / di.y));
+					rx.y = ((dj.y == 0.0) ? ch[j].x : (ch[(j + k - 1) % k].x + (y - ch[(j + k - 1) % k].y) * dj.x / dj.y));
+
+					testCounter += 2;
+
+					if (rx.y < rx.x) {
+						sx = (uint16_t)MAX(CEILH(rx.y), 0);
+						ex = (uint16_t)MIN(floor(rx.x), width - 1.0);
+					}
+					else {
+						sx = (uint16_t)MAX(CEILH(rx.x), 0);
+						ex = (uint16_t)MIN(floor(rx.y), width - 1.0);
+					}
+					
+					for (x = sx; x <= ex; ++x) {
+						if (mask[y * width + x] != 0xFF) {
+							if (!draw) {
+								return true;
+							}
+
+							mcol = ((buffer[y * width + x] == 0x00000000) ? colour : colourMix(buffer[y * width + x], colour));
+
+							mask[y * width + x] = mcol & 0x000000FF;
+							buffer[y * width + x] = mcol;
+
+							sm[y] += ((mcol & 0x000000FF) == 255);
+
+							drawCounter++;
+						}
+					}
+				}
+
+				if (ch[i].y == y) {
+					i = (i + k - 1) % k;
+
+					di = vec2(ch[i].x - ch[(i + 1) % k].x, ch[i].y - ch[(i + 1) % k].y);
+				}
+
+				if (ch[j].y == y) {
+					j = (j + 1) % k;
+
+					dj = vec2(ch[j].x - ch[(j + k - 1) % k].x, ch[j].y - ch[(j + k - 1) % k].y);
+				}
+			}
+			
 			return false;
 		};
 
@@ -664,4 +761,21 @@ void VoxelBuffer::updateColours(uint32_t index) {
 	}
 
 	buffer[index + 1] = colours[0];
+}
+
+float VoxelBuffer::dot(uint8_t plane, vec4& v) {
+	switch (plane) {
+		case 0: return v.x + v.w;
+		case 1: return -v.x + v.w;
+		case 2: return v.y + v.w;
+		case 3: return -v.y + v.w;
+		case 4: return v.z + v.w;
+		default: return 0.0f;
+	}
+}
+
+vec4 VoxelBuffer::lerp(vec4& a, vec4& b, float alpha) {
+	float aAlpha = 1.0f - alpha;
+
+	return vec4(aAlpha * a.x + alpha * b.x, aAlpha * a.y + alpha * b.y, aAlpha * a.z + alpha * b.z, aAlpha * a.w + alpha * b.w);
 }
