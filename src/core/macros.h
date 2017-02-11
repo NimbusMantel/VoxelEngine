@@ -10,3 +10,5 @@
 #define MAX(a, b) ((a < b) ? b : a)
 
 #define CEILH(c) (ceil(c) + ((c == ceil(c)) ? 1.0 : 0.0))
+
+#define CEILN(c) ((c == 0.0) ? 0.0 : CEILH(c))

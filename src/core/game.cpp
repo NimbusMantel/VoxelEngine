@@ -62,24 +62,24 @@ void axisTest() {
 	}
 
 	for (uint8_t i = 3; i < 17; i += 2) {
-		voxels.addVoxel(i, 1, 1, 1, VoxelBuffer::constructVoxel(0xFF0000FF));
-		voxels.addVoxel(i, -1, 1, 1, VoxelBuffer::constructVoxel(0xFF0000FF));
-		voxels.addVoxel(i, 1, -1, 1, VoxelBuffer::constructVoxel(0xFF0000FF));
-		voxels.addVoxel(i, -1, -1, 1, VoxelBuffer::constructVoxel(0xFF0000FF));
+		voxels.addVoxel(i, 1, 1, 1, VoxelBuffer::constructVoxel(0xFF000080));
+		voxels.addVoxel(i, -1, 1, 1, VoxelBuffer::constructVoxel(0xFF000080));
+		voxels.addVoxel(i, 1, -1, 1, VoxelBuffer::constructVoxel(0xFF000080));
+		voxels.addVoxel(i, -1, -1, 1, VoxelBuffer::constructVoxel(0xFF000080));
 	}
 	
 	for (uint8_t i = 3; i < 17; i += 2) {
-		voxels.addVoxel(1, i, 1, 1, VoxelBuffer::constructVoxel(0x00FF00FF));
-		voxels.addVoxel(-1, i, 1, 1, VoxelBuffer::constructVoxel(0x00FF00FF));
-		voxels.addVoxel(1, i, -1, 1, VoxelBuffer::constructVoxel(0x00FF00FF));
-		voxels.addVoxel(-1, i, -1, 1, VoxelBuffer::constructVoxel(0x00FF00FF));
+		voxels.addVoxel(1, i, 1, 1, VoxelBuffer::constructVoxel(0x00FF0080));
+		voxels.addVoxel(-1, i, 1, 1, VoxelBuffer::constructVoxel(0x00FF0080));
+		voxels.addVoxel(1, i, -1, 1, VoxelBuffer::constructVoxel(0x00FF0080));
+		voxels.addVoxel(-1, i, -1, 1, VoxelBuffer::constructVoxel(0x00FF0080));
 	}
 
 	for (uint8_t i = 3; i < 17; i += 2) {
-		voxels.addVoxel(1, 1, i, 1, VoxelBuffer::constructVoxel(0x0000FFFF));
-		voxels.addVoxel(-1, 1, i, 1, VoxelBuffer::constructVoxel(0x0000FFFF));
-		voxels.addVoxel(1, -1, i, 1, VoxelBuffer::constructVoxel(0x0000FFFF));
-		voxels.addVoxel(-1, -1, i, 1, VoxelBuffer::constructVoxel(0x0000FFFF));
+		voxels.addVoxel(1, 1, i, 1, VoxelBuffer::constructVoxel(0x0000FF80));
+		voxels.addVoxel(-1, 1, i, 1, VoxelBuffer::constructVoxel(0x0000FF80));
+		voxels.addVoxel(1, -1, i, 1, VoxelBuffer::constructVoxel(0x0000FF80));
+		voxels.addVoxel(-1, -1, i, 1, VoxelBuffer::constructVoxel(0x0000FF80));
 	}
 }
 
@@ -94,10 +94,6 @@ void transparencyTest() {
 	voxels.addVoxel(1, 1, 1, 1, VoxelBuffer::constructVoxel(0x00000020));
 }
 
-void cubeTest() {
-	//voxels.addVoxel(-1, 1, 1, 1, VoxelBuffer::constructVoxel(0xFFFFFFFF));
-}
-
 void on_init(int w, int h, uint32_t* b, uint8_t* m) {
 	width = w;
 	height = h;
@@ -106,7 +102,7 @@ void on_init(int w, int h, uint32_t* b, uint8_t* m) {
 
 	camera = Camera(voxels.getRenderFunction(width, height, 70, buffer, mask));
 
-	cubeTest();
+	axisTest();//transparencyTest();
 }
 
 void on_update(float dt) {
