@@ -20,7 +20,7 @@ VoxelBuffer::VoxelBuffer() {
 	size = VOXEL_BUFFER_LENGTH;
 	
 	buffer[0] = 0xFFFF0000; // empty root voxel
-	buffer[1] = 0x00000000;
+	buffer[1] = 0x00000000; // empty root colour
 	buffer[2] = 0x0001FFFC; // parent header pointing to the root voxel
 
 	spots[3] = VOXEL_BUFFER_LENGTH - 3;
@@ -409,6 +409,10 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			// Check if the voxel is covered -> if so return false
 			// Draw the pixels if the voxel is smaller than a pixel or hasn't got any children
 			// Return whether the voxel hasn't been drawn
+
+			// Bugs: - Disappearing cubes
+			//		 - Aborting with depth
+			//		 - Early clipping
 			
 			vs[0] = ((mat4)perPro) * vec4(posX - size, posY - size, posZ - size, 1);
 			vs[1] = ((mat4)perPro) * vec4(posX + size, posY - size, posZ - size, 1);
@@ -422,11 +426,20 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			allOutside = 0xFF;
 
 			for (i = 0; i < 8; ++i) {
-				cc[i] = (((this->dot(0, vs[i]) < 0.0f) ? 0x01 : 0x00) |
-						 ((this->dot(1, vs[i]) < 0.0f) ? 0x02 : 0x00) |
-						 ((this->dot(2, vs[i]) < 0.0f) ? 0x04 : 0x00) |
-						 ((this->dot(3, vs[i]) < 0.0f) ? 0x08 : 0x00) |
-						 ((this->dot(4, vs[i]) < 0.0f) ? 0x10 : 0x00));
+				if (this->dot(4, vs[i]) < 0.0f) {
+					cc[i] = (((vs[i].x < -1.0f) ? 0x01 : 0x00) |
+							 ((vs[i].x > 1.0f) ? 0x02 : 0x00) |
+							 ((vs[i].y < -1.0f) ? 0x04 : 0x00) |
+							 ((vs[i].y > 1.0f) ? 0x08 : 0x00) |
+							 (0x10));
+				}
+				else {
+					cc[i] = (((vs[i].x < -vs[i].w) ? 0x01 : 0x00) |
+							 ((vs[i].x > vs[i].w) ? 0x02 : 0x00) |
+							 ((vs[i].y < -vs[i].w) ? 0x04 : 0x00) |
+							 ((vs[i].y > vs[i].w) ? 0x08 : 0x00) |
+							 (0x00));
+				}
 
 				allOutside &= cc[i];
 			}
@@ -435,34 +448,37 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 				return false;
 			}
 
-			if (children) {
-				return true;
-			}
-
 			k = 0;
 
 			msk = 0x00;
 
-			// Bugs: - Disappearing cubes
-			//		 - Aborting with objects behind
-			//		 - Corner rendering
-
 			for (i = 0; i < 8; ++i) {
 				if (cc[i] == 0x00) {
 					cv[k++] = vs[i];
-
+					
 					continue;
 				}
 
-				for (m = 0x01; m <= 0x04; m <<= 1) {
-					if (cc[i ^ m] == 0x00) {
-						y = 0x01;
+				for (m = i ^ 0x01; (m ^ i) <= 0x04; m = i ^ ((m ^ i) << 1)) {
+					if (cc[m] == 0x00) {
+						tmp = vs[i];
+
+						if (cc[i] & 0x10) {
+							frma = this->dot(4, tmp);
+							dsta = this->dot(4, vs[m]);
+							rela = frma / (frma - dsta);
+
+							tmp = this->lerp(tmp, vs[m], rela);
+						}
+
 						resa = 0.0f;
 
-						for (x = 0; x < 5; ++x) {
+						y = 0x01;
+
+						for (x = 0; x < 4; ++x) {
 							if (cc[i] & y) {
-								frma = this->dot(x, vs[i]);
-								dsta = this->dot(x, vs[i ^ m]);
+								frma = this->dot(x, tmp);
+								dsta = this->dot(x, vs[m]);
 								rela = frma / (frma - dsta);
 
 								if (resa < rela) resa = rela;
@@ -470,78 +486,110 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 
 							y <<= 1;
 						}
+						
+						cv[k++] = this->lerp(tmp, vs[m], resa);
 
-						cv[k++] = this->lerp(vs[i], vs[i ^ m], resa);
+						if (cc[i] & 0xEF) {
+							tmp = cv[k - 1];
 
+							y = (((fabs(this->dot(0, tmp)) < M_EPSILON) ? 0x01 : 0x00) |
+								((fabs(this->dot(1, tmp)) < M_EPSILON) ? 0x02 : 0x00) |
+								((fabs(this->dot(2, tmp)) < M_EPSILON) ? 0x04 : 0x00) |
+								((fabs(this->dot(3, tmp)) < M_EPSILON) ? 0x08 : 0x00));
+
+							switch (cc[i] & 0xEF) {
+								case 0x05: msk |= ((((y & 0x05) == 0x01) ? 0x80 : 0x00) | (((y & 0x05) == 0x04) ? 0x01 : 0x00)); break; // ld
+								case 0x06: msk |= ((((y & 0x06) == 0x02) ? 0x40 : 0x00) | (((y & 0x06) == 0x04) ? 0x20 : 0x00)); break; // rd
+								case 0x09: msk |= ((((y & 0x09) == 0x01) ? 0x04 : 0x00) | (((y & 0x09) == 0x08) ? 0x02 : 0x00)); break; // lu
+								case 0x0A: msk |= ((((y & 0x0A) == 0x02) ? 0x08 : 0x00) | (((y & 0x0A) == 0x08) ? 0x10 : 0x00)); break; // ru
+							}
+						}
+						
 						continue;
 					}
 
-					if ((cc[i] & cc[i ^ m]) != 0x00) {
-						switch (cc[i] & 0xF7) {
-							case 0x05: msk |= ((cc[i ^ m] & 0x01) | (cc[i ^ m] & 0x04) << 5); break; // ld
-							case 0x06: msk |= ((cc[i ^ m] & 0x02) << 4 | (cc[i ^ m] & 0x04) << 4); break; // rd
-							case 0x09: msk |= ((cc[i ^ m] & 0x01) << 1 | (cc[i ^ m] & 0x08) >> 1); break; // lu
-							case 0x0A: msk |= ((cc[i ^ m] & 0x02) << 3 | (cc[i ^ m] & 0x08)); break; // ru
+					if ((cc[i] & cc[m] & 0xEF) != 0x00) {
+						switch (cc[i] & 0xEF) {
+							case 0x05: msk |= ((cc[m] & 0x01) | (cc[m] & 0x04) << 5); break; // ld
+							case 0x06: msk |= ((cc[m] & 0x02) << 4 | (cc[m] & 0x04) << 4); break; // rd
+							case 0x09: msk |= ((cc[m] & 0x01) << 1 | (cc[m] & 0x08) >> 1); break; // lu
+							case 0x0A: msk |= ((cc[m] & 0x02) << 3 | (cc[m] & 0x08)); break; // ru
 						}
 
 						continue;
 					}
-					
-					for (x = 0; x < 5; ++x) {
-						y = 1;
 
-						if (cc[i] & y) {
-							frma = this->dot(y, vs[i]);
-							dsta = this->dot(y, vs[i ^ m]);
-							rela = frma / (frma - dsta);
+					tmp = vs[i];
 
-							if (frma < rela) frma = rela;
+					if (cc[i] & 0x10) {
+						frma = this->dot(4, tmp);
+						dsta = this->dot(4, vs[m]);
+						rela = frma / (frma - dsta);
 
-							if (frma > dsta) break;
-						}
-
-						y <<= 1;
+						tmp = this->lerp(tmp, vs[m], rela);
 					}
 
-					if (x < 5) {
+					if (!(cc[i] & cc[m] & 0x10)) {
+						resa = 0.0f;
+
+						y = 0x01;
+
+						for (x = 0; x < 4; ++x) {
+							if (cc[i] & y) {
+								frma = this->dot(x, tmp);
+								dsta = this->dot(x, vs[m]);
+								rela = frma / (frma - dsta);
+
+								if (frma > dsta) break;
+
+								if (resa < rela) resa = rela;
+							}
+
+							y <<= 1;
+						}
+					}
+
+					if ((cc[i] & cc[m] & 0x10) || x < 4) {
 						if (cc[i] & 0x01) {
-							if (cc[i ^ m] & 0x04) {
+							if (cc[m] & 0x04) {
 								msk |= 0x81;
 							}
-							else if (cc[i ^ m] & 0x08) {
+							else if (cc[m] & 0x08) {
 								msk |= 0x06;
 							}
 						}
 						else if (cc[i] & 0x02) {
-							if (cc[i ^ m] & 0x04) {
+							if (cc[m] & 0x04) {
 								msk |= 0x60;
 							}
-							else if (cc[i ^ m] & 0x08) {
+							else if (cc[m] & 0x08) {
 								msk |= 0x18;
 							}
 						}
 						else if (cc[i] & 0x04) {
-							if (cc[i ^ m] & 0x01) {
+							if (cc[m] & 0x01) {
 								msk |= 0x81;
 							}
-							else if (cc[i ^ m] & 0x02) {
+							else if (cc[m] & 0x02) {
 								msk |= 0x60;
 							}
 						}
 						else if (cc[i] & 0x08) {
-							if (cc[i ^ m] & 0x01) {
+							if (cc[m] & 0x01) {
 								msk |= 0x06;
 							}
-							else if (cc[i ^ m] & 0x02) {
+							else if (cc[m] & 0x02) {
 								msk |= 0x18;
 							}
 						}
 					}
 					else {
-						cv[k++] = this->lerp(vs[i], vs[i ^ m], frma);
+						cv[k++] = this->lerp(vs[i], vs[m], resa);
 					}
 				}
 			}
+
+			//DEBUG_LOG_RAW("Mask", "%s", std::bitset<8>(msk).to_string().c_str());
 
 			if ((msk & 0x81) == 0x81) {
 				cv[k++] = vec4(-1, -1, 1, 1);
@@ -562,7 +610,9 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			for (i = 0; i < k; ++i) {
 				cv[i].x = ROUND_2_INT((1.0 + cv[i].x / cv[i].w) * 0.5 * (width - 1.0));
 				cv[i].y = ROUND_2_INT((1.0 + cv[i].y / cv[i].w) * 0.5 * (height - 1.0));
-				
+
+				//DEBUG_LOG_RAW("Render", "(%d|%d)", (int)cv[i].x, (int)cv[i].y);
+
 				min.x = MIN(min.x, cv[i].x);
 				max.x = MAX(max.x, cv[i].x);
 				min.y = MIN(min.y, cv[i].y);
@@ -797,6 +847,8 @@ void VoxelBuffer::updateColours(uint32_t index) {
 }
 
 float VoxelBuffer::dot(uint8_t plane, vec4& v) {
+	// v.w has to be positive
+	
 	switch (plane) {
 		case 0: return v.x + v.w;
 		case 1: return -v.x + v.w;

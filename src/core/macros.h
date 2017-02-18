@@ -1,6 +1,7 @@
 #pragma once
 
 #include <math.h>
+#include <limits>
 
 //#define M_PI 3.14159265359
 
@@ -12,3 +13,5 @@
 #define CEILH(c) (ceil(c) + ((c == ceil(c)) ? 1.0 : 0.0))
 
 #define CEILN(c) ((c == 0.0) ? 0.0 : CEILH(c))
+
+#define M_EPSILON std::numeric_limits<float>::epsilon()

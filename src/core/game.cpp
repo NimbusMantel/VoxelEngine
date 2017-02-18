@@ -102,7 +102,7 @@ void on_init(int w, int h, uint32_t* b, uint8_t* m) {
 
 	camera = Camera(voxels.getRenderFunction(width, height, 70, buffer, mask));
 
-	axisTest();//transparencyTest();
+	transparencyTest();
 }
 
 void on_update(float dt) {

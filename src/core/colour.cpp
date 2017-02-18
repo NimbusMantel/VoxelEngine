@@ -27,9 +27,9 @@ uint32_t colourMix(uint32_t colA, uint32_t colB) {
 	float alpA = (colA & 0x000000FF) / 255.0f;
 	float alpB = (colB & 0x000000FF) / 255.0f;
 
-	if (alpA == 0.0f && alpB > 0.0f) return colB;
-	if (alpB == 0.0f && alpA > 0.0f) return colA;
-	if (alpA == 0.0f && alpB == 0.0f) return 0x0;
+	if (alpA < M_EPSILON && alpB > M_EPSILON) return colB;
+	if (alpB < M_EPSILON && alpA > M_EPSILON) return colA;
+	if (alpA < M_EPSILON && alpB < M_EPSILON) return 0x0;
 
 	col hwbA = col((colA & 0x7FC00000) >> 22, ((colA & 0x003F8000) >> 15) / 127.0f, ((colA & 0x00007F00) >> 8) / 127.0f);
 	col hwbB = col((colB & 0x7FC00000) >> 22, ((colB & 0x003F8000) >> 15) / 127.0f, ((colB & 0x00007F00) >> 8) / 127.0f);
