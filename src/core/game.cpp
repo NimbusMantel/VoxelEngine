@@ -135,5 +135,5 @@ void on_touch_up(int x, int y) {
 }
 
 void on_mouse_scroll(int x, int y) {
-	distance = MAX(distance + y, 0);
+	distance = MAX(distance + y / 10.0, 0.1);
 }

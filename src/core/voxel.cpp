@@ -377,8 +377,8 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 
 	uint8_t allOutside;
 
-	float frma, dsta, rela, resa;
-	uint8_t msk, m;
+	float frma, dsta, afrm, adst;
+	uint8_t msk, m, unm, cmb;
 
 	uint8_t* sm = (uint8_t*)malloc(sizeof(uint8_t) * height);
 
@@ -389,7 +389,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 
 	int8_t i, j, k;
 
-	vec4 tmp;
+	vec4 tmpI, tmpM, tmp;
 
 	bool c, draw;
 
@@ -399,20 +399,20 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 
 	uint32_t mcol;
 	
-	return [this, perMat, width, height, ar, vs, cc, cv, &allOutside, &frma, &dsta, &rela, &resa, &msk, &m, ch, buffer, mask, sm, &perPro, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmp, &c, &draw, &sx, &ex, &x, &y, &di, &dj, &rx, &mcol](mat4 cm) {
+	return [this, perMat, width, height, ar, vs, cc, cv, &allOutside, &frma, &dsta, &afrm, &adst, &msk, &m, &unm, &cmb, ch, buffer, mask, sm, &perPro, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmpI, &tmpM, &tmp, &c, &draw, &sx, &ex, &x, &y, &di, &dj, &rx, &mcol](mat4 cm) {
 		perPro = ((mat4)perMat) * cm.inverse();
 
 		drawCounter = testCounter = 0;
 		
-		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [this, perPro, width, height, ar, vs, cc, cv, &allOutside, &frma, &dsta, &rela, &resa, &msk, &m, ch, buffer, mask, sm, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmp, &c, &draw, &sx, &ex, &x, &y, &di, &dj, &rx, &mcol](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
+		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [this, perPro, width, height, ar, vs, cc, cv, &allOutside, &frma, &dsta, &afrm, &adst, &msk, &m, &unm, &cmb, ch, buffer, mask, sm, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmpI, &tmpM, &tmp, &c, &draw, &sx, &ex, &x, &y, &di, &dj, &rx, &mcol](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
 			// Project the voxel vertices into screen space -> if all of them are off return false
 			// Check if the voxel is covered -> if so return false
 			// Draw the pixels if the voxel is smaller than a pixel or hasn't got any children
 			// Return whether the voxel hasn't been drawn
 
 			// Bugs: - Disappearing cubes
-			//		 - Aborting with depth
-			//		 - Early clipping
+			//		 - Aborting behind the camera
+			//		 - Corner filling
 			
 			vs[0] = ((mat4)perPro) * vec4(posX - size, posY - size, posZ - size, 1);
 			vs[1] = ((mat4)perPro) * vec4(posX + size, posY - size, posZ - size, 1);
@@ -427,14 +427,14 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 
 			for (i = 0; i < 8; ++i) {
 				if (this->dot(4, vs[i]) < 0.0f) {
-					cc[i] = (((vs[i].x < -1.0f) ? 0x01 : 0x00) |
-							 ((vs[i].x > 1.0f) ? 0x02 : 0x00) |
-							 ((vs[i].y < -1.0f) ? 0x04 : 0x00) |
-							 ((vs[i].y > 1.0f) ? 0x08 : 0x00) |
+					cc[i] = (((vs[i].x < -M_EPSILON) ? 0x01 : 0x00) | // Clipping mask for a vertex behind the camera
+							 ((vs[i].x > M_EPSILON) ? 0x02 : 0x00) |
+							 ((vs[i].y < -M_EPSILON) ? 0x04 : 0x00) |
+							 ((vs[i].y > M_EPSILON) ? 0x08 : 0x00) |
 							 (0x10));
 				}
 				else {
-					cc[i] = (((vs[i].x < -vs[i].w) ? 0x01 : 0x00) |
+					cc[i] = (((vs[i].x < -vs[i].w) ? 0x01 : 0x00) | // Clipping mask for a vertex in front of the camera
 							 ((vs[i].x > vs[i].w) ? 0x02 : 0x00) |
 							 ((vs[i].y < -vs[i].w) ? 0x04 : 0x00) |
 							 ((vs[i].y > vs[i].w) ? 0x08 : 0x00) |
@@ -445,163 +445,169 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			}
 
 			if (allOutside != 0x00) {
-				return false;
+				return false; // Trivial reject if all vertices are outside
 			}
 
 			k = 0;
 
 			msk = 0x00;
 
-			for (i = 0; i < 8; ++i) {
-				if (cc[i] == 0x00) {
+			unm = 0x00;
+			cmb = 0x00;
+
+			for (i = 0x00; i != 0x04; ++i) {
+				i = (i & 0xFB) | (((i & 0x01) ^ ((i & 0x02) >> 1)) << 2); // Count up the four independent vertices 0, 5, 6, 3
+
+				if (cc[i] == 0x00) { // Trivial accept of vertex in view
 					cv[k++] = vs[i];
-					
-					continue;
 				}
 
-				for (m = i ^ 0x01; (m ^ i) <= 0x04; m = i ^ ((m ^ i) << 1)) {
-					if (cc[m] == 0x00) {
-						tmp = vs[i];
-
-						if (cc[i] & 0x10) {
-							frma = this->dot(4, tmp);
-							dsta = this->dot(4, vs[m]);
-							rela = frma / (frma - dsta);
-
-							tmp = this->lerp(tmp, vs[m], rela);
+				for (m = i ^ 0x01; (m ^ i) <= 0x04; m = i ^ ((m ^ i) << 1)) { // Count up the three adjacent vertices i ^ 0x01, i ^ 0x02, i ^ 0x04
+					if ((cc[i] & cc[m] & 0xEF) != 0x00) { // Parallel edge in 2d space
+						for (x = 0; x < 2; ++x) { // Corner mask check on both vertices of the line
+							switch (cc[x ? i : m] & 0xEF) {
+								case 0x05: msk |= ((cc[x ? m : i] & 0x01) | (cc[x ? m : i] & 0x04) << 5); break; // ld
+								case 0x06: msk |= ((cc[x ? m : i] & 0x02) << 4 | (cc[x ? m : i] & 0x04) << 4); break; // rd
+								case 0x09: msk |= ((cc[x ? m : i] & 0x01) << 1 | (cc[x ? m : i] & 0x08) >> 1); break; // lu
+								case 0x0A: msk |= ((cc[x ? m : i] & 0x02) << 3 | (cc[x ? m : i] & 0x08)); break; // ru
+							}
 						}
 
-						resa = 0.0f;
+						continue;
+					}
+					
+					if (cc[m] == 0x00 && (unm & (0x01 << (m & 0xFB))) == 0x00) { // Trivial accept of vertex in view - if not already found
+						cv[k++] = vs[m];
+						
+						unm |= (0x01 << (m & 0xFB));
+					}
+
+					cmb = cc[i] | cc[m];
+
+					if (cmb == 0x00) { // Trivial continue if both vertices are in view
+						continue;
+					}
+
+					if (!(cc[i] & cc[m] & 0x10)) { // At least one vertex is in front of the camera
+						tmpI = vs[i];
+						tmpM = vs[m];
+
+						if (cc[i] & 0x10) { // Near plane clipping
+							frma = this->dot(4, tmpI);
+							dsta = this->dot(4, tmpM);
+							
+							tmpI = this->lerp(tmpI, tmpM, frma / (frma - dsta));
+						}
+
+						if (cc[m] & 0x10) { // Near plane clipping
+							frma = this->dot(4, tmpM);
+							dsta = this->dot(4, tmpI);
+							
+							tmpM = this->lerp(tmpM, tmpI, frma / (frma - dsta));
+						}
+
+						afrm = adst = 0.0f;
 
 						y = 0x01;
 
-						for (x = 0; x < 4; ++x) {
-							if (cc[i] & y) {
-								frma = this->dot(x, tmp);
-								dsta = this->dot(x, vs[m]);
-								rela = frma / (frma - dsta);
+						for (x = 0; x < 4; ++x) { // Clipping on all four 2d clipping planes
+							if (cmb & y) {
+								frma = this->dot(x, tmpI);
+								dsta = this->dot(x, tmpM);
 
-								if (resa < rela) resa = rela;
+								if (cc[i] & y) {
+									afrm = MAX(afrm, frma / (frma - dsta)); // Clipping of the i vertex
+								}
+								else {
+									adst = MAX(adst, dsta / (dsta - frma)); // Clipping of the m vertex
+								}
+
+								if ((afrm + adst) > 1.0f) break; // Break if the line intersects two planes but is outside
 							}
 
 							y <<= 1;
+ 						}
+					}
+
+					if ((cc[i] & cc[m] & 0x10) || x < 4) { // Both vertices are behind the camera or the line is outside
+						if (cc[i] & 0x01) { // Corner mask check on the line
+							if (cc[m] & 0x04) {
+								msk |= 0x81; // ld
+							}
+							else if (cc[m] & 0x08) {
+								msk |= 0x06; // lu
+							}
 						}
-						
-						cv[k++] = this->lerp(tmp, vs[m], resa);
+						else if (cc[i] & 0x02) {
+							if (cc[m] & 0x04) {
+								msk |= 0x60; // rd
+							}
+							else if (cc[m] & 0x08) {
+								msk |= 0x18; // ru
+							}
+						}
+						else if (cc[i] & 0x04) {
+							if (cc[m] & 0x01) {
+								msk |= 0x81; // ld
+							}
+							else if (cc[m] & 0x02) {
+								msk |= 0x60; // rd
+							}
+						}
+						else if (cc[i] & 0x08) {
+							if (cc[m] & 0x01) {
+								msk |= 0x06; // lu
+							}
+							else if (cc[m] & 0x02) {
+								msk |= 0x18; // ru
+							}
+						}
 
-						if (cc[i] & 0xEF) {
-							tmp = cv[k - 1];
+						continue;
+					}
+					else { // Clipping of the vertices
+						if (cc[i]) {
+							cv[k++] = this->lerp(tmpI, tmpM, afrm); // Clipping of the i vertex
+						}
 
-							y = (((fabs(this->dot(0, tmp)) < M_EPSILON) ? 0x01 : 0x00) |
-								((fabs(this->dot(1, tmp)) < M_EPSILON) ? 0x02 : 0x00) |
-								((fabs(this->dot(2, tmp)) < M_EPSILON) ? 0x04 : 0x00) |
-								((fabs(this->dot(3, tmp)) < M_EPSILON) ? 0x08 : 0x00));
+						if (cc[m]) {
+							cv[k++] = this->lerp(tmpM, tmpI, adst); // Clipping of the m vertex
+						}
 
-							switch (cc[i] & 0xEF) {
+						for (x = 0; x < (bool(cc[i]) + bool(cc[m])); ++x) { // Corner mask check on the clipped vertex/vertices
+							tmp = cv[k - x];
+
+							y = (((fabs(this->dot(0, tmp)) < M_EPSILON) ? 0x01 : 0x00) | // Mask for the clipped vertex
+								 ((fabs(this->dot(1, tmp)) < M_EPSILON) ? 0x02 : 0x00) |
+								 ((fabs(this->dot(2, tmp)) < M_EPSILON) ? 0x04 : 0x00) |
+								 ((fabs(this->dot(3, tmp)) < M_EPSILON) ? 0x08 : 0x00));
+
+							switch (cc[cc[m] ? (x ? i : m) : i] & 0xEF) {
 								case 0x05: msk |= ((((y & 0x05) == 0x01) ? 0x80 : 0x00) | (((y & 0x05) == 0x04) ? 0x01 : 0x00)); break; // ld
 								case 0x06: msk |= ((((y & 0x06) == 0x02) ? 0x40 : 0x00) | (((y & 0x06) == 0x04) ? 0x20 : 0x00)); break; // rd
 								case 0x09: msk |= ((((y & 0x09) == 0x01) ? 0x04 : 0x00) | (((y & 0x09) == 0x08) ? 0x02 : 0x00)); break; // lu
 								case 0x0A: msk |= ((((y & 0x0A) == 0x02) ? 0x08 : 0x00) | (((y & 0x0A) == 0x08) ? 0x10 : 0x00)); break; // ru
 							}
 						}
-						
-						continue;
-					}
-
-					if ((cc[i] & cc[m] & 0xEF) != 0x00) {
-						switch (cc[i] & 0xEF) {
-							case 0x05: msk |= ((cc[m] & 0x01) | (cc[m] & 0x04) << 5); break; // ld
-							case 0x06: msk |= ((cc[m] & 0x02) << 4 | (cc[m] & 0x04) << 4); break; // rd
-							case 0x09: msk |= ((cc[m] & 0x01) << 1 | (cc[m] & 0x08) >> 1); break; // lu
-							case 0x0A: msk |= ((cc[m] & 0x02) << 3 | (cc[m] & 0x08)); break; // ru
-						}
 
 						continue;
-					}
-
-					tmp = vs[i];
-
-					if (cc[i] & 0x10) {
-						frma = this->dot(4, tmp);
-						dsta = this->dot(4, vs[m]);
-						rela = frma / (frma - dsta);
-
-						tmp = this->lerp(tmp, vs[m], rela);
-					}
-
-					if (!(cc[i] & cc[m] & 0x10)) {
-						resa = 0.0f;
-
-						y = 0x01;
-
-						for (x = 0; x < 4; ++x) {
-							if (cc[i] & y) {
-								frma = this->dot(x, tmp);
-								dsta = this->dot(x, vs[m]);
-								rela = frma / (frma - dsta);
-
-								if (frma > dsta) break;
-
-								if (resa < rela) resa = rela;
-							}
-
-							y <<= 1;
-						}
-					}
-
-					if ((cc[i] & cc[m] & 0x10) || x < 4) {
-						if (cc[i] & 0x01) {
-							if (cc[m] & 0x04) {
-								msk |= 0x81;
-							}
-							else if (cc[m] & 0x08) {
-								msk |= 0x06;
-							}
-						}
-						else if (cc[i] & 0x02) {
-							if (cc[m] & 0x04) {
-								msk |= 0x60;
-							}
-							else if (cc[m] & 0x08) {
-								msk |= 0x18;
-							}
-						}
-						else if (cc[i] & 0x04) {
-							if (cc[m] & 0x01) {
-								msk |= 0x81;
-							}
-							else if (cc[m] & 0x02) {
-								msk |= 0x60;
-							}
-						}
-						else if (cc[i] & 0x08) {
-							if (cc[m] & 0x01) {
-								msk |= 0x06;
-							}
-							else if (cc[m] & 0x02) {
-								msk |= 0x18;
-							}
-						}
-					}
-					else {
-						cv[k++] = this->lerp(vs[i], vs[m], resa);
 					}
 				}
 			}
 
 			//DEBUG_LOG_RAW("Mask", "%s", std::bitset<8>(msk).to_string().c_str());
 
-			if ((msk & 0x81) == 0x81) {
-				cv[k++] = vec4(-1, -1, 1, 1);
+			if ((msk & 0x81) == 0x81) { // Addition of the found corner vertices
+				cv[k++] = vec4(-1, -1, 1, 1); // ld
 			}
 			if ((msk & 0x60) == 0x60) {
-				cv[k++] = vec4(1, -1, 1, 1);
+				cv[k++] = vec4(1, -1, 1, 1); // rd
 			}
 			if ((msk & 0x06) == 0x06) {
-				cv[k++] = vec4(-1, 1, 1, 1);
+				cv[k++] = vec4(-1, 1, 1, 1); // lu
 			}
 			if ((msk & 0x18) == 0x18) {
-				cv[k++] = vec4(1, 1, 1, 1);
+				cv[k++] = vec4(1, 1, 1, 1); // ru
 			}
 
 			min = vec2(width - 1, height - 1);
@@ -854,7 +860,7 @@ float VoxelBuffer::dot(uint8_t plane, vec4& v) {
 		case 1: return -v.x + v.w;
 		case 2: return v.y + v.w;
 		case 3: return -v.y + v.w;
-		case 4: return v.w - 1.0f;
+		case 4: return v.w - M_EPSILON;
 		default: return 0.0f;
 	}
 }

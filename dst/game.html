@@ -34,6 +34,8 @@
             document.exitPointerLock = (document.exitPointerLock || document.mozExitPointerLock || document.webkitExitPointerLock || document.msExitPointerLock);
             
             canvas.onmousedown = function() {
+                window.focus();
+                
                 canvas.requestPointerLock();
             }
             
