@@ -143,6 +143,7 @@ void update() {
 	currFrame = SDL_GetTicks();
 
 	input();
+
 	on_update((currFrame - prevFrame) / 1000.0f);
 
 	prevFrame = currFrame;

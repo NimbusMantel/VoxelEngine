@@ -410,10 +410,12 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			// Draw the pixels if the voxel is smaller than a pixel or hasn't got any children
 			// Return whether the voxel hasn't been drawn
 
-			// Bugs: - Disappearing cubes
-			//		 - Aborting behind the camera
-			//		 - Corner filling
+			// Bugs: - missing / wrongly placed corners
+			//		 - vanishing quarter (full zoom) - why do coordinates need to be clipped
+			//		 - aborting: Invalid function pointer '0' called with signature 'iiiiiiii'. Perhaps this is an invalid value (e.g. caused by calling a virtual method on a NULL pointer)? Or calling a function with an incorrect type, which will fail? (it is worth building your source files with -Werror (warnings are errors), as warnings can indicate undefined behavior which can cause this)
 			
+			// colour == 0x003F80FF
+
 			vs[0] = ((mat4)perPro) * vec4(posX - size, posY - size, posZ - size, 1);
 			vs[1] = ((mat4)perPro) * vec4(posX + size, posY - size, posZ - size, 1);
 			vs[2] = ((mat4)perPro) * vec4(posX - size, posY + size, posZ - size, 1);
@@ -426,7 +428,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			allOutside = 0xFF;
 
 			for (i = 0; i < 8; ++i) {
-				if (this->dot(4, vs[i]) < 0.0f) {
+				if (vs[i].w < M_EPSILON) {
 					cc[i] = (((vs[i].x < -M_EPSILON) ? 0x01 : 0x00) | // Clipping mask for a vertex behind the camera
 							 ((vs[i].x > M_EPSILON) ? 0x02 : 0x00) |
 							 ((vs[i].y < -M_EPSILON) ? 0x04 : 0x00) |
@@ -610,12 +612,12 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 				cv[k++] = vec4(1, 1, 1, 1); // ru
 			}
 
-			min = vec2(width - 1, height - 1);
-			max = vec2(0, 0);
+			min = vec2(width - 1.0, height - 1.0);
+			max = vec2(0.0, 0.0);
 
 			for (i = 0; i < k; ++i) {
-				cv[i].x = ROUND_2_INT((1.0 + cv[i].x / cv[i].w) * 0.5 * (width - 1.0));
-				cv[i].y = ROUND_2_INT((1.0 + cv[i].y / cv[i].w) * 0.5 * (height - 1.0));
+				cv[i].x = MIN(MAX(ROUND_2_INT((1.0 + cv[i].x / cv[i].w) * 0.5 * (width - 1.0)), 0.0), width - 1.0);
+				cv[i].y = MIN(MAX(ROUND_2_INT((1.0 + cv[i].y / cv[i].w) * 0.5 * (height - 1.0)), 0.0), height - 1.0);
 
 				//DEBUG_LOG_RAW("Render", "(%d|%d)", (int)cv[i].x, (int)cv[i].y);
 
@@ -625,7 +627,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 				max.y = MAX(max.y, cv[i].y);
 			}
 
-			bool draw = !children || ((max.x - min.x) < 2 && (max.y - min.y) < 2);
+			draw = !children || ((max.x - min.x) < 2 && (max.y - min.y) < 2);
 
 			if (!draw && ((max.x - min.x) * (max.y - min.y)) > drawCounter) {
 				return true;
@@ -673,9 +675,9 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			dj = vec2(ch[j].x - ch[(j + k - 1) % k].x, ch[j].y - ch[(j + k - 1) % k].y);
 
 			testCounter++;
-			
+
 			for (y = min.y; y <= max.y; ++y) {
-				if (sm[y] < width && ((ch[i].y >= y) != (ch[(i + 1) % k].y >= y)) && ((ch[j].y >= y) != (ch[(j + k - 1) % k].y >= y))) {
+				if (sm[y] < width && ((y == 0 && min.y == 0.0) || (((ch[i].y >= y) != (ch[(i + 1) % k].y >= y)) && ((ch[j].y >= y) != (ch[(j + k - 1) % k].y >= y))))) {
 					rx.x = ((di.y == 0.0) ? ch[i].x : (ch[(i + 1) % k].x + (y - ch[(i + 1) % k].y) * di.x / di.y));
 					rx.y = ((dj.y == 0.0) ? ch[j].x : (ch[(j + k - 1) % k].x + (y - ch[(j + k - 1) % k].y) * dj.x / dj.y));
 
@@ -689,7 +691,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 						sx = (uint16_t)MAX(CEILN(rx.x), 0.0);
 						ex = (uint16_t)MIN(floor(rx.y), width - 1.0);
 					}
-					
+
 					for (x = sx; x <= ex; ++x) {
 						if (mask[y * width + x] != 0xFF) {
 							if (!draw) {
@@ -703,7 +705,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 
 							sm[y] += ((mcol & 0x000000FF) == 255);
 
-							drawCounter++;
+							drawCounter += ((mcol & 0x000000FF) == 255);
 						}
 					}
 				}
@@ -720,7 +722,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 					dj = vec2(ch[j].x - ch[(j + k - 1) % k].x, ch[j].y - ch[(j + k - 1) % k].y);
 				}
 			}
-			
+
 			return false;
 		};
 

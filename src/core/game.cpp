@@ -102,7 +102,7 @@ void on_init(int w, int h, uint32_t* b, uint8_t* m) {
 
 	camera = Camera(voxels.getRenderFunction(width, height, 70, buffer, mask));
 
-	transparencyTest();
+	monkeyTest();
 }
 
 void on_update(float dt) {
@@ -135,5 +135,5 @@ void on_touch_up(int x, int y) {
 }
 
 void on_mouse_scroll(int x, int y) {
-	distance = MAX(distance + y / 10.0, 0.1);
+	distance = MAX(distance + y / 10.0, 0.0);
 }

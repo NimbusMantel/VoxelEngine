@@ -4,6 +4,7 @@
 #include <limits>
 
 //#define M_PI 3.14159265359
+#define M_EPSILON std::numeric_limits<float>::epsilon()
 
 #define ROUND_2_INT(f) ((int)(f >= 0.0 ? (f + 0.5) : (f - 0.5)))
 
@@ -13,5 +14,3 @@
 #define CEILH(c) (ceil(c) + ((c == ceil(c)) ? 1.0 : 0.0))
 
 #define CEILN(c) ((c == 0.0) ? 0.0 : CEILH(c))
-
-#define M_EPSILON std::numeric_limits<float>::epsilon()
