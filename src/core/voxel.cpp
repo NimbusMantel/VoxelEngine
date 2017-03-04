@@ -377,7 +377,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 
 	uint8_t allOutside;
 
-	float frma, dsta, afrm, adst;
+	float frma, dsta, rela, afrm, adst;
 	uint8_t msk, m, unm, cmb;
 
 	uint8_t* sm = (uint8_t*)malloc(sizeof(uint8_t) * height);
@@ -399,12 +399,12 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 
 	uint32_t mcol;
 	
-	return [this, perMat, width, height, ar, vs, cc, cv, &allOutside, &frma, &dsta, &afrm, &adst, &msk, &m, &unm, &cmb, ch, buffer, mask, sm, &perPro, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmpI, &tmpM, &tmp, &c, &draw, &sx, &ex, &x, &y, &di, &dj, &rx, &mcol](mat4 cm) {
+	return [this, perMat, width, height, ar, vs, cc, cv, &allOutside, &frma, &dsta, &rela, &afrm, &adst, &msk, &m, &unm, &cmb, ch, buffer, mask, sm, &perPro, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmpI, &tmpM, &tmp, &c, &draw, &sx, &ex, &x, &y, &di, &dj, &rx, &mcol](mat4 cm) {
 		perPro = ((mat4)perMat) * cm.inverse();
 
 		drawCounter = testCounter = 0;
 		
-		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [this, perPro, width, height, ar, vs, cc, cv, &allOutside, &frma, &dsta, &afrm, &adst, &msk, &m, &unm, &cmb, ch, buffer, mask, sm, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmpI, &tmpM, &tmp, &c, &draw, &sx, &ex, &x, &y, &di, &dj, &rx, &mcol](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
+		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [this, perPro, width, height, ar, vs, cc, cv, &allOutside, &frma, &dsta, &rela, &afrm, &adst, &msk, &m, &unm, &cmb, ch, buffer, mask, sm, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmpI, &tmpM, &tmp, &c, &draw, &sx, &ex, &x, &y, &di, &dj, &rx, &mcol](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
 			// Project the voxel vertices into screen space -> if all of them are off return false
 			// Check if the voxel is covered -> if so return false
 			// Draw the pixels if the voxel is smaller than a pixel or hasn't got any children
@@ -510,6 +510,8 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 
 						afrm = adst = 0.0f;
 
+						sx = ex = 0x00;
+
 						y = 0x01;
 
 						for (x = 0; x < 4; ++x) { // Clipping on all four 2d clipping planes
@@ -518,10 +520,22 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 								dsta = this->dot(x, tmpM);
 
 								if (cc[i] & y) {
-									afrm = MAX(afrm, frma / (frma - dsta)); // Clipping of the i vertex
+									rela = frma / (frma - dsta);
+
+									if (rela > afrm) {
+										afrm = rela; // Clipping of the i vertex
+
+										sx = 0x01 << x;
+									}
 								}
 								else {
-									adst = MAX(adst, dsta / (dsta - frma)); // Clipping of the m vertex
+									rela = dsta / (dsta - frma);
+
+									if (rela > adst) {
+										adst = rela; // Clipping of the m vertex
+
+										ex = 0x01 << x;
+									}
 								}
 
 								if ((afrm + adst) > 1.0f) break; // Break if the line intersects two planes but is outside
@@ -576,15 +590,10 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 							cv[k++] = this->lerp(tmpM, tmpI, adst); // Clipping of the m vertex
 						}
 
-						for (x = 0; x < (bool(cc[i]) + bool(cc[m])); ++x) { // Corner mask check on the clipped vertex/vertices
-							tmp = cv[k - x];
+						for (x = 0; x < (bool(sx) + bool(ex)); ++x) { // Corner mask check on the clipped vertex/vertices
+							y = (ex ? (x ? sx : ex) : sx); // Mask for the clipped vertex
 
-							y = (((fabs(this->dot(0, tmp)) < M_EPSILON) ? 0x01 : 0x00) | // Mask for the clipped vertex
-								 ((fabs(this->dot(1, tmp)) < M_EPSILON) ? 0x02 : 0x00) |
-								 ((fabs(this->dot(2, tmp)) < M_EPSILON) ? 0x04 : 0x00) |
-								 ((fabs(this->dot(3, tmp)) < M_EPSILON) ? 0x08 : 0x00));
-
-							switch (cc[cc[m] ? (x ? i : m) : i] & 0xEF) {
+							switch (cc[ex ? (x ? i : m) : i] & 0xEF) {
 								case 0x05: msk |= ((((y & 0x05) == 0x01) ? 0x80 : 0x00) | (((y & 0x05) == 0x04) ? 0x01 : 0x00)); break; // ld
 								case 0x06: msk |= ((((y & 0x06) == 0x02) ? 0x40 : 0x00) | (((y & 0x06) == 0x04) ? 0x20 : 0x00)); break; // rd
 								case 0x09: msk |= ((((y & 0x09) == 0x01) ? 0x04 : 0x00) | (((y & 0x09) == 0x08) ? 0x02 : 0x00)); break; // lu
@@ -668,6 +677,19 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 				if (ch[j].y == min.y) break;
 			}
 
+			/*
+			for (i = 0; i < k; ++i) {
+				if (mask[(uint32_t)(ch[i].y * width + ch[i].x)] != 0xFF) {
+					mask[(uint32_t)(ch[i].y * width + ch[i].x)] = 0xFF;
+					buffer[(uint32_t)(ch[i].y * width + ch[i].x)] = 0x000000FF;
+
+					sm[(uint32_t)ch[i].y] += 1;
+
+					drawCounter += 1;
+				}
+			}
+			*/
+
 			i = (j + k - 1) % k;
 			j = (j + 1) % k;
 
@@ -698,14 +720,16 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 								return true;
 							}
 
-							mcol = ((buffer[y * width + x] == 0x00000000) ? colour : colourMix(buffer[y * width + x], colour));
+							mcol = ((buffer[y * width + x] == 0x00000000) ? colour : colourMix(buffer[y * width + x], colour, mask[y * width + x]));
 
-							mask[y * width + x] = mcol & 0x000000FF;
 							buffer[y * width + x] = mcol;
 
-							sm[y] += ((mcol & 0x000000FF) == 255);
+							if ((mcol & 0x000000FF) == 255) {
+								mask[y * width + x] = 0xFF;
 
-							drawCounter += ((mcol & 0x000000FF) == 255);
+								sm[y] ++;
+								drawCounter ++;
+							}
 						}
 					}
 				}
@@ -847,17 +871,17 @@ void VoxelBuffer::updateColours(uint32_t index) {
 		}
 	}
 
-	for (uint8_t i = 1; i < k; ++i) {
-		colours[0] = colourMix(colours[0], colours[i]);
+	uint8_t i = 1;
+
+	while (i < k) {
+		colours[0] = colourMix(colours[0], colours[i], i);
 	}
 
 	buffer[index + 1] = colours[0];
 }
 
 float VoxelBuffer::dot(uint8_t plane, vec4& v) {
-	// v.w has to be positive
-	
-	switch (plane) {
+	switch (plane) { // v.w is expected to be positive
 		case 0: return v.x + v.w;
 		case 1: return -v.x + v.w;
 		case 2: return v.y + v.w;

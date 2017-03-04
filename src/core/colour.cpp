@@ -3,9 +3,12 @@
 #include "platform_log.h"
 
 #include <math.h>
-#include <assert.h>
 
-// TO DO: Optimisation
+static uint32_t lastColA = 0x00000000;
+static uint32_t lastColB = 0x00000000;
+static uint32_t lastWeig = 0x00;
+static uint32_t lastColR = 0x00000000;
+static int16_t alp;
 
 uint32_t rgbaTOhwba(uint32_t rgba) {
 	if (!(rgba & 0x000000FF)) return 0x00000000;
@@ -23,27 +26,37 @@ uint32_t hwbaTOrgba(uint32_t hwba) {
 	return (((uint32_t)roundf(rgb.x) << 24) | ((uint32_t)roundf(rgb.y) << 16) | ((uint32_t)roundf(rgb.z) << 8) | (hwba & 0x000000FF));
 }
 
-uint32_t colourMix(uint32_t colA, uint32_t colB) {
-	float alpA = (colA & 0x000000FF) / 255.0f;
-	float alpB = (colB & 0x000000FF) / 255.0f;
+uint32_t colourMix(uint32_t colA, uint32_t colB, uint8_t& weight) {
+	weight |= !bool(weight);
 
-	if (alpA < M_EPSILON && alpB > M_EPSILON) return colB;
-	if (alpB < M_EPSILON && alpA > M_EPSILON) return colA;
-	if (alpA < M_EPSILON && alpB < M_EPSILON) return 0x0;
+	if (lastColA == colA && lastColB == colB && lastWeig == weight) {
+		weight += (weight < 0xFE);
 
-	col hwbA = col((colA & 0x7FC00000) >> 22, ((colA & 0x003F8000) >> 15) / 127.0f, ((colA & 0x00007F00) >> 8) / 127.0f);
-	col hwbB = col((colB & 0x7FC00000) >> 22, ((colB & 0x003F8000) >> 15) / 127.0f, ((colB & 0x00007F00) >> 8) / 127.0f);
+		return lastColR;
+	}
 
-	if (hwbA.y == 1.0f || hwbA.z == 1.0f) hwbA.x = hwbB.x;
-	else if (hwbB.y == 1.0f || hwbB.z == 1.0f) hwbB.x = hwbA.x;
-	else if ((hwbA.x - hwbB.x) > 180.0f) hwbB.x += 360.0f;
-	else if ((hwbA.x - hwbB.x) < -180.0f) hwbA.x += 360.0f;
+	lastColA = colA;
+	lastColB = colB;
+	lastWeig = weight;
 
-	float h = fmodf(hwbA.x + (hwbB.x - hwbA.x) * alpB / (alpA + alpB), 360.0f);
-	float w = hwbA.y + (hwbB.y - hwbA.y) * alpB / (alpA + alpB);
-	float b = hwbA.z + (hwbB.z - hwbA.z) * alpB / (alpA + alpB);
+	alp = ((((colA & 0x003F8000) >> 15) == 0x7F) || (((colA & 0x00007F00) >> 8) == 0x7F));
+	colA = (colA & 0x803FFFFF) | ((colB & 0x7FC00000) & -alp) | ((colA & 0x7FC00000) & ~(-alp));
 
-	return (((uint32_t)roundf(h) << 22) | ((uint32_t)roundf(w * 127.0f) << 15) | ((uint32_t)roundf(b * 127.0f) << 8) | (uint32_t)roundf((1.0f - (1.0f - alpA) * (1.0f - alpB)) * 255.0f));
+	alp = ((((colB & 0x003F8000) >> 15) == 0x7F) || (((colB & 0x00007F00) >> 8) == 0x7F));
+	colB = (colB & 0x803FFFFF) | ((colA & 0x7FC00000) & -alp) | ((colB & 0x7FC00000) & ~(-alp));
+
+	alp = ((colA & 0x7FC00000) >> 22) - ((colB & 0x7FC00000) >> 22);
+	alp = 0xB4 & -(((alp ^ (alp >> 15)) - (alp >> 15)) > 0xB4);
+	lastColR = (((((colB & 0x7FC00000) >> 22) + 0x0168 + (int32_t)(((((colA & 0x7FC00000) >> 22) + alp) % 0x0168) - ((((colB & 0x7FC00000) >> 22) + alp) % 0x0168)) * (int32_t)weight * (int32_t)(colA & 0xFF) / (int32_t)(weight * (colA & 0xFF) + (colB & 0xFF))) % 0x0168) << 22) & 0x7FC00000;
+
+	alp = 0x7F * weight * (colA & 0xFF) / (weight * (colA & 0xFF) + (colB & 0xFF));
+	lastColR |= (((((colA & 0x003F8000) >> 15) * (alp + 1) + ((colB & 0x003F8000) >> 15) * (0x7F - alp)) << 8) & 0x003F8000) |
+		(((((colA & 0x00007F00) >> 8) * (alp + 1) + ((colB & 0x00007F00) >> 8) * (0x7F - alp)) << 1) & 0x00007F00) |
+		((0xFF00 - ((0xFF - (colA & 0x000000FF)) * (0xFF - (colB & 0x000000FF)))) >> 8);
+
+	weight += (weight < 0xFE);
+
+	return lastColR;
 }
 
 col rgbTOhwb(col rgb) {
