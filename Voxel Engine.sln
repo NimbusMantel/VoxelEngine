@@ -1,9 +1,9 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 14
-VisualStudioVersion = 14.0.24720.0
+VisualStudioVersion = 14.0.25420.1
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Voxel Engine", "Voxel Engine.vcxproj", "{92759BAC-4B53-4502-AA6D-9C197A4CE41B}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Voxel Engine", "Voxel Engine.vcxproj", "{E99F5DFC-113A-4BC3-8253-90A6AC0C9A9D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -13,10 +13,14 @@ Global
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{92759BAC-4B53-4502-AA6D-9C197A4CE41B}.Debug|x64.ActiveCfg = Release|Win32
-		{92759BAC-4B53-4502-AA6D-9C197A4CE41B}.Debug|x86.ActiveCfg = Release|Win32
-		{92759BAC-4B53-4502-AA6D-9C197A4CE41B}.Release|x64.ActiveCfg = Release|Win32
-		{92759BAC-4B53-4502-AA6D-9C197A4CE41B}.Release|x86.ActiveCfg = Release|Win32
+		{E99F5DFC-113A-4BC3-8253-90A6AC0C9A9D}.Debug|x64.ActiveCfg = Debug|x64
+		{E99F5DFC-113A-4BC3-8253-90A6AC0C9A9D}.Debug|x64.Build.0 = Debug|x64
+		{E99F5DFC-113A-4BC3-8253-90A6AC0C9A9D}.Debug|x86.ActiveCfg = Debug|Win32
+		{E99F5DFC-113A-4BC3-8253-90A6AC0C9A9D}.Debug|x86.Build.0 = Debug|Win32
+		{E99F5DFC-113A-4BC3-8253-90A6AC0C9A9D}.Release|x64.ActiveCfg = Release|x64
+		{E99F5DFC-113A-4BC3-8253-90A6AC0C9A9D}.Release|x64.Build.0 = Release|x64
+		{E99F5DFC-113A-4BC3-8253-90A6AC0C9A9D}.Release|x86.ActiveCfg = Release|Win32
+		{E99F5DFC-113A-4BC3-8253-90A6AC0C9A9D}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
