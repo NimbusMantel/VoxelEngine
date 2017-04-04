@@ -1,0 +1,143 @@
+/*
+			for (i = 0; i < k; ++i) {
+				if (mask[(uint32_t)(ch[i].y * width + ch[i].x)] != 0xFF) {
+					mask[(uint32_t)(ch[i].y * width + ch[i].x)] = 0xFF;
+					buffer[(uint32_t)(ch[i].y * width + ch[i].x)] = 0x000000FF;
+
+					sm[(uint32_t)ch[i].y] += 1;
+
+					drawCounter += 1;
+				}
+			}
+			*/
+
+			//opaque = ((colour & 0x000000FF) == 0xFF);// || (max.x - min.x) <= 4 || (max.y - min.y) <= 4);
+
+			/*if (!opaque) {
+				vec4 mid = ((mat4)perPro) * vec4(posX, posY, posZ, 1);
+
+				if (mid.z < size) {
+					colour = ((colour & 0xFFFFFF00) | (uint32_t)ROUND_2_INT((colour & 0x000000FF) * 1.0 + ((mid.z - size) / (2.0 * mid.z))));
+				}
+
+				mx = MIN(MAX(ROUND_2_INT((1.0 + mid.x / mid.w) * 0.5 * (width - 1.0)), 0.0), width - 1.0);
+				my = MIN(MAX(ROUND_2_INT((1.0 + mid.y / mid.w) * 0.5 * (height - 1.0)), 0.0), height - 1.0);
+
+				for (j = 0; j < k; ++j) {
+					if (ch[j].x == min.x) break;
+				}
+
+				i = (j + k - 1) % k;
+				j = (j + 1) % k;
+
+				di = vec2(ch[i].x - ch[(i + 1) % k].x, ch[i].y - ch[(i + 1) % k].y);
+				dj = vec2(ch[j].x - ch[(j + k - 1) % k].x, ch[j].y - ch[(j + k - 1) % k].y);
+
+				testCounter++;
+
+				for (x = min.x; x <= max.x; ++x) {
+					if ((x == 0 && min.x == 0.0) || (((ch[i].x >= x) != (ch[(i + 1) % k].x >= x)) && ((ch[j].x >= x) != (ch[(j + k - 1) % k].x >= x)))) {
+						rx.x = ((di.x == 0.0) ? ch[i].y : (ch[(i + 1) % k].y + (x - ch[(i + 1) % k].x) * di.y / di.x));
+						rx.y = ((dj.x == 0.0) ? ch[j].y : (ch[(j + k - 1) % k].y + (x - ch[(j + k - 1) % k].x) * dj.y / dj.x));
+
+						testCounter += 2;
+
+						if (rx.y < rx.x) {
+							edg[x << 1] = (uint16_t)MAX(CEILN(rx.y), 0.0);
+							edg[(x << 1) + 1] = (uint16_t)MIN(floor(rx.x), height - 1.0);
+						}
+						else {
+							edg[x << 1] = (uint16_t)MAX(CEILN(rx.x), 0.0);
+							edg[(x << 1) + 1] = (uint16_t)MIN(floor(rx.y), height - 1.0);
+						}
+					}
+
+					if (ch[i].x == x) {
+						i = (i + k - 1) % k;
+
+						di = vec2(ch[i].x - ch[(i + 1) % k].x, ch[i].y - ch[(i + 1) % k].y);
+					}
+
+					if (ch[j].x == x) {
+						j = (j + 1) % k;
+
+						dj = vec2(ch[j].x - ch[(j + k - 1) % k].x, ch[j].y - ch[(j + k - 1) % k].y);
+					}
+				}
+			}*/
+
+			for (j = 0; j < k; ++j) {
+				if (ch[j].y == min.y) break;
+			}
+
+			i = (j + k - 1) % k;
+			j = (j + 1) % k;
+
+			di = vec2(ch[i].x - ch[(i + 1) % k].x, ch[i].y - ch[(i + 1) % k].y);
+			dj = vec2(ch[j].x - ch[(j + k - 1) % k].x, ch[j].y - ch[(j + k - 1) % k].y);
+
+			testCounter++;
+
+			for (y = min.y; y <= max.y; ++y) {
+				if (sm[y] < width && ((y == 0 && min.y == 0.0) || (((ch[i].y >= y) != (ch[(i + 1) % k].y >= y)) && ((ch[j].y >= y) != (ch[(j + k - 1) % k].y >= y))))) {
+					rx.x = ((di.y == 0.0) ? ch[i].x : (ch[(i + 1) % k].x + (y - ch[(i + 1) % k].y) * di.x / di.y));
+					rx.y = ((dj.y == 0.0) ? ch[j].x : (ch[(j + k - 1) % k].x + (y - ch[(j + k - 1) % k].y) * dj.x / dj.y));
+
+					testCounter += 2;
+
+					if (rx.y < rx.x) {
+						sx = (uint16_t)MAX(CEILN(rx.y), 0.0);
+						ex = (uint16_t)MIN(floor(rx.x), width - 1.0);
+					}
+					else {
+						sx = (uint16_t)MAX(CEILN(rx.x), 0.0);
+						ex = (uint16_t)MIN(floor(rx.y), width - 1.0);
+					}
+
+					//if (opaque) {
+						for (x = sx; x <= ex; ++x) {
+							if (mask[y * width + x] != 0xFF) {
+								if (!draw) {
+									return true;
+								}
+
+								mcol = ((buffer[y * width + x] == 0x00000000) ? colour : colourMix(buffer[y * width + x], colour, mask[y * width + x]));
+
+								buffer[y * width + x] = mcol;
+
+								if ((mcol & 0x000000FF) == 0xFF) {
+									mask[y * width + x] = 0xFF;
+
+									sm[y] ++;
+									drawCounter++;
+								}
+							}
+						}
+					/*}
+					else {
+						for (x = sx; x <= ex; ++x) {
+							if (mask[y * width + x] != 0xFF) {
+								if (!draw) {
+									return true;
+								}
+
+								gx = MAX(mx - sx, ex - mx) + 1;
+								gy = MAX(my - edg[x << 1], edg[(x << 1) + 1] - my) + 1;
+
+								dx = (((x - sx) & -(int16_t)(x < mx)) | ((ex - x) & ~(-(int16_t)(x < mx)))) + (gx - (((mx - sx) & -(int16_t)(x < mx)) | ((ex - mx) & ~(-(int16_t)(x < mx)))));
+								dy = (((y - edg[x << 1]) & -(int16_t)(y < my)) | ((edg[(x << 1) + 1] - y) & ~(-(int16_t)(y < my)))) + (gy - (((my - edg[x << 1]) & -(int16_t)(y < my)) | ((edg[(x << 1) + 1] - my) & ~(-(int16_t)(y < my)))));
+
+								mcol = colourMix(buffer[y * width + x], ((colour & 0xFFFFFF00) | ((colour & 0x000000FF) / 8 + (colour & 0x000000FF) * 7 * dx * dy / gx / gy / 8)), mask[y * width + x]);
+
+								buffer[y * width + x] = mcol;
+
+								if ((mcol & 0x000000FF) == 0xFF) {
+									mask[y * width + x] = 0xFF;
+
+									sm[y] ++;
+									drawCounter++;
+								}
+							}
+						}
+					}*/
+				}

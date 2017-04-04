@@ -15,6 +15,9 @@
 
 // close pointers are always relative, far pointers always absolute
 
+// Bugs: - short pointers can't point to far pointers
+//		 - no continuous transparency
+
 VoxelBuffer::VoxelBuffer() {
 	buffer = (uint32_t*)malloc(sizeof(uint32_t) * VOXEL_BUFFER_LENGTH);
 	size = VOXEL_BUFFER_LENGTH;
@@ -398,13 +401,19 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 	vec2 di, dj, rx;
 
 	uint32_t mcol;
+
+	uint16_t* edg = (uint16_t*)malloc(sizeof(uint16_t) * width * 2);
+
+	bool opaque;
+
+	uint16_t mx, my, dx, gx, dy, gy;
 	
-	return [this, perMat, width, height, ar, vs, cc, cv, &allOutside, &frma, &dsta, &rela, &afrm, &adst, &msk, &m, &unm, &cmb, ch, buffer, mask, sm, &perPro, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmpI, &tmpM, &tmp, &c, &draw, &sx, &ex, &x, &y, &di, &dj, &rx, &mcol](mat4 cm) {
+	return [this, perMat, width, height, ar, vs, cc, cv, &allOutside, &frma, &dsta, &rela, &afrm, &adst, &msk, &m, &unm, &cmb, ch, buffer, mask, sm, &perPro, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmpI, &tmpM, &tmp, &c, &draw, &sx, &ex, &x, &y, &di, &dj, &rx, &mcol, edg, &opaque, &mx, &my, &dx, &gx, &dy, &gy](mat4 cm) {
 		perPro = ((mat4)perMat) * cm.inverse();
 
 		drawCounter = testCounter = 0;
 		
-		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [this, perPro, width, height, ar, vs, cc, cv, &allOutside, &frma, &dsta, &rela, &afrm, &adst, &msk, &m, &unm, &cmb, ch, buffer, mask, sm, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmpI, &tmpM, &tmp, &c, &draw, &sx, &ex, &x, &y, &di, &dj, &rx, &mcol](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
+		std::function<bool(int16_t, int16_t, int16_t, uint16_t, uint32_t, bool)> render = [this, perPro, width, height, ar, vs, cc, cv, &allOutside, &frma, &dsta, &rela, &afrm, &adst, &msk, &m, &unm, &cmb, ch, buffer, mask, sm, &drawCounter, &testCounter, &min, &max, &i, &j, &k, &tmpI, &tmpM, &tmp, &c, &draw, &sx, &ex, &x, &y, &di, &dj, &rx, &mcol, edg, &opaque, &mx, &my, &dx, &gx, &dy, &gy](int16_t posX, int16_t posY, int16_t posZ, uint16_t size, uint32_t colour, bool children)->bool {
 			// Project the voxel vertices into screen space -> if all of them are off return false
 			// Check if the voxel is covered -> if so return false
 			// Draw the pixels if the voxel is smaller than a pixel or hasn't got any children
@@ -414,7 +423,7 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			//		 - vanishing quarter (full zoom) - why do coordinates need to be clipped
 			//		 - aborting: Invalid function pointer '0' called with signature 'iiiiiiii'. Perhaps this is an invalid value (e.g. caused by calling a virtual method on a NULL pointer)? Or calling a function with an incorrect type, which will fail? (it is worth building your source files with -Werror (warnings are errors), as warnings can indicate undefined behavior which can cause this)
 			
-			// colour == 0x003F80FF
+			// white: 0x003F80FF
 
 			vs[0] = ((mat4)perPro) * vec4(posX - size, posY - size, posZ - size, 1);
 			vs[1] = ((mat4)perPro) * vec4(posX + size, posY - size, posZ - size, 1);
@@ -636,7 +645,9 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 				max.y = MAX(max.y, cv[i].y);
 			}
 
-			draw = !children || ((max.x - min.x) < 2 && (max.y - min.y) < 2);
+			opaque = ((colour & 0x000000FF) == 0xFF);
+
+			draw = !children || (/*opaque && */((max.x - min.x) < 2 && (max.y - min.y) < 2))/* || (!opaque && ((max.x - min.x) < 64 && (max.y - min.y) < 64))*/;
 
 			if (!draw && ((max.x - min.x) * (max.y - min.y)) > drawCounter) {
 				return true;
@@ -673,22 +684,65 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 			
 			k -= 1;
 
+			if (!opaque) { // Gap filling only work when closely
+				vec4 mid = ((mat4)perPro) * vec4(posX, posY, posZ, 1);
+
+				if (mid.z < size) {
+					colour = ((colour & 0xFFFFFF00) | (uint32_t)ROUND_2_INT((colour & 0x000000FF) * 1.0 + ((mid.z - size) / (2.0 * mid.z))));
+				}
+
+				mx = MIN(MAX(ROUND_2_INT((1.0 + mid.x / mid.w) * 0.5 * (width - 1.0)), 0.0), width - 1.0);
+				my = MIN(MAX(ROUND_2_INT((1.0 + mid.y / mid.w) * 0.5 * (height - 1.0)), 0.0), height - 1.0);
+
+				mx += (mx - 0.5 * (min.x + max.x));
+				my += (my - 0.5 * (min.y + max.y));
+
+				for (j = 0; j < k; ++j) {
+					if (ch[j].x == min.x) break;
+				}
+
+				i = (j + k - 1) % k;
+				j = (j + 1) % k;
+
+				di = vec2(ch[i].x - ch[(i + 1) % k].x, ch[i].y - ch[(i + 1) % k].y);
+				dj = vec2(ch[j].x - ch[(j + k - 1) % k].x, ch[j].y - ch[(j + k - 1) % k].y);
+
+				testCounter++;
+
+				for (x = min.x; x <= max.x; ++x) {
+					if ((x == 0 && min.x == 0.0) || (((ch[i].x >= x) != (ch[(i + 1) % k].x >= x)) && ((ch[j].x >= x) != (ch[(j + k - 1) % k].x >= x)))) {
+						rx.x = ((di.x == 0.0) ? ch[i].y : (ch[(i + 1) % k].y + (x - ch[(i + 1) % k].x) * di.y / di.x));
+						rx.y = ((dj.x == 0.0) ? ch[j].y : (ch[(j + k - 1) % k].y + (x - ch[(j + k - 1) % k].x) * dj.y / dj.x));
+
+						testCounter += 2;
+
+						if (rx.y < rx.x) {
+							edg[x << 1] = (uint16_t)MAX(CEILN(rx.y), 0.0);
+							edg[(x << 1) + 1] = (uint16_t)MIN(floor(rx.x), height - 1.0);
+						}
+						else {
+							edg[x << 1] = (uint16_t)MAX(CEILN(rx.x), 0.0);
+							edg[(x << 1) + 1] = (uint16_t)MIN(floor(rx.y), height - 1.0);
+						}
+					}
+
+					if (ch[i].x == x) {
+						i = (i + k - 1) % k;
+
+						di = vec2(ch[i].x - ch[(i + 1) % k].x, ch[i].y - ch[(i + 1) % k].y);
+					}
+
+					if (ch[j].x == x) {
+						j = (j + 1) % k;
+
+						dj = vec2(ch[j].x - ch[(j + k - 1) % k].x, ch[j].y - ch[(j + k - 1) % k].y);
+					}
+				}
+			}
+
 			for (j = 0; j < k; ++j) {
 				if (ch[j].y == min.y) break;
 			}
-
-			/*
-			for (i = 0; i < k; ++i) {
-				if (mask[(uint32_t)(ch[i].y * width + ch[i].x)] != 0xFF) {
-					mask[(uint32_t)(ch[i].y * width + ch[i].x)] = 0xFF;
-					buffer[(uint32_t)(ch[i].y * width + ch[i].x)] = 0x000000FF;
-
-					sm[(uint32_t)ch[i].y] += 1;
-
-					drawCounter += 1;
-				}
-			}
-			*/
 
 			i = (j + k - 1) % k;
 			j = (j + 1) % k;
@@ -714,21 +768,49 @@ std::function<void(mat4)> VoxelBuffer::getRenderFunction(uint16_t width, uint16_
 						ex = (uint16_t)MIN(floor(rx.y), width - 1.0);
 					}
 
-					for (x = sx; x <= ex; ++x) {
-						if (mask[y * width + x] != 0xFF) {
-							if (!draw) {
-								return true;
+					if (opaque) {
+						for (x = sx; x <= ex; ++x) {
+							if (mask[y * width + x] != 0xFF) {
+								if (!draw) {
+									return true;
+								}
+
+								mcol = ((buffer[y * width + x] == 0x00000000) ? colour : colourMix(buffer[y * width + x], colour, mask[y * width + x]));
+
+								buffer[y * width + x] = mcol;
+
+								if ((mcol & 0x000000FF) == 0xFF) {
+									mask[y * width + x] = 0xFF;
+
+									sm[y] ++;
+									drawCounter++;
+								}
 							}
+						}
+					}
+					else {
+						for (x = sx; x <= ex; ++x) {
+							if (mask[y * width + x] != 0xFF) {
+								if (!draw) {
+									return true;
+								}
 
-							mcol = ((buffer[y * width + x] == 0x00000000) ? colour : colourMix(buffer[y * width + x], colour, mask[y * width + x]));
+								gx = MAX(mx - sx, ex - mx) + 1;
+								gy = MAX(my - edg[x << 1], edg[(x << 1) + 1] - my) + 1;
 
-							buffer[y * width + x] = mcol;
+								dx = (((x - sx) & -(int16_t)(x < mx)) | ((ex - x) & ~(-(int16_t)(x < mx)))) + (gx - (((mx - sx) & -(int16_t)(x < mx)) | ((ex - mx) & ~(-(int16_t)(x < mx)))));
+								dy = (((y - edg[x << 1]) & -(int16_t)(y < my)) | ((edg[(x << 1) + 1] - y) & ~(-(int16_t)(y < my)))) + (gy - (((my - edg[x << 1]) & -(int16_t)(y < my)) | ((edg[(x << 1) + 1] - my) & ~(-(int16_t)(y < my)))));
 
-							if ((mcol & 0x000000FF) == 255) {
-								mask[y * width + x] = 0xFF;
+								mcol = colourMix(buffer[y * width + x], ((colour & 0xFFFFFF00) | ((colour & 0x000000FF) / 10 + (colour & 0x000000FF) * 9 * dx * dy / gx / gy / 10)), mask[y * width + x]);
 
-								sm[y] ++;
-								drawCounter ++;
+								buffer[y * width + x] = mcol;
+
+								if ((mcol & 0x000000FF) == 0xFF) {
+									mask[y * width + x] = 0xFF;
+
+									sm[y] ++;
+									drawCounter++;
+								}
 							}
 						}
 					}

@@ -94,6 +94,19 @@ void transparencyTest() {
 	voxels.addVoxel(1, 1, 1, 1, VoxelBuffer::constructVoxel(0x00000020));
 }
 
+void volumeTest() {
+	const uint32_t colour = 0x0000FF08;
+	const int depth = 16;
+
+	for (int x = 0; x < depth; ++x) {
+		for (int y = 0; y < depth; ++y) {
+			for (int z = 0; z < depth; ++z) {
+				voxels.addVoxel(x * 2 - depth + 1, y * 2 - depth + 1, z * 2 - depth + 1, 1, VoxelBuffer::constructVoxel(colour));
+			}
+		}
+	}
+}
+
 void on_init(int w, int h, uint32_t* b, uint8_t* m) {
 	width = w;
 	height = h;
@@ -102,7 +115,7 @@ void on_init(int w, int h, uint32_t* b, uint8_t* m) {
 
 	camera = Camera(voxels.getRenderFunction(width, height, 70, buffer, mask));
 
-	axisTest();//transparencyTest();//monkeyTest();
+	axisTest();
 }
 
 void on_update(float dt) {
