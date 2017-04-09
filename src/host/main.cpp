@@ -50,7 +50,7 @@ int main(int argc, char* argv[]) {
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-	glClearColor(1, 0, 0, 0);
+	glClearColor(0, 0, 0, 0);
 
 	std::vector<cl::Platform> platforms;
 	cl::Platform::get(&platforms);
