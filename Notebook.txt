@@ -1,0 +1,27 @@
+Voxel buffer management on the CPU
+- Bitmask for each block of voxel children (8*4*4=128 bytes)
+- Storage in binary tree 32-bit array
+- Path computation: current level is the least significant bit, on left shift per level
+- Binary index in the array: ((path | (1 << level)) - 2) or (path + (2^maxLevel >> (maxLevel-level)))
+- Binary index to array index: (index >> 3)
+- Binary index to bit index: (index & 7)
+
+- maxLevel=23 -> ~2MB voxel buffer management -> ~1GB CPU voxel buffer, ~1GB GPU voxel buffer -> ~1000m^3 voxel data at its lowest level
+
+Voxel buffer on CPU and GPU are synchronized
+
+Voxel strcuture on the GPU
+- 32-bit structure: 1-active, 3-index, 4-parent, 8-children, (16-unused)
+- 32-bit children: 32-pointer (absolute, refer to the block of voxel data (4*4=16 bytes))
+- 32 bit colour: 8-pred, 8-pgreen, 8-pblue, 8-beta       \ "A physically Based Colour Model"
+- 32 bit colour: 8-mred, 8-mgreen, 8-mblue, (8-unused)   /  Robert J Oddy, Philip J Willis
+
+Voxel structure on the CPU
+- 32-bit structure: 1-active, 3-index, 4-parent, 8-children, (16-unused)
+- 32-bit children: 32-pointer (absolute, refer to the block of voxel data (4*4=16 bytes))
+- 32 bit unused: (32-unused)
+- 32 bit unused: (32-unused)
+
+Voxel buffer dynamics
+- Loading of voxels in order (root -> recursion on children)
+- Unloading still UNSOLVED -> rendered bit?
