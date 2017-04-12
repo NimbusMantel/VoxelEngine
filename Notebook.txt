@@ -11,7 +11,7 @@ Voxel buffer management on the CPU
 Voxel buffer on CPU and GPU are synchronized
 
 Voxel strcuture on the GPU
-- 32-bit structure: 1-active, 3-index, 4-parent, 8-children, (16-unused)
+- 32-bit structure: 1-active, 3-index, 4-parent, 8-children, 7-activity, (9-unused)
 - 32-bit children: 32-pointer (absolute, refer to the block of voxel data (4*4=16 bytes))
 - 32 bit colour: 8-pred, 8-pgreen, 8-pblue, 8-beta       \ "A physically Based Colour Model"
 - 32 bit colour: 8-mred, 8-mgreen, 8-mblue, (8-unused)   /  Robert J Oddy, Philip J Willis
@@ -23,5 +23,16 @@ Voxel structure on the CPU
 - 32 bit unused: (32-unused)
 
 Voxel buffer dynamics
-- Loading of voxels in order (root -> recursion on children)
-- Unloading still UNSOLVED -> rendered bit?
+- Loading of voxels in order (root -> recursion on children) by requests from the GPU and CPU
+- Unloading by suggestions from the GPU checked by the CPU
+
+GPU unloading suggestions
+- 6-bit last usage counter (reset every frame for the active voxels)
+- 1-bit unused children (toggled once lowest level has been visited -> check with siblings -> recursion to parent)
+- memory pressure level calculated by the CPU (default to 127, maximum at 1)
+- unused voxels with fallow period >= memory pressure is suggested to the CPU for unloading
+- suggestions for blocks to unload given to the CPU via a buffer (atomic array list)
+
+CPU unloading checks
+- calculation of the current memory pressure via the amount of memory needs to be inserted and how much space is left
+- only unloading of voxel data which isn't in very close proximity to the player (but not in full detail) or needed for physics
