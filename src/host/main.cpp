@@ -11,9 +11,19 @@
 
 #include <Windows.h>
 
+#include "voxel/voxel.hpp"
+
 #define OpenCLDebug 0
 
 int main(int argc, char* argv[]) {
+	std::cout << manBuf::get((0x00000001 << BUFFER_DEPTH) - 1);
+	manBuf::set((0x00000001 << BUFFER_DEPTH) - 1, 1);			// Last valid bit position
+	std::cout << manBuf::get((0x00000001 << BUFFER_DEPTH) - 1);
+
+	std::cout << manBuf::get(0x00000001 << BUFFER_DEPTH);
+	manBuf::set(0x00000001 << BUFFER_DEPTH, 1);					// Invalid bit position, assers when BUFFER_SANITY is turned on
+	std::cout << manBuf::get(0x00000001 << BUFFER_DEPTH);
+
 	if (SDL_Init(SDL_INIT_VIDEO) < 0) return -1;
 
 	SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);

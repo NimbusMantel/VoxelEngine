@@ -104,7 +104,7 @@
       <AdditionalLibraryDirectories>lib64\Common;lib64\Intel;lib64\NVIDIA</AdditionalLibraryDirectories>
       <AdditionalDependencies>lib64\Intel\OpenCL.lib;lib64\NVIDIA\OpenCL.lib;lib64\Common\SDL2.lib;lib64\Common\SDL2main.lib;lib64\Common\glew32.lib;lib64\Common\opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <SubSystem>Windows</SubSystem>
+      <SubSystem>Console</SubSystem>
     </Link>
     <PostBuildEvent>
       <Command>If exist "*.cl" copy "*.cl" "$(OutDir)\"</Command>
@@ -126,7 +126,7 @@
       <AdditionalLibraryDirectories>lib64\Common;lib64\Intel;lib64\NVIDIA</AdditionalLibraryDirectories>
       <AdditionalDependencies>lib64\Intel\OpenCL.lib;lib64\NVIDIA\OpenCL.lib;lib64\Common\SDL2.lib;lib64\Common\SDL2main.lib;lib64\Common\glew32.lib;lib64\Common\opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <SubSystem>Windows</SubSystem>
+      <SubSystem>Console</SubSystem>
     </Link>
     <PostBuildEvent>
       <Command>If exist "*.cl" copy "*.cl" "$(OutDir)\"</Command>
@@ -154,7 +154,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <SubSystem>Windows</SubSystem>
+      <SubSystem>Console</SubSystem>
     </Link>
     <PostBuildEvent>
       <Command>If exist "*.cl" copy "*.cl" "$(OutDir)\"</Command>
@@ -180,7 +180,7 @@
       <AdditionalLibraryDirectories>lib64\Common;lib64\Intel;lib64\NVIDIA</AdditionalLibraryDirectories>
       <AdditionalDependencies>lib64\Intel\OpenCL.lib;lib64\NVIDIA\OpenCL.lib;lib64\Common\SDL2.lib;lib64\Common\SDL2main.lib;lib64\Common\glew32.lib;lib64\Common\opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <SubSystem>Windows</SubSystem>
+      <SubSystem>Console</SubSystem>
     </Link>
     <PostBuildEvent>
       <Command>If exist "*.cl" copy "*.cl" "$(OutDir)\"</Command>
