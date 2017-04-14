@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 /*
 #define VOXEL_IS_ACTIVE(v) (       v      )	>> 31
@@ -19,4 +20,6 @@ namespace manBuf {
 	bool get(uint32_t pos);
 
 	void set(uint32_t pos, bool toggled);
+
+	void alo(uint32_t size, std::vector<std::pair<uint32_t, uint32_t>>& vec);
 }
