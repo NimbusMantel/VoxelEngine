@@ -17,9 +17,11 @@
 #define BUFFER_SANITY 1
 
 namespace manBuf {
+	uint32_t spa();
+
 	bool get(uint32_t pos);
 
-	void set(uint32_t pos, bool toggled);
+	void set(uint32_t pos, bool tog);
 
-	void alo(uint32_t size, std::vector<std::pair<uint32_t, uint32_t>>& vec);
+	void alo(uint32_t siz, std::vector<std::pair<uint32_t, uint32_t>>& vec);
 }

@@ -2,17 +2,11 @@
 
 #include <assert.h>
 
-#define S1(p) (p | (p >> 1))
-#define S2(p) (S1(p) | (S1(p) >> 2))
-#define S4(p) (S2(p) | (S2(p) >> 4))
-#define S8(p) (S4(p) | (S4(p) >> 8))
-#define S16(p) (S8(p) | (S8(p) >> 16))
-
 #define ceil(n) (int)(n + 0.5f)
 
 static const uint32_t bpow = (0x01 << BUFFER_DEPTH);
 
-static uint32_t manBuffer[ceil(S16(bpow) / 32.0f)];
+static uint32_t manBuffer[ceil((0xFFFFFFFF >> (31 - BUFFER_DEPTH)) / 32.0f)];
 
 static uint32_t space = bpow;
 
@@ -26,21 +20,27 @@ static uint32_t space = bpow;
 #endif
 
 namespace manBuf {
+	uint32_t spa() {
+		return space;
+	}
+
 	bool get(uint32_t pos) {
 		scheck(pos);
 		return (bool)mget((pos | bpow) - 1);
 	}
 
-	void set(uint32_t pos, bool toggled) {
+	void set(uint32_t pos, bool tog) {
 		scheck(pos);
 
 		pos |= bpow;
 
 		bool prev = (bool)mget(pos - 1);
 
-		if (toggled == prev) return;
+		if (tog == prev) return;
 
-		mset(pos - 1, toggled);
+		mset(pos - 1, tog);
+
+		space += ((-tog) | 0x01);
 
 		prev = !prev;
 
@@ -59,7 +59,7 @@ namespace manBuf {
 		}
 	}
 
-	void alo(uint32_t size, std::vector<std::pair<uint32_t, uint32_t>>& vec) {
+	void alo(uint32_t siz, std::vector<std::pair<uint32_t, uint32_t>>& vec) {
 		if (mget(0)) return;
 
 		// TO DO

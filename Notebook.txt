@@ -2,7 +2,7 @@ Voxel buffer management on the CPU
 - Bitmask for each block of voxel children (8*4*4=128 bytes)
 - Storage in binary tree 32-bit array
 - Path computation: current level is the least significant bit, on left shift per level
-- Binary index in the array: ((path | (1 << level)) - 2) or (path + (2^maxLevel >> (maxLevel-level)))
+- Binary index in the array: ((path | (1 << level)) - 1) or (path + (2^maxLevel >> (maxLevel-level)))
 - Binary index to array index: (index >> 3)
 - Binary index to bit index: (index & 7)
 
