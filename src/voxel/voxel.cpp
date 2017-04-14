@@ -44,9 +44,11 @@ namespace manBuf {
 
 		prev = !prev;
 
-		bool sib = (bool)mget(((pos & 0x01) | ((pos & 0x01) ^ 0x01)) - 1);
+		bool sib;
 
 		for (int8_t inv = 1; inv <= BUFFER_DEPTH; ++inv) {
+			sib = (bool)mget(((pos & 0xFFFFFFFE) | ((pos & 0x01) ^ 0x01)) - 1);
+
 			pos >>= 1;
 
 			if (((bool)mget(pos - 1)) == (prev && sib)) break;
@@ -54,8 +56,6 @@ namespace manBuf {
 			prev = (prev && sib);
 
 			mset(pos - 1, prev);
-
-			sib = (bool)mget(((pos & 0x01) | ((pos & 0x01) ^ 0x01)) - 1);
 		}
 	}
 
