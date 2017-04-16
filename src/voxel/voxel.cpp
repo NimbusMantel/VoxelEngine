@@ -19,6 +19,68 @@ static uint32_t space = bpow;
 #define mget(p) (manBuffer[p >> 5] & (0x01 << (p & 0x1F)))
 #define mset(p, b) manBuffer[p >> 5] = (manBuffer[p >> 5] & (0xFFFFFFFF ^ (0x01 << (p & 0x1F)))) | (((uint32_t)b) << (p & 0x1F))
 
+uint32_t mgec(uint32_t pos, uint32_t siz) {
+	uint32_t free = 0;
+
+	if ((pos & 0x1F) && siz < (32 - (pos & 0x1F))) {
+		if (!((manBuffer[pos >> 5] << (pos & 0x1F)) >> (32 - (pos & 0x1F)))) {
+			return siz;
+		}
+		else {
+			while (!mget(pos)) {
+				free++;
+				pos++;
+			}
+
+			return free;
+		}
+	}
+
+	if ((pos & 0x1F) && siz > (32 - (pos & 0x1F))) {
+		if (!(manBuffer[pos >> 5] << (pos & 0x1F))) {
+			free += (32 - (pos & 0x1F));
+			pos += free;
+			siz -= free;
+		}
+		else {
+			while (!mget(pos)) {
+				free++;
+				pos++;
+			}
+
+			return free;
+		}
+	}
+
+	for (; siz >= 32; siz -= 32) {
+		if (!manBuffer[pos >> 5]) {
+			pos += 32;
+		}
+		else {
+			while (!mget(pos)) {
+				free++;
+				pos++;
+			}
+
+			return free;
+		}
+	}
+
+	if (siz > 0) {
+		if (!(manBuffer[pos >> 5] >> (32 - (pos & 0x1F)))) {
+			free += (32 - (pos & 0x1F));
+		}
+		else {
+			while (!mget(pos)) {
+				free++;
+				pos++;
+			}
+		}
+	}
+
+	return free;
+}
+
 void als(uint32_t siz, std::vector<std::pair<uint32_t, uint32_t>>& vec, uint32_t srt) {
 	uint8_t level;
 	
@@ -45,17 +107,13 @@ void als(uint32_t siz, std::vector<std::pair<uint32_t, uint32_t>>& vec, uint32_t
 		srt = (srt + ((bool)mget(srt - 1))) << 1;
 	}
 
-	uint32_t free = mgec(srt, siz);
+	uint32_t free = mgec(srt - 1, siz);
 
 	vec.push_back(std::make_pair(srt, free));
 
 	if (free != siz) return;
 	
 	als(siz - free, vec, srt + free);
-}
-
-uint32_t mgec(uint32_t pos, uint32_t siz) {
-	// manBuf chunk get TO DO
 }
 
 namespace manBuf {
