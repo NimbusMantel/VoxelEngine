@@ -1,0 +1,367 @@
+<html>
+    <head>
+        <meta charset="utf-8"/>
+        
+        <title>Material lighting</title>
+        
+        <link href="index.css" rel="stylesheet" type="text/css"/>
+    </head>
+    
+    <body>
+        <script type="text/javascript" src="jscolor.js"></script>
+        <script type="text/javascript" src="sortable.js"></script>
+        
+		<div style="margin-top:30px; margin-left:30px; overflow:hidden;">
+			<div class="container" style="float:left; margin:0 0 30 0; width:400px;">
+				<div id="filter">
+					<div><div data-force="5" class="layer title title_xl">Material lighting</div></div>
+					
+					<div style="margin-top: -8px; margin-left: 10px; background:rgb(240, 240, 240);" class="block__list block__list_words">
+						<ul id="editable"></ul>
+						
+						<div id="result" style="margin:10 0 20 40; width:272; height:58; background:rgb(255, 255, 255); border:4px solid rgb(229, 229, 229);"></div>
+						
+						<button id="addUser">Add new material</button>
+					</div>
+				</div>
+			</div>
+			
+			<div class="container"  style="float:left; margin:0 0 0 0; width:400px;">
+				<div id="filter">
+					<div><div data-force="5" class="layer title title_xl">Impressum</div></div>
+					
+					<div style="margin-top: -8px; margin-left: 10px; background:rgb(240, 240, 240);">
+						<center>
+							<br>
+							Based on
+							<br>
+							"A physically Based Colour Model"
+							<br>
+							by
+							<br>
+							Robert J Oddy and Philip J Willis
+							<br><br>
+							<a href="https://github.com/RubaXa/Sortable">Sortable</a> by Lebedev Konstantin
+							<br>
+							Copyright 2013-2017 Lebedev Konstantin
+							<br>
+							Published under the <a href="https://opensource.org/licenses/MIT">MIT License</a>
+							<a href=""></a>
+							<br>
+							<br>
+							<a href="https://github.com/EastDesire/jscolor">jscolor</a> by East Desire
+							<br>
+							Published under the <a href="http://www.gnu.org/licenses/gpl-3.0.txt">GNU GPL license v3</a> 
+							<br><br>
+						</center>
+					</div>
+				</div>
+			</div>
+        </div>
+		
+        <script type="text/javascript">
+            var sid = 0;
+            
+			function update(evt) {
+				var re;
+				
+				if (evt.item.childElementCount < 2) {
+					re = document.createElement('i');
+					re.className = 'js-remove';
+                    re.style = "top:25px; right:12px;"
+					re.innerHTML = '✖';
+					
+					evt.item.appendChild(re);
+				}
+				
+				if (evt.item.parentNode.firstChild.childElementCount > 1) {
+					evt.item.parentNode.firstChild.removeChild(evt.item.parentNode.firstChild.children[1]);
+				}
+				
+				if (evt.item.parentNode.childElementCount > 1 && evt.item.parentNode.children[1].childElementCount < 2) {
+					re = document.createElement('i');
+					re.className = 'js-remove';
+                    re.style = "top:25px; right:12px;"
+					re.innerHTML = '✖';
+					
+					evt.item.parentNode.children[1].appendChild(re);
+				}
+                
+                updateResult();
+			}
+		
+            var editableList = Sortable.create(document.getElementById('editable'), {animation: 150, filter: '.js-remove', onFilter: function (evt) {evt.item.parentNode.removeChild(evt.item); updateResult();}, onUpdate: update});
+            
+            function rgbTOrgb(rgb) {
+                rgb = rgb.match(/\d+/g);
+                
+                rgb.forEach(function(v, i, a) {a[i] = parseInt(v);});
+                
+                return rgb;
+            }
+            
+            function updateMaterial(id, bc) {
+                var fl = rgbTOrgb(document.getElementById("fl" + id).style["background-color"]);
+                var bl = rgbTOrgb(document.getElementById("bl" + id).style["background-color"]);
+                var bt = document.getElementById("sl" + id).value / 255;
+                var pb = rgbTOrgb(document.getElementById("pb" + id).style["background-color"]);
+                var mb = rgbTOrgb(document.getElementById("mb" + id).style["background-color"]);
+                var rs = document.getElementById("rs" + id);
+                
+                var br = [bc[0] + 8 * Math.sqrt(bl[0]), bc[1] + 8 * Math.sqrt(bl[1]), bc[2] + 8 * Math.sqrt(bl[2])];
+                var mx = Math.max(Math.max(Math.max(br[0], br[1]), br[2]), 255);
+                br[0] = (br[0] * 255) / mx; br[1] = (br[1] * 255) / mx; br[2] = (br[2] * 255) / mx;
+                
+                var rc = [Math.floor((bt * pb[0] * fl[0] + (1 - bt) * mb[0] * br[0]) / 255), Math.floor(bt * pb[1] * fl[1] / 255 + (1 - bt) * mb[1] * br[1] / 255), Math.floor((bt * pb[2] * fl[2] + (1 - bt) * mb[2] * br[2]) / 255)];
+                
+                rs.style["border-color"] = rs.children[1].style["border-top-color"] = "rgb(" + rc[0] + ", " + rc[1] + ", " + rc[2] + ")";
+                rs.style["background-color"] = rs.children[2].style["border-top-color"] = "rgb(" + Math.floor(0.9 * rc[0]) + ", " + Math.floor(0.9 * rc[1]) + ", " + Math.floor(0.9 * rc[2]) + ")";
+                
+                return rc;
+            }
+            
+            function updateResult() {
+                var rc = [0, 0, 0];
+                
+                for (var i = 0; i < editableList.el.childElementCount; i++) {
+                    rc = updateMaterial(parseInt(editableList.el.children[i].firstChild.id.substr(2)), rc);
+                }
+                
+                var rs = document.getElementById("result");
+                
+                rs.style["border-color"] = "rgb(" + Math.floor(0.9 * rc[0]) + ", " + Math.floor(0.9 * rc[1]) + ", " + Math.floor(0.9 * rc[2]) + ")";
+                rs.style["background-color"] = "rgb(" + rc[0] + ", " + rc[1] + ", " + rc[2] + ")";
+            }
+            
+			function hover(ele) {
+                ele.style["border-color"] = "rgb(0,0,0)";
+			}
+			
+			function flatten(ele) {
+                ele.style["border-color"] = "rgb(127,127,127)";
+			}
+            
+            function slenter(num) {
+                editableList.option("disabled", true);
+            }
+            
+            function sleave(num) {
+                editableList.option("disabled", false);
+                
+                flatten(document.getElementById("tm" + num));
+                flatten(document.getElementById("pb" + num));
+                flatten(document.getElementById("mb" + num));
+            }
+			
+            document.getElementById('addUser').onclick = function (del = true) {
+                var el = document.createElement('li');
+                
+                var rs = document.createElement('div');
+                rs.id = 'rs' + sid;
+                rs.style = 'position:relative; margin:0 0 2 0; background:rgb(229, 229, 229); border:4px solid rgb(255, 255, 255);';
+                
+                var cn = document.createElement('div');
+                cn.style = 'margin:0 0 10 7;';
+				
+				var fl = document.createElement('button');
+                fl.id = 'fl' + sid;
+				fl.style = 'width:30px; height:30px; border:solid 3px rgb(127,127,127); border-radius:30px; opacity:1;'
+				fl.onmouseenter = hover.bind(null, fl);
+				fl.onmouseleave = flatten.bind(null, fl);
+				new jscolor(fl, {valueElement:null, value:'ffffff', onFineChange: updateResult});
+				cn.appendChild(fl);
+				
+				var sf = document.createElement('span');
+				sf.innerHTML = '&nbsp&nbsp';
+				cn.appendChild(sf);
+				
+                var sh = document.createElement('div');
+                sh.id = 'sh' + sid;
+                sh.style = 'border:0 none; position:relative; left:0px; top:0px; overflow: visible; width:175px; height:50px; display:inline;';
+                
+                var mb = document.createElement('button');
+                mb.id = 'mb' + sid;
+                mb.style = 'position:static; border: 2px solid rgb(127,127,127); border-radius: 4px; opacity:1; left:0px; width:175px; height:20px;';
+                new jscolor(mb, {valueElement:null, value:'ffffff', onFineChange: updateResult});
+				sh.appendChild(mb);
+                
+                var pb = document.createElement('button');
+                pb.id = 'pb' + sid;
+                pb.style = 'position:absolute; border:2px solid rgb(127,127,127); border-radius:4px; opacity:1; left:0px; width:175px; top:-3px; height:20px; background-image:url("particle.png"); background-blend-mode:multiply;';
+                new jscolor(pb, {valueElement:null, value:'ffffff', onFineChange: updateResult});
+				sh.appendChild(pb);
+                
+                var tm = document.createElement('div');
+                tm.id = 'tm' + sid;
+                tm.style = 'width: 8px; height: 38px; background-color:rgb(200, 200, 200); position:absolute; left: 0px; top: -2px; border: 2px solid rgb(127,127,127); padding: 0px; margin: 0px; text-align: center;';
+                sh.appendChild(tm);
+                
+                var sl = document.createElement('input');
+                sl.type = 'range';
+                sl.id = 'sl' + sid;
+                sl.min = 0;
+                sl.max = 255;
+                sl.value = 255;
+                sl.style = 'position:absolute; left: -16px; top: -2px; overflow: visible; z-index: 100; width:190px; height:42px;';
+                sl.onmousedown = onMouseDown.bind(null, sid);
+                sl.oninput = onInput.bind(null, sid);
+                sl.onmouseenter = slenter.bind(null, sid);
+                sl.onmouseleave = sleave.bind(null, sid);
+                sl.onmousemove = onMouseMove.bind(null, sid);
+                sh.appendChild(sl);
+                
+                cn.appendChild(sh);
+				
+				var sb = document.createElement('span');
+				sb.innerHTML = '&nbsp&nbsp';
+				cn.appendChild(sb);
+				
+				var bl = document.createElement('button');
+                bl.id = 'bl' + sid;
+				bl.style = 'width:30px; height:30px; border:solid 3px rgb(127,127,127); border-radius:30px; opacity:1;'
+				bl.onmouseenter = hover.bind(null, bl);
+				bl.onmouseleave = flatten.bind(null, bl);
+				new jscolor(bl, {valueElement:null, value:'ffffff', onFineChange: updateResult});
+				cn.appendChild(bl);
+                
+                rs.appendChild(cn);
+                
+                var bf = document.createElement('div');
+                bf.style = 'top:100%; left:50%; border:solid transparent; height:0; width:0; position:absolute; pointer-events:none; border-top-color:rgb(255, 255, 255); border-width:26px; margin-left:-26px;';
+                bf.innerHTML = ' ';
+                rs.appendChild(bf);
+                
+                var af = document.createElement('div');
+                af.style = 'top:100%; left:50%; border:solid transparent; height:0; width:0; position:absolute; pointer-events:none; border-top-color:rgb(229, 229, 229); border-width:20px; margin-left:-20px;';
+                af.innerHTML = ' ';
+                rs.appendChild(af);
+                
+                el.appendChild(rs);
+				
+				if (del) {
+					var re = document.createElement('i');
+					re.className = 'js-remove';
+                    re.style = "top:25px; right:12px;"
+					re.innerHTML = '✖';
+					el.appendChild(re);
+				}
+                
+                editableList.el.appendChild(el);
+                
+                onInput(sid, {target: {value: sl.value}});
+                
+                sid++;
+            };
+            
+            document.getElementById('addUser').onclick(false);
+            
+            function onInput(id, evt) {
+                var sl = document.getElementById("sl" + id);
+                var pb = document.getElementById("pb" + id);
+                var tm = document.getElementById("tm" + id);
+                
+                var loc = (evt.target.value / (sl.max - sl.min)) * 175;
+                
+                tm.style.left = loc - 6 + "px";
+                pb.style.width = loc + "px";
+                
+                updateResult();
+            }
+            
+            function reenable(sli) {
+                sli.disabled = false;
+            }
+            
+            function onMouseDown(num, evt) {
+                var sli = document.getElementById("sl" + num);
+                
+                var obj = document.getElementById("tm" + num);
+                var box = obj.getBoundingClientRect();
+                
+                var nvt;
+                
+                if (evt.clientX >= box.left && evt.clientX <= box.right && evt.clientY >= box.top && evt.clientY <= box.bottom) {
+                    return;
+                }
+                
+                obj = document.getElementById("pb" + num);
+                box = obj.getBoundingClientRect();
+                
+                if (evt.clientX >= box.left && evt.clientX <= box.right && evt.clientY >= box.top && evt.clientY <= box.bottom) {
+                    nvt = new MouseEvent("mousedown", {buttons: 1, clientX: evt.clientX, clientY: evt.clientY, relatedTarget: obj});
+                    Object.defineProperty(nvt, 'target', {value: obj, enumerable: true});
+                    
+                    document.dispatchEvent(nvt);
+                    
+                    evt.stopImmediatePropagation();
+                    
+                    sli.disabled = true;
+                    
+                    document.addEventListener("mouseup", reenable.bind(null, sli), {once: true});
+                    
+                    return;
+                }
+                
+                obj = document.getElementById("mb" + num);
+                box = obj.getBoundingClientRect();
+                
+                if (evt.clientX >= box.left && evt.clientX <= box.right && evt.clientY >= box.top && evt.clientY <= box.bottom) {
+                    nvt = new MouseEvent("mousedown", {buttons: 1, clientX: evt.clientX, clientY: evt.clientY, relatedTarget: obj});
+                    Object.defineProperty(nvt, 'target', {value: obj, enumerable: true});
+                    
+                    document.dispatchEvent(nvt);
+                    
+                    evt.stopImmediatePropagation();
+                    
+                    sli.disabled = true;
+                    
+                    document.addEventListener("mouseup", reenable.bind(null, sli), {once: true});
+                    
+                    return;
+                }
+            }
+            
+            function onMouseMove(num, evt) {
+                var sli = document.getElementById("sl" + num);
+                
+                var tm = document.getElementById("tm" + num);
+                var pb = document.getElementById("pb" + num);
+                var mb = document.getElementById("mb" + num);
+                
+                var box = tm.getBoundingClientRect();
+                
+                if (evt.clientX >= box.left && evt.clientX <= box.right && evt.clientY >= box.top && evt.clientY <= box.bottom) {
+                    hover(tm);
+                    flatten(pb);
+                    flatten(mb);
+                    
+                    return;
+                }
+                
+                box = pb.getBoundingClientRect();
+                
+                if (evt.clientX >= box.left && evt.clientX <= box.right && evt.clientY >= box.top && evt.clientY <= box.bottom) {
+                    flatten(tm);
+                    hover(pb);
+                    flatten(mb);
+                    
+                    return;
+                }
+                
+                box = mb.getBoundingClientRect();
+                
+                if (evt.clientX >= box.left && evt.clientX <= box.right && evt.clientY >= box.top && evt.clientY <= box.bottom) {
+                    flatten(tm);
+                    flatten(pb);
+                    hover(mb);
+                    
+                    return;
+                }
+                
+                flatten(tm);
+                flatten(pb);
+                flatten(mb);
+            }
+        </script>
+    </body>
+</html>
