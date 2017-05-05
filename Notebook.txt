@@ -10,11 +10,22 @@ Voxel buffer management on the CPU
 
 Voxel buffer on CPU and GPU are synchronized
 
-Voxel strcuture on the GPU
-- 32-bit structure: 1-active, 3-index, 4-parent, 8-children, 7-activity, (9-unused)
+Voxel strucuture on the GPU
+- 32-bit structure: 1-active, 3-index, 4-parent, 8-children, 7-activity, 1-emitter, (8-unused)
 - 32-bit children: 32-pointer (absolute, refer to the block of voxel data (4*4=16 bytes))
-- 32 bit colour: 8-pred, 8-pgreen, 8-pblue, 8-beta       \ "A physically Based Colour Model"
-- 32 bit colour: 8-mred, 8-mgreen, 8-mblue, (8-unused)   /  Robert J Oddy, Philip J Willis
+- 64 bit colour: 4-pred, 4-pgreen, 4-pblue, 4-beta, \ "A physically Based Colour Model"
+                 4-mred, 4-mgreen, 4-mblue,         /  Robert J Oddy, Philip J Willis
+                 4-l1red, 4-l1green, 4-l1blue,
+                 4-l2red, 4-l2green, 4-l2blue,
+                 4-l3red, 4-l3green, 4-l3blue
+
+Voxel baked lighting on the GPU
+- three adjacent lights stored in sibling voxels
+- three adjacent lights stored in l1 to l3
+- inactive voxel: light in l1
+- opaque voxel: no light
+- emitter voxel: unshaded colour (particle), intensity (beta), filter (medium, less weight), light in (particle * beta)
+- transparent voxel: ???
 
 Voxel structure on the CPU
 - 32-bit structure: 1-active, 3-index, 4-parent, 8-children, (16-unused)
@@ -36,3 +47,11 @@ GPU unloading suggestions
 CPU unloading checks
 - calculation of the current memory pressure via the amount of memory needs to be inserted and how much space is left
 - only unloading of voxel data which isn't in very close proximity to the player (but not in full detail) or needed for physics
+
+Pixel calculation
+- Init: RGBpixel = (0, 0, 0); RGBback = (1, 1, 1); RGBlight = (0, 0, 0); buf;
+- Input: RGBparticle, beta, RGBmedium, RGBlfore, RGBlback
+- Algorithm: buf = (beta * RGBparticle * RGBlfore) + RGBlight
+             RGBpixel += RGBback * buf * beta / max(buf.r, buf.g, buf.b, beta);
+             RGBback *= (1 - beta) * RGBmedium;
+             RGBlight = 8 * sqrt(RGBlback);
