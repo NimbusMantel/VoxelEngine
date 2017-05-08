@@ -43,9 +43,9 @@ CPU unloading checks
 Voxel material colour on the GPU
 - "A physically Based Colour Model" by Robert J Oddy, Philip J Willis:
   ratio of particle and medium colour defined by beta value
-- colours premultiplied by the most significant bit of beta
-- most significant bit of beta defines the bit distribution
-- colours reapproximated by multiplication by (beta / beta_msb)
+- beta value bit distribution: 0-1(0), 2-5(1), 6-9(2), 10-13(3), 14-15(4)
+- colours premultiplied by ((2 ^ (bits + 1)) - 1)
+- colours reapproximated by multiplication by (beta / ((2 ^ (bits + 1)) - 1))
 
 Voxel baked lighting on the GPU
 - inner light: stored in l0
