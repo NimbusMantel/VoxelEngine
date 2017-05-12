@@ -19,7 +19,11 @@
 					<div style="margin-top: -8px; margin-left: 10px; background:rgb(240, 240, 240);" class="block__list block__list_words">
 						<ul id="editable"></ul>
 						
-						<div id="result" style="margin:10 0 20 40; width:272; height:58; background:rgb(255, 255, 255); border:4px solid rgb(229, 229, 229);"></div>
+						<div id="result" style="margin:10 0 20 40; width:272; height:58; background:rgb(255, 255, 255); border:4px solid rgb(229, 229, 229);">
+                            <div style="margin:14 0 0 14; width:242; height:28; background:rgb(255, 255, 255); border:1px solid black;">
+                                <center><span style="color: rgb(0, 0, 0)">100%</span></center>
+                            </div>
+                        </div>
 						
 						<button id="addUser">Add new material</button>
 					</div>
@@ -61,6 +65,7 @@
 		
         <script type="text/javascript">
             var sid = 0;
+            var bd = [0, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 7, 7, 7, 7, 15];
             
 			function update(evt) {
 				var re;
@@ -100,37 +105,68 @@
                 return rgb;
             }
             
-            function updateMaterial(id, bc) {
-                var fl = rgbTOrgb(document.getElementById("fl" + id).style["background-color"]);
-                var bl = rgbTOrgb(document.getElementById("bl" + id).style["background-color"]);
+            function sqrte(n) {
+                return Math.floor(Math.sqrt(n));
+            }
+            
+            function updateMaterial(id, bc, bce) {
+                var fle = document.getElementById("fl" + id);
+                var fl = rgbTOrgb(fle.style["background-color"]);
+                var ble = document.getElementById("bl" + id);
+                var bl = rgbTOrgb(ble.style["background-color"]);
                 var bt = document.getElementById("sl" + id).value / 255;
-                var pb = rgbTOrgb(document.getElementById("pb" + id).style["background-color"]);
-                var mb = rgbTOrgb(document.getElementById("mb" + id).style["background-color"]);
+                var pbe = document.getElementById("pb" + id);
+                var pb = rgbTOrgb(pbe.style["background-color"]);
+                var mbe = document.getElementById("mb" + id);
+                var mb = rgbTOrgb(mbe.style["background-color"]);
                 var rs = document.getElementById("rs" + id);
+                
+                fle.firstChild.style["background-color"] = "rgb(" + (Math.round(fl[0] / 17) * 17) + ", " + (Math.round(fl[1] / 17) * 17) + ", " + (Math.round(fl[2] / 17) * 17) + ")";
+                ble.firstChild.style["background-color"] = "rgb(" + (Math.round(bl[0] / 17) * 17) + ", " + (Math.round(bl[1] / 17) * 17) + ", " + (Math.round(bl[2] / 17) * 17) + ")";
+                
+                var bte = Math.round(bt * 255 / 17);
+                
+                pbe.firstChild.style["background-color"] = "rgb(" + Math.round(Math.round(Math.round(pb[0] * bd[bte] / 255) * 17 * bte / Math.max(bd[bte], 1)) * 255 / (Math.max(bte, 1) * 17)) + ", " + Math.round(Math.round(Math.round(pb[1] * bd[bte] / 255) * 17 * bte / Math.max(bd[bte], 1)) * 255 / (Math.max(bte, 1) * 17)) + ", " + Math.round(Math.round(Math.round(pb[2] * bd[bte] / 255) * 17 * bte / Math.max(bd[bte], 1)) * 255 / (Math.max(bte, 1) * 17)) + ")";
+                mbe.firstChild.style["background-color"] = "rgb(" + Math.round(Math.round(Math.round(mb[0] * bd[15 - bte] / 255) * 17 * (15 - bte) / Math.max(bd[15 - bte], 1)) * 255 / (Math.max(15 - bte, 1) * 17)) + ", " + Math.round(Math.round(Math.round(mb[1] * bd[15 - bte] / 255) * 17 * (15 - bte) / Math.max(bd[15 - bte], 1)) * 255 / (Math.max(15 - bte, 1) * 17)) + ", " + Math.round(Math.round(Math.round(mb[2] * bd[15 - bte] / 255) * 17 * (15 - bte) / Math.max(bd[15 - bte], 1)) * 255 / (Math.max(15 - bte, 1) * 17)) + ")";
                 
                 var br = [bc[0] + 8 * Math.sqrt(bl[0]), bc[1] + 8 * Math.sqrt(bl[1]), bc[2] + 8 * Math.sqrt(bl[2])];
                 var mx = Math.max(Math.max(Math.max(br[0], br[1]), br[2]), 255);
                 br[0] = (br[0] * 255) / mx; br[1] = (br[1] * 255) / mx; br[2] = (br[2] * 255) / mx;
                 
-                var rc = [Math.floor((bt * pb[0] * fl[0] + (1 - bt) * mb[0] * br[0]) / 255), Math.floor(bt * pb[1] * fl[1] / 255 + (1 - bt) * mb[1] * br[1] / 255), Math.floor((bt * pb[2] * fl[2] + (1 - bt) * mb[2] * br[2]) / 255)];
+                var rc = [Math.round((bt * pb[0] * fl[0] + (1 - bt) * mb[0] * br[0]) / 255), Math.round(bt * pb[1] * fl[1] / 255 + (1 - bt) * mb[1] * br[1] / 255), Math.round((bt * pb[2] * fl[2] + (1 - bt) * mb[2] * br[2]) / 255)];
                 
                 rs.style["border-color"] = rs.children[1].style["border-top-color"] = "rgb(" + rc[0] + ", " + rc[1] + ", " + rc[2] + ")";
                 rs.style["background-color"] = rs.children[2].style["border-top-color"] = "rgb(" + Math.floor(0.9 * rc[0]) + ", " + Math.floor(0.9 * rc[1]) + ", " + Math.floor(0.9 * rc[2]) + ")";
                 
-                return rc;
+                var bre = [bce[0] + 8 * sqrte(Math.round(bl[0] / 17) * 17), bce[1] + 8 * sqrte(Math.round(bl[1] / 17) * 17), bce[2] + 8 * sqrte(Math.round(bl[2] / 17) * 17)];
+                var mxe = Math.max(Math.max(Math.max(bre[0], bre[1]), bre[2]), 255);
+                bre[0] = Math.round((bre[0] * 255) / mxe); bre[1] = Math.round((bre[1] * 255) / mxe); bre[2] = Math.round((bre[2] * 255) / mxe);
+                
+                var rce = [Math.round((Math.round(pb[0] * bd[bte] / 255) * 17 * bte * fl[0] / Math.max(bd[bte], 1) + Math.round(mb[0] * bd[15 - bte] / 255) * 17 * (15 - bte) * bre[0] / Math.max(bd[15 - bte], 1)) / 255), Math.round((Math.round(pb[1] * bd[bte] / 255) * 17 * bte * fl[1] / Math.max(bd[bte], 1) + Math.round(mb[1] * bd[15 - bte] / 255) * 17 * (15 - bte) * bre[1] / Math.max(bd[15 - bte], 1)) / 255), Math.round((Math.round(pb[2] * bd[bte] / 255) * 17 * bte * fl[2] / Math.max(bd[bte], 1) + Math.round(mb[2] * bd[15 - bte] / 255) * 17 * (15 - bte) * bre[2] / Math.max(bd[15 - bte], 1)) / 255)];
+                
+                rs.children[2].children[1].style["border-top-color"] = "rgb(" + rce[0] + ", " + rce[1] + ", " + rce[2] + ")";
+                
+                return [rc, rce];
             }
             
             function updateResult() {
-                var rc = [0, 0, 0];
+                var rc = [[0, 0, 0], [0, 0, 0]];
                 
                 for (var i = 0; i < editableList.el.childElementCount; i++) {
-                    rc = updateMaterial(parseInt(editableList.el.children[i].firstChild.id.substr(2)), rc);
+                    rc = updateMaterial(parseInt(editableList.el.children[i].firstChild.id.substr(2)), rc[0], rc[1]);
                 }
                 
                 var rs = document.getElementById("result");
                 
-                rs.style["border-color"] = "rgb(" + Math.floor(0.9 * rc[0]) + ", " + Math.floor(0.9 * rc[1]) + ", " + Math.floor(0.9 * rc[2]) + ")";
-                rs.style["background-color"] = "rgb(" + rc[0] + ", " + rc[1] + ", " + rc[2] + ")";
+                rs.style["border-color"] = "rgb(" + Math.floor(0.9 * rc[0][0]) + ", " + Math.floor(0.9 * rc[0][1]) + ", " + Math.floor(0.9 * rc[0][2]) + ")";
+                rs.style["background-color"] = "rgb(" + rc[0][0] + ", " + rc[0][1] + ", " + rc[0][2] + ")";
+                
+                rs.children[0].style["background-color"] = "rgb(" + rc[1][0] + ", " + rc[1][1] + ", " + rc[1][2] + ")";
+                
+                rs.children[0].children[0].children[0].innerHTML = (100 - Math.round((Math.abs(rc[0][0] - rc[1][0]) + Math.abs(rc[0][1] - rc[1][1]) + Math.abs(rc[0][2] - rc[1][2])) / 7.65)) + "%";
+                rs.children[0].children[0].children[0].innerHTML = ((rs.children[0].children[0].children[0].innerHTML.length < 4) ? "0" : "") + ((rs.children[0].children[0].children[0].innerHTML.length < 3) ? "0" : "") + rs.children[0].children[0].children[0].innerHTML;
+        
+                rs.children[0].children[0].children[0].style["color"] = "rgb(" + ((rc[1][0] < 128) ? 255 : 0) + ", " + ((rc[1][1] < 128) ? 255 : 0) + ", " + ((rc[1][2] < 128) ? 255 : 0) + ")";
             }
             
 			function hover(ele) {
@@ -169,6 +205,11 @@
 				fl.onmouseenter = hover.bind(null, fl);
 				fl.onmouseleave = flatten.bind(null, fl);
 				new jscolor(fl, {valueElement:null, value:'ffffff', onFineChange: updateResult});
+                
+                var fle = document.createElement('div');
+                fle.style = 'position:absolute; margin: -6 0 0 6; width: 10px; height: 10px; border: 1px solid black; border-radius: 10px; opacity: 1; background-color: rgb(255, 255, 255);';
+                fl.appendChild(fle);
+                
 				cn.appendChild(fl);
 				
 				var sf = document.createElement('span');
@@ -183,12 +224,22 @@
                 mb.id = 'mb' + sid;
                 mb.style = 'position:static; border: 2px solid rgb(127,127,127); border-radius: 4px; opacity:1; left:0px; width:175px; height:20px;';
                 new jscolor(mb, {valueElement:null, value:'ffffff', onFineChange: updateResult});
+                
+                var mbe = document.createElement('div');
+                mbe.style = 'position:absolute; height:6px; width:0px; margin: 3 0 0 0; border: 1px solid black; background-color: rgb(255, 255, 255);';
+                mb.appendChild(mbe);
+                
 				sh.appendChild(mb);
                 
                 var pb = document.createElement('button');
                 pb.id = 'pb' + sid;
-                pb.style = 'position:absolute; border:2px solid rgb(127,127,127); border-radius:4px; opacity:1; left:0px; width:175px; top:-3px; height:20px; background-image:url("particle.png"); background-blend-mode:multiply;';
+                pb.style = 'position:absolute; border:2px solid rgb(127,127,127); border-radius:4px; opacity:1; left:0px; width:175px; top:-3px; height:20px; background-image:url("particle.png"); background-blend-mode:multiply; background-color: rgb(255, 255, 255)';
                 new jscolor(pb, {valueElement:null, value:'ffffff', onFineChange: updateResult});
+                
+                var pbe = document.createElement('div');
+                pbe.style = 'position:absolute; height:6px; width:157px; margin: -4 0 0 4; border: 1px solid black; background-image:url("particle.png"); background-blend-mode:multiply; background-color: rgb(255, 255, 255)';
+                pb.appendChild(pbe);
+                
 				sh.appendChild(pb);
                 
                 var tm = document.createElement('div');
@@ -222,6 +273,11 @@
 				bl.onmouseenter = hover.bind(null, bl);
 				bl.onmouseleave = flatten.bind(null, bl);
 				new jscolor(bl, {valueElement:null, value:'ffffff', onFineChange: updateResult});
+                
+                var ble = document.createElement('div');
+                ble.style = 'position:absolute; margin: -6 0 0 6; width: 10px; height: 10px; border: 1px solid black; border-radius: 10px; opacity: 1; background-color: rgb(255, 255, 255);';
+                bl.appendChild(ble);
+                
 				cn.appendChild(bl);
                 
                 rs.appendChild(cn);
@@ -234,6 +290,17 @@
                 var af = document.createElement('div');
                 af.style = 'top:100%; left:50%; border:solid transparent; height:0; width:0; position:absolute; pointer-events:none; border-top-color:rgb(229, 229, 229); border-width:20px; margin-left:-20px;';
                 af.innerHTML = ' ';
+                
+                var afe = document.createElement('div');
+                afe.style = 'top:100%; left:50%; border:solid transparent; height:0; width:0; position:absolute; pointer-events:none; border-top-color:black; border-width:14px; margin:-20 0 0 -14;';
+                afe.innerHTML = ' ';
+                af.appendChild(afe);
+                
+                afe = document.createElement('div');
+                afe.style = 'top:100%; left:50%; border:solid transparent; height:0; width:0; position:absolute; pointer-events:none; border-top-color:rgb(255, 255, 255); border-width:12px; margin:-19 0 0 -12;';
+                afe.innerHTML = ' ';
+                af.appendChild(afe);
+                
                 rs.appendChild(af);
                 
                 el.appendChild(rs);
@@ -259,11 +326,19 @@
                 var sl = document.getElementById("sl" + id);
                 var pb = document.getElementById("pb" + id);
                 var tm = document.getElementById("tm" + id);
+                var mb = document.getElementById("mb" + id);
                 
                 var loc = (evt.target.value / (sl.max - sl.min)) * 175;
                 
-                tm.style.left = loc - 6 + "px";
+                tm.style.left = (loc - 6) + "px";
                 pb.style.width = loc + "px";
+                
+                pb.firstChild.style.width = (loc - 18) + "px";
+                pb.firstChild.style.display = ((loc > 18) ? "block" : "none");
+                
+                mb.firstChild.style.left = (loc + 10) + "px";
+                mb.firstChild.style.width = (175 - loc - 18) + "px";
+                mb.firstChild.style.display = ((loc < 157) ? "block" : "none");
                 
                 updateResult();
             }
