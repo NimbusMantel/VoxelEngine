@@ -22,7 +22,11 @@ namespace manBuf {
 
 	bool get(uint32_t pos);
 
+	bool get(uint32_t pos, uint32_t siz);
+
 	void set(uint32_t pos, bool tog);
+
+	void set(uint32_t pos, uint32_t siz, bool tog);
 
 	void alo(uint32_t siz, std::vector<std::pair<uint32_t, uint32_t>>& vec);
 }

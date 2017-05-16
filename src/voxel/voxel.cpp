@@ -1,8 +1,21 @@
 #include "voxel.hpp"
 
 #include <assert.h>
+#include <intrin.h>
 
 #define ceil(n) (int)(n + 0.5f)
+
+static uint32_t __inline clz(uint32_t n) {
+	unsigned long r; _BitScanForward(&r, n); return r;
+}
+
+static uint32_t __inline ctz(uint32_t n) {
+	unsigned long r; _BitScanReverse(&r, n); return r;
+}
+
+static uint32_t __inline cnz(uint32_t n) {
+	return (32 - __popcnt(n));
+}
 
 static const uint32_t bpow = (0x01 << BUFFER_DEPTH);
 
@@ -12,8 +25,10 @@ static uint32_t space = bpow;
 
 #if BUFFER_SANITY
 #define scheck(p) assert(p < bpow);
+#define zcheck(p) assert(p != 0);
 #else
 #define scheck(p) 
+#define zcheck(p) 
 #endif
 
 #define mget(p) (manBuffer[p >> 5] & (0x01 << (p & 0x1F)))
@@ -22,17 +37,13 @@ static uint32_t space = bpow;
 uint32_t mgec(uint32_t pos, uint32_t siz) {
 	uint32_t free = 0;
 
-	if ((pos & 0x1F) && siz < (32 - (pos & 0x1F))) {
-		if (!((manBuffer[pos >> 5] << (pos & 0x1F)) >> (32 - (pos & 0x1F)))) {
+	if ((pos & 0x1F) && siz <= (32 - (pos & 0x1F))) {
+		if (!((manBuffer[pos >> 5] << (pos & 0x1F)) >> (32 - siz))) {
 			return siz;
 		}
 		else {
-			while (!mget(pos)) {
-				free++;
-				pos++;
-			}
-
-			return free;
+			
+			return clz(manBuffer[pos >> 5] << (pos & 0x1F));
 		}
 	}
 
@@ -43,12 +54,7 @@ uint32_t mgec(uint32_t pos, uint32_t siz) {
 			siz -= free;
 		}
 		else {
-			while (!mget(pos)) {
-				free++;
-				pos++;
-			}
-
-			return free;
+			return clz(manBuffer[pos >> 5] << (pos & 0x1F));
 		}
 	}
 
@@ -57,31 +63,117 @@ uint32_t mgec(uint32_t pos, uint32_t siz) {
 			pos += 32;
 		}
 		else {
-			while (!mget(pos)) {
-				free++;
-				pos++;
-			}
+			free += clz(manBuffer[pos >> 5]);
 
 			return free;
 		}
 	}
 
 	if (siz > 0) {
-		if (!(manBuffer[pos >> 5] >> (32 - (pos & 0x1F)))) {
-			free += (32 - (pos & 0x1F));
+		if (!(manBuffer[pos >> 5] >> (32 - siz))) {
+			free += (32 - siz);
 		}
 		else {
-			while (!mget(pos)) {
-				free++;
-				pos++;
-			}
+			free += clz(manBuffer[pos >> 5]);
 		}
 	}
 
 	return free;
 }
 
-void als(uint32_t siz, std::vector<std::pair<uint32_t, uint32_t>>& vec, uint32_t srt) {
+void mses(uint32_t pos, bool tog) {
+	bool prev = (bool)mget(pos);
+
+	if (tog == prev) return;
+
+	mset(pos, tog);
+
+	space += ((-tog) | 0x01);
+
+	prev = !prev;
+
+	bool sib;
+
+	for (uint8_t inv = 1; inv <= BUFFER_DEPTH; ++inv) {
+		sib = (bool)mget(((pos & 0xFFFFFFFE) | ((pos & 0x01) ^ 0x01)) - 1);
+
+		pos >>= 1;
+
+		if (((bool)mget(pos)) == (prev && sib)) break;
+
+		prev = (prev && sib);
+
+		mset(pos, prev);
+	}
+}
+
+void mseo(uint32_t pos, uint32_t siz) {
+	if ((pos & 0x1F) && siz <= (32 - siz)) {
+		space -= (cnz((manBuffer[pos >> 5] << (pos & 0x1F)) >> (32 - siz)) + siz - 32);
+
+		manBuffer[pos >> 5] |= ((0xFFFFFFFF >> (32 - siz)) << (32 - siz - (pos & 0x1F)));
+	}
+	else {
+		if ((pos & 0x1F) && siz > (32 - (pos & 0x1F))) {
+			space -= (cnz(manBuffer[pos >> 5] << (pos & 0x1F)) - (pos & 0x1F));
+
+			manBuffer[pos >> 5] |= (0xFFFFFFFF >> (pos & 0x1F));
+
+			pos += (32 - (pos & 0x1F));
+		}
+
+		for (; siz >= 32; siz -= 32) {
+			space -= cnz(manBuffer[pos >> 5]);
+
+			manBuffer[pos >> 5] |= 0xFFFFFFFF;
+
+			pos += 32;
+		}
+
+		if (siz > 0) {
+			space -= (cnz(manBuffer[pos >> 5] >> (32 - siz)) + siz - 32);
+
+			manBuffer[pos >> 5] |= (0xFFFFFFFF << (32 - siz));
+		}
+	}
+
+	// Go up
+}
+
+void msez(uint32_t pos, uint32_t siz) {
+	if ((pos & 0x1F) && siz <= (32 - siz)) {
+		space += (32 - cnz((manBuffer[pos >> 5] << (pos & 0x1F)) >> (32 - siz)));
+
+		manBuffer[pos >> 5] &= ~((0xFFFFFFFF >> (32 - siz)) << (32 - siz - (pos & 0x1F)));
+	}
+	else {
+		if ((pos & 0x1F) && siz > (32 - (pos & 0x1F))) {
+			space += (32 - cnz(manBuffer[pos >> 5] << (pos & 0x1F)));
+
+			manBuffer[pos >> 5] &= (0xFFFFFFFF << (32 - (pos & 0x1F)));
+
+			pos += (32 - (pos & 0x1F));
+		}
+
+		for (; siz >= 32; siz -= 32) {
+			space += (32 - cnz(manBuffer[pos >> 5]));
+
+			manBuffer[pos >> 5] &= 0x00000000;
+
+			pos += 32;
+		}
+
+		if (siz > 0) {
+			space += (32 - cnz(manBuffer[pos >> 5] >> (32 - siz)));
+
+			manBuffer[pos >> 5] &= (0xFFFFFFFF >> siz);
+		}
+	}
+		
+	// Go up
+}
+
+void mals(uint32_t siz, std::vector<std::pair<uint32_t, uint32_t>>& vec, uint32_t srt) {
 	uint8_t level;
 	
 	if (srt) {
@@ -113,7 +205,7 @@ void als(uint32_t siz, std::vector<std::pair<uint32_t, uint32_t>>& vec, uint32_t
 
 	if (free != siz) return;
 	
-	als(siz - free, vec, srt + free);
+	mals(siz - free, vec, srt + free);
 }
 
 namespace manBuf {
@@ -123,42 +215,40 @@ namespace manBuf {
 
 	bool get(uint32_t pos) {
 		scheck(pos);
+
 		return (bool)mget((pos | bpow) - 1);
+	}
+
+	bool get(uint32_t pos, uint32_t siz) {
+		zcheck(siz);
+
+		return (mgec((pos | bpow) - 1, siz) != siz);
 	}
 
 	void set(uint32_t pos, bool tog) {
 		scheck(pos);
 
-		pos |= bpow;
+		mses((pos | bpow) - 1, tog);
+	}
 
-		bool prev = (bool)mget(pos - 1);
+	void set(uint32_t pos, uint32_t siz, bool tog) {
+		scheck(pos);
+		scheck(pos + siz - 1);
+		zcheck(siz);
 
-		if (tog == prev) return;
-
-		mset(pos - 1, tog);
-
-		space += ((-tog) | 0x01);
-
-		prev = !prev;
-
-		bool sib;
-
-		for (uint8_t inv = 1; inv <= BUFFER_DEPTH; ++inv) {
-			sib = (bool)mget(((pos & 0xFFFFFFFE) | ((pos & 0x01) ^ 0x01)) - 1);
-
-			pos >>= 1;
-
-			if (((bool)mget(pos - 1)) == (prev && sib)) break;
-
-			prev = (prev && sib);
-
-			mset(pos - 1, prev);
+		if (tog) {
+			mseo((pos | bpow) - 1, siz);
+		}
+		else {
+			msez((pos | bpow) - 1, siz);
 		}
 	}
 
 	void alo(uint32_t siz, std::vector<std::pair<uint32_t, uint32_t>>& vec) {
 		if (mget(0)) return;
 
-		als(siz, vec, 0x00);
+		zcheck(siz);
+
+		mals(siz, vec, 0x00);
 	}
 }
