@@ -26,9 +26,11 @@ static uint32_t space = bpow;
 #if BUFFER_SANITY
 #define scheck(p) assert(p < bpow);
 #define zcheck(p) assert(p != 0);
+#define ocheck(p, a) if (p == 1) {a}
 #else
 #define scheck(p) 
 #define zcheck(p) 
+#define ockeck(p, a) 
 #endif
 
 #define mget(p) (manBuffer[p >> 5] & (0x01 << (p & 0x1F)))
@@ -108,7 +110,10 @@ void mses(uint32_t pos, bool tog) {
 }
 
 void mseo(uint32_t pos, uint32_t siz) {
-	if ((pos & 0x1F) && siz <= (32 - siz)) {
+	uint32_t spos = pos;
+	uint32_t epos = (pos + siz - 1);
+	
+	if ((pos & 0x1F) && siz <= (32 - (pos & 0x1F))) {
 		space -= (cnz((manBuffer[pos >> 5] << (pos & 0x1F)) >> (32 - siz)) + siz - 32);
 
 		manBuffer[pos >> 5] |= ((0xFFFFFFFF >> (32 - siz)) << (32 - siz - (pos & 0x1F)));
@@ -125,7 +130,7 @@ void mseo(uint32_t pos, uint32_t siz) {
 		for (; siz >= 32; siz -= 32) {
 			space -= cnz(manBuffer[pos >> 5]);
 
-			manBuffer[pos >> 5] |= 0xFFFFFFFF;
+			manBuffer[pos >> 5] = 0xFFFFFFFF;
 
 			pos += 32;
 		}
@@ -137,11 +142,49 @@ void mseo(uint32_t pos, uint32_t siz) {
 		}
 	}
 
-	// Go up
+	bool sset, eset;
+
+	for (uint8_t inv = 1; inv <= BUFFER_DEPTH; ++inv) {
+		sset = (bool)mget(((spos & 0xFFFFFFFE) | ((spos & 0x01) ^ 0x01)) - 1);
+		eset = (bool)mget(((epos & 0xFFFFFFFE) | ((epos & 0x01) ^ 0x01)) - 1);
+
+		spos >>= 1;
+		epos >>= 1;
+
+		pos = spos;
+		siz = (epos - spos) + 1;
+
+		if ((pos & 0x1F) && siz <= (32 - (pos & 0x1F))) {
+			manBuffer[pos >> 5] |= ((0xFFFFFFFF >> (32 - siz)) << (32 - siz - (pos & 0x1F)));
+		}
+		else {
+			if ((pos & 0x1F) && siz > (32 - (pos & 0x1F))) {
+				manBuffer[pos >> 5] |= (0xFFFFFFFF >> (pos & 0x1F));
+
+				pos += (32 - (pos & 0x1F));
+			}
+
+			if (siz > 32) {
+				memset(manBuffer + pos, 0xFF, (epos - pos + 1) >> 5);
+
+				siz &= 0x0000001F;
+			}
+
+			if (siz > 0) {
+				manBuffer[pos >> 5] |= (0xFFFFFFFF << (32 - siz));
+			}
+		}
+
+		mset(spos, sset);
+		mset(epos, eset);
+	}
 }
 
 void msez(uint32_t pos, uint32_t siz) {
-	if ((pos & 0x1F) && siz <= (32 - siz)) {
+	uint32_t spos = pos;
+	uint32_t epos = (pos + siz - 1);
+
+	if ((pos & 0x1F) && siz <= (32 - (pos & 0x1F))) {
 		space += (32 - cnz((manBuffer[pos >> 5] << (pos & 0x1F)) >> (32 - siz)));
 
 		manBuffer[pos >> 5] &= ~((0xFFFFFFFF >> (32 - siz)) << (32 - siz - (pos & 0x1F)));
@@ -158,7 +201,7 @@ void msez(uint32_t pos, uint32_t siz) {
 		for (; siz >= 32; siz -= 32) {
 			space += (32 - cnz(manBuffer[pos >> 5]));
 
-			manBuffer[pos >> 5] &= 0x00000000;
+			manBuffer[pos >> 5] = 0x00000000;
 
 			pos += 32;
 		}
@@ -169,8 +212,35 @@ void msez(uint32_t pos, uint32_t siz) {
 			manBuffer[pos >> 5] &= (0xFFFFFFFF >> siz);
 		}
 	}
-		
-	// Go up
+
+	for (uint8_t inv = 1; inv <= BUFFER_DEPTH; ++inv) {
+		spos >>= 1;
+		epos >>= 1;
+
+		pos = spos;
+		siz = (epos - spos) + 1;
+
+		if ((pos & 0x1F) && siz <= (32 - (pos & 0x1F))) {
+			manBuffer[pos >> 5] &= ~((0xFFFFFFFF >> (32 - siz)) << (32 - siz - (pos & 0x1F)));
+		}
+		else {
+			if ((pos & 0x1F) && siz > (32 - (pos & 0x1F))) {
+				manBuffer[pos >> 5] &= (0xFFFFFFFF << (32 - (pos & 0x1F)));
+
+				pos += (32 - (pos & 0x1F));
+			}
+
+			if (siz > 32) {
+				memset(manBuffer + pos, 0x00, (epos - pos + 1) >> 5);
+
+				siz &= 0x0000001F;
+			}
+
+			if (siz > 0) {
+				manBuffer[epos >> 5] &= (0xFFFFFFFF >> siz);
+			}
+		}
+	}
 }
 
 void mals(uint32_t siz, std::vector<std::pair<uint32_t, uint32_t>>& vec, uint32_t srt) {
@@ -221,6 +291,7 @@ namespace manBuf {
 
 	bool get(uint32_t pos, uint32_t siz) {
 		zcheck(siz);
+		ocheck(siz, return get(pos););
 
 		return (mgec((pos | bpow) - 1, siz) != siz);
 	}
@@ -235,6 +306,7 @@ namespace manBuf {
 		scheck(pos);
 		scheck(pos + siz - 1);
 		zcheck(siz);
+		ocheck(siz, set(pos, tog); return;);
 
 		if (tog) {
 			mseo((pos | bpow) - 1, siz);

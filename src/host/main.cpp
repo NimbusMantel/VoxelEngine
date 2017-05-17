@@ -16,13 +16,8 @@
 #define OpenCLDebug 0
 
 int main(int argc, char* argv[]) {
-	std::cout << manBuf::get((0x00000001 << BUFFER_DEPTH) - 1);
-	manBuf::set((0x00000001 << BUFFER_DEPTH) - 1, 1);			// Last valid bit position
-	std::cout << manBuf::get((0x00000001 << BUFFER_DEPTH) - 1);
-
-	std::cout << manBuf::get(0x00000001 << BUFFER_DEPTH);
-	manBuf::set(0x00000001 << BUFFER_DEPTH, 1);					// Invalid bit position, assers when BUFFER_SANITY is turned on
-	std::cout << manBuf::get(0x00000001 << BUFFER_DEPTH);
+	// Voxel buffer binary tree testing:
+	//            TO DO
 
 	if (SDL_Init(SDL_INIT_VIDEO) < 0) return -1;
 
