@@ -2,8 +2,10 @@
 
 #include <assert.h>
 #include <intrin.h>
+#include <iostream>
+#include <bitset>
 
-#define ceil(n) (int)(n + 0.5f)
+#define ceil(n) ((int)(n) + (n > (int)(n)))
 
 static uint32_t __inline clz(uint32_t n) {
 	unsigned long r; _BitScanForward(&r, n); return r;
@@ -97,9 +99,9 @@ void mses(uint32_t pos, bool tog) {
 	bool sib;
 
 	for (uint8_t inv = 1; inv <= BUFFER_DEPTH; ++inv) {
-		sib = (bool)mget(((pos & 0xFFFFFFFE) | ((pos & 0x01) ^ 0x01)) - 1);
-
-		pos >>= 1;
+		sib = (bool)mget(pos + ((-((pos & 0x01) ^ 0x01)) | 0x01));
+		
+		pos = (pos - ((pos & 0x01) ^ 0x01)) >> 1;
 
 		if (((bool)mget(pos)) == (prev && sib)) break;
 
@@ -145,11 +147,11 @@ void mseo(uint32_t pos, uint32_t siz) {
 	bool sset, eset;
 
 	for (uint8_t inv = 1; inv <= BUFFER_DEPTH; ++inv) {
-		sset = (bool)mget(((spos & 0xFFFFFFFE) | ((spos & 0x01) ^ 0x01)) - 1);
-		eset = (bool)mget(((epos & 0xFFFFFFFE) | ((epos & 0x01) ^ 0x01)) - 1);
+		sset = (bool)mget(spos + ((-((spos & 0x01) ^ 0x01)) | 0x01));
+		eset = (bool)mget(epos + ((-((epos & 0x01) ^ 0x01)) | 0x01));
 
-		spos >>= 1;
-		epos >>= 1;
+		spos = (spos - ((spos & 0x01) ^ 0x01)) >> 1;
+		epos = (spos - ((spos & 0x01) ^ 0x01)) >> 1;
 
 		pos = spos;
 		siz = (epos - spos) + 1;
@@ -165,7 +167,7 @@ void mseo(uint32_t pos, uint32_t siz) {
 			}
 
 			if (siz > 32) {
-				memset(manBuffer + pos, 0xFF, (epos - pos + 1) >> 5);
+				memset(manBuffer + pos, 0xFF, ((epos - pos + 1) >> 5) << 2);
 
 				siz &= 0x0000001F;
 			}
@@ -214,8 +216,8 @@ void msez(uint32_t pos, uint32_t siz) {
 	}
 
 	for (uint8_t inv = 1; inv <= BUFFER_DEPTH; ++inv) {
-		spos >>= 1;
-		epos >>= 1;
+		spos = (spos - ((spos & 0x01) ^ 0x01)) >> 1;
+		epos = (epos - ((epos & 0x01) ^ 0x01)) >> 1;
 
 		pos = spos;
 		siz = (epos - spos) + 1;
@@ -231,7 +233,7 @@ void msez(uint32_t pos, uint32_t siz) {
 			}
 
 			if (siz > 32) {
-				memset(manBuffer + pos, 0x00, (epos - pos + 1) >> 5);
+				memset(manBuffer + pos, 0x00, ((epos - pos + 1) >> 5) << 2);
 
 				siz &= 0x0000001F;
 			}
@@ -254,7 +256,7 @@ void mals(uint32_t siz, std::vector<std::pair<uint32_t, uint32_t>>& vec, uint32_
 				break;
 			}
 
-			srt >> 1;
+			srt = (srt - ((srt & 0x01) ^ 0x01)) >> 1;
 		}
 
 		if (level == 0) return;
@@ -276,6 +278,31 @@ void mals(uint32_t siz, std::vector<std::pair<uint32_t, uint32_t>>& vec, uint32_
 	if (free != siz) return;
 	
 	mals(siz - free, vec, srt + free);
+}
+
+void mdis() {
+	uint32_t pl = bpow - 1;
+	uint32_t il = (bpow << 1) - 1;
+	uint32_t sz = 0x01;
+	uint32_t id = 0x00;
+
+	for (uint8_t d = 0; d <= BUFFER_DEPTH; ++d) {
+		std::cout << std::string(pl, ' ');
+
+		for (uint8_t i = 0; i < sz; ++i) {
+			if (i) std::cout << std::string(il, ' ');
+
+			std::cout << bool(mget(id + i));
+		}
+
+		std::cout << std::string(pl, ' ') << std::endl;
+
+		id += sz;
+		sz <<= 1;
+
+		il = pl;
+		pl >>= 1;
+	}
 }
 
 namespace manBuf {
@@ -322,5 +349,9 @@ namespace manBuf {
 		zcheck(siz);
 
 		mals(siz, vec, 0x00);
+	}
+
+	void dis() {
+		ocheck(1, mdis(););
 	}
 }

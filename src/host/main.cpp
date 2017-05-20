@@ -13,13 +13,42 @@
 
 #include "voxel/voxel.hpp"
 
+#include <random>
+
 #define OpenCLDebug 0
 
 int main(int argc, char* argv[]) {
-	// Voxel buffer binary tree testing:
-	//            TO DO
+	// BEGIN: Voxel buffer binary tree testing
 
-	if (SDL_Init(SDL_INIT_VIDEO) < 0) return -1;
+	std::random_device rd;
+	std::mt19937 rng(rd());
+	std::uniform_int_distribution<int> uni(0, (0x01 << BUFFER_DEPTH) - 1);
+
+	std::cout << "Set Random" << std::endl << std::endl;
+
+	for (int i = 0; i < 32; ++i) {
+		manBuf::set(uni(rng), true);
+	}
+
+	manBuf::dis();
+
+	std::cout << std::endl << std::endl << "Set All" << std::endl << std::endl;
+
+	manBuf::set(0, 0x01 << BUFFER_DEPTH, true);
+
+	manBuf::dis();
+
+	std::cout << std::endl << std::endl << "Set Gap" << std::endl << std::endl;
+
+	manBuf::set(1, (0x01 << BUFFER_DEPTH) - 2, false);
+
+	manBuf::dis();
+
+	std::cout << std::endl;
+
+	// END: Voxel buffer binary tree testing
+
+	/*if (SDL_Init(SDL_INIT_VIDEO) < 0) return -1;
 
 	SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
@@ -154,7 +183,7 @@ int main(int argc, char* argv[]) {
 
 	SDL_GL_DeleteContext(context);
 	SDL_DestroyWindow(window);
-	SDL_Quit();
+	SDL_Quit();*/
 
 	return 0;
 }
