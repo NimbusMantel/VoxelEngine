@@ -25,23 +25,36 @@ int main(int argc, char* argv[]) {
 	std::uniform_int_distribution<int> uni(0, (0x01 << BUFFER_DEPTH) - 1);
 
 	std::cout << "Set Random" << std::endl << std::endl;
-
-	for (int i = 0; i < 32; ++i) {
+	for (int i = 0; i < 64; ++i) {
 		manBuf::set(uni(rng), true);
 	}
-
 	manBuf::dis();
 
 	std::cout << std::endl << std::endl << "Set All" << std::endl << std::endl;
-
 	manBuf::set(0, 0x01 << BUFFER_DEPTH, true);
-
 	manBuf::dis();
 
 	std::cout << std::endl << std::endl << "Set Gap" << std::endl << std::endl;
+	manBuf::set(2, (0x01 << BUFFER_DEPTH) - 4, false);
+	manBuf::dis();
 
-	manBuf::set(1, (0x01 << BUFFER_DEPTH) - 2, false);
+	std::cout << std::endl << std::endl << "Set Block" << std::endl << std::endl;
+	manBuf::set(11, 18, true);
+	manBuf::set(39, 7, true);
+	manBuf::dis();
 
+	std::cout << std::endl << std::endl << "Allocation" << std::endl << std::endl;
+	std::vector<std::pair<uint32_t, uint32_t>> rs;
+	manBuf::alo(23, rs);
+	for (std::vector<std::pair<uint32_t, uint32_t>>::iterator it = rs.begin(); it != rs.end(); ++it) {
+		std::cout << "(" << it->first << ": " << it->second << ") ";
+	}
+	std::cout << std::endl;
+
+	std::cout << std::endl;
+	for (std::vector<std::pair<uint32_t, uint32_t>>::iterator it = rs.begin(); it != rs.end(); ++it) {
+		manBuf::set(it->first, it->second, true);
+	}
 	manBuf::dis();
 
 	std::cout << std::endl;

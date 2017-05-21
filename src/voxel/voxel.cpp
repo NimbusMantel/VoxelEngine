@@ -8,11 +8,11 @@
 #define ceil(n) ((int)(n) + (n > (int)(n)))
 
 static uint32_t __inline clz(uint32_t n) {
-	unsigned long r; _BitScanForward(&r, n); return r;
+	unsigned long r; bool z = _BitScanReverse(&r, n); return (32 - z - r);
 }
 
 static uint32_t __inline ctz(uint32_t n) {
-	unsigned long r; _BitScanReverse(&r, n); return r;
+	unsigned long r; bool z = _BitScanForward(&r, n); return (r | (32 & (~(-z))));
 }
 
 static uint32_t __inline cnz(uint32_t n) {
@@ -35,8 +35,8 @@ static uint32_t space = bpow;
 #define ockeck(p, a) 
 #endif
 
-#define mget(p) (manBuffer[p >> 5] & (0x01 << (p & 0x1F)))
-#define mset(p, b) manBuffer[p >> 5] = (manBuffer[p >> 5] & (0xFFFFFFFF ^ (0x01 << (p & 0x1F)))) | (((uint32_t)b) << (p & 0x1F))
+#define mget(p) (manBuffer[p >> 5] & (0x80000000 >> (p & 0x1F)))
+#define mset(p, b) manBuffer[p >> 5] = (manBuffer[p >> 5] & (0xFFFFFFFF ^ (0x80000000 >> (p & 0x1F)))) | (((uint32_t)b) << (31 - (p & 0x1F)))
 
 uint32_t mgec(uint32_t pos, uint32_t siz) {
 	uint32_t free = 0;
@@ -46,7 +46,6 @@ uint32_t mgec(uint32_t pos, uint32_t siz) {
 			return siz;
 		}
 		else {
-			
 			return clz(manBuffer[pos >> 5] << (pos & 0x1F));
 		}
 	}
@@ -114,7 +113,7 @@ void mses(uint32_t pos, bool tog) {
 void mseo(uint32_t pos, uint32_t siz) {
 	uint32_t spos = pos;
 	uint32_t epos = (pos + siz - 1);
-	
+
 	if ((pos & 0x1F) && siz <= (32 - (pos & 0x1F))) {
 		space -= (cnz((manBuffer[pos >> 5] << (pos & 0x1F)) >> (32 - siz)) + siz - 32);
 
@@ -126,6 +125,7 @@ void mseo(uint32_t pos, uint32_t siz) {
 
 			manBuffer[pos >> 5] |= (0xFFFFFFFF >> (pos & 0x1F));
 
+			siz -= (32 - (pos & 0x1F));
 			pos += (32 - (pos & 0x1F));
 		}
 
@@ -143,19 +143,20 @@ void mseo(uint32_t pos, uint32_t siz) {
 			manBuffer[pos >> 5] |= (0xFFFFFFFF << (32 - siz));
 		}
 	}
-
-	bool sset, eset;
+	
+	bool sset = true;
+	bool eset = true;
 
 	for (uint8_t inv = 1; inv <= BUFFER_DEPTH; ++inv) {
-		sset = (bool)mget(spos + ((-((spos & 0x01) ^ 0x01)) | 0x01));
-		eset = (bool)mget(epos + ((-((epos & 0x01) ^ 0x01)) | 0x01));
+		sset = sset && (bool)mget(spos + ((-((spos & 0x01) ^ 0x01)) | 0x01));
+		eset = eset && (bool)mget(epos + ((-((epos & 0x01) ^ 0x01)) | 0x01));
 
 		spos = (spos - ((spos & 0x01) ^ 0x01)) >> 1;
-		epos = (spos - ((spos & 0x01) ^ 0x01)) >> 1;
-
+		epos = (epos - ((epos & 0x01) ^ 0x01)) >> 1;
+		
 		pos = spos;
 		siz = (epos - spos) + 1;
-
+		
 		if ((pos & 0x1F) && siz <= (32 - (pos & 0x1F))) {
 			manBuffer[pos >> 5] |= ((0xFFFFFFFF >> (32 - siz)) << (32 - siz - (pos & 0x1F)));
 		}
@@ -163,6 +164,7 @@ void mseo(uint32_t pos, uint32_t siz) {
 			if ((pos & 0x1F) && siz > (32 - (pos & 0x1F))) {
 				manBuffer[pos >> 5] |= (0xFFFFFFFF >> (pos & 0x1F));
 
+				siz -= (32 - (pos & 0x1F));
 				pos += (32 - (pos & 0x1F));
 			}
 
@@ -173,7 +175,7 @@ void mseo(uint32_t pos, uint32_t siz) {
 			}
 
 			if (siz > 0) {
-				manBuffer[pos >> 5] |= (0xFFFFFFFF << (32 - siz));
+				manBuffer[epos >> 5] |= (0xFFFFFFFF << (32 - siz));
 			}
 		}
 
@@ -197,6 +199,7 @@ void msez(uint32_t pos, uint32_t siz) {
 
 			manBuffer[pos >> 5] &= (0xFFFFFFFF << (32 - (pos & 0x1F)));
 
+			siz -= (32 - (pos & 0x1F));
 			pos += (32 - (pos & 0x1F));
 		}
 
@@ -228,7 +231,8 @@ void msez(uint32_t pos, uint32_t siz) {
 		else {
 			if ((pos & 0x1F) && siz > (32 - (pos & 0x1F))) {
 				manBuffer[pos >> 5] &= (0xFFFFFFFF << (32 - (pos & 0x1F)));
-
+				
+				siz -= (32 - (pos & 0x1F));
 				pos += (32 - (pos & 0x1F));
 			}
 
@@ -250,7 +254,7 @@ void mals(uint32_t siz, std::vector<std::pair<uint32_t, uint32_t>>& vec, uint32_
 	
 	if (srt) {
 		for (level = BUFFER_DEPTH; level > 0; --level) {
-			if ((srt & 0x01) && !mget(srt)) {
+			if ((srt & 0x01) && !mget(srt + 1)) {
 				srt += 1;
 
 				break;
@@ -262,22 +266,23 @@ void mals(uint32_t siz, std::vector<std::pair<uint32_t, uint32_t>>& vec, uint32_
 		if (level == 0) return;
 	}
 	else {
-		srt = 0x02;
-
 		level = 1;
+
+		srt = 1 + (bool)mget(0x01);
 	}
-
-	for (; level <= BUFFER_DEPTH; ++level) {
-		srt = (srt + ((bool)mget(srt - 1))) << 1;
-	}
-
-	uint32_t free = mgec(srt - 1, siz);
-
-	vec.push_back(std::make_pair(srt, free));
-
-	if (free != siz) return;
 	
-	mals(siz - free, vec, srt + free);
+	for (; level < BUFFER_DEPTH; ++level) {
+		srt = ((srt + 1) << 1);
+		srt -= ((bool)mget(srt - 1) ^ 0x01);
+	}
+
+	uint32_t free = mgec(srt, siz);
+
+	vec.push_back(std::make_pair((srt + 1) & (~bpow), siz ^ ((free ^ siz) & -(free < siz))));
+
+	if (free < siz) {
+		mals(siz - free, vec, srt + free);
+	}
 }
 
 void mdis() {
