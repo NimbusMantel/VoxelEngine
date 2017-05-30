@@ -59,3 +59,14 @@ Pixel calculation
              RGBpixel += RGBback * buf * beta / max(buf.r, buf.g, buf.b, beta);
              RGBback *= (1 - beta) * RGBmedium;
              RGBlight = 8 * sqrt(RGBlback);
+
+Binary instruction language
+- header: [2] [2]* (amount of instructions, adressesses of instructions)
+- CPU to GPU instructions:
+  - RES (reset the entire voxel buffer)
+  - SET [4] [16] (set voxel at index)
+  - SEC [4] [4] [16]* (set multiple voxels beginning from index)
+  - CLN [4] (clean voxel at index)
+  - CLC [4] [4] (clean multiple voxels beginning from index)
+- GPU to CPU instructions:
+  WORK IN PROGRESS

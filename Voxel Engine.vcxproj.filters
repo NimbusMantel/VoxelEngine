@@ -29,6 +29,9 @@
     <ClInclude Include="src\voxel\voxel.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\host\instruct.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Intel_OpenCL_Build_Rules Include="src\kernel\kernel.cl">

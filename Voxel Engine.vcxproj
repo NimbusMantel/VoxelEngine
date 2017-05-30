@@ -191,6 +191,7 @@
     <ClCompile Include="src\voxel\voxel.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\host\instruct.h" />
     <ClInclude Include="src\voxel\colour.hpp" />
     <ClInclude Include="src\voxel\voxel.hpp" />
   </ItemGroup>
