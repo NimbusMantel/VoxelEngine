@@ -11,7 +11,7 @@ Voxel buffer management on the CPU
 Voxel buffer on CPU and GPU are synchronized
 
 Voxel strucuture on the GPU
-- 32-bit structure: 1-active, 3-index, 4-parent, 8-children, 7-activity, 1-emitter, (8-unused)
+- 32-bit structure: 1-active, 3-index, 4-parent, 8-children, 1-search, 7-activity, 1-emitter, (7-unused)
 - 32-bit children: 32-pointer (absolute, refer to the block of voxel data (4*4=16 bytes))
 - 64 bit colour: 4-mred, 4-mgreen, 4-mblue, 4-beta,
                  4-l0red, 4-l0green, 4-l0blue,
@@ -29,12 +29,16 @@ Voxel buffer dynamics
 - Loading of voxels in order (root -> recursion on children) by requests from the GPU and CPU
 - Unloading by suggestions from the GPU checked by the CPU
 
-GPU unloading suggestions
-- 6-bit last usage counter (reset every frame for the active voxels)
-- 1-bit unused children (toggled once lowest level has been visited -> check with siblings -> recursion to parent)
+GPU loading suggestions
+- set children mask but unset first child pointer represent unloaded children
+- 7-bit last render timestamp (time - voxel)
+- 1-bit search flag
+  - update to 0 by childless leaf voxel
+  - binary OR recursive parent update
+  - binary search from the root for voxels to load or unload
+  - reset to 1 at the end of the frame
 - memory pressure level calculated by the CPU (default to 127, maximum at 1)
 - unused voxels with fallow period >= memory pressure is suggested to the CPU for unloading
-- suggestions for blocks to unload given to the CPU via a buffer (atomic array list)
 
 CPU unloading checks
 - calculation of the current memory pressure via the amount of memory needs to be inserted and how much space is left
@@ -60,13 +64,29 @@ Pixel calculation
              RGBback *= (1 - beta) * RGBmedium;
              RGBlight = 8 * sqrt(RGBlback);
 
-Binary instruction language
-- header: [2] [2]* (amount of instructions, adressesses of instructions)
-- CPU to GPU instructions:
-  - RES (reset the entire voxel buffer)
-  - SET [4] [16] (set voxel at index)
-  - SEC [4] [4] [16]* (set multiple voxels beginning from index)
-  - CLN [4] (clean voxel at index)
-  - CLC [4] [4] (clean multiple voxels beginning from index)
-- GPU to CPU instructions:
-  WORK IN PROGRESS
+CPU to GPU communication
+- 24 bit indices
+- header
+  - [s] [a] [o, n, sp]* [o, n, ap]*
+  - amounts of synchronous and asynchronous instructions
+  - instruction codes and numbers of calls of, pointers to synchronous instructions
+  - instruction codes and numbers of subcalls of, pointers to asynchronous instructions
+- instructions
+  - RLD [parent, children]*: load children -> pointer(p)
+  - ULD [parent]*: unload children -> pointer(p)
+  - ADD [parent, mask, voxels]*: add children -> children(p), poss. pointer(p)
+  - REM [parent, mask]*: remove children -> children(p), poss. pointer(p)
+  - MOV [fparent, fidx, tparent, tidx]*: move voxel -> children(op), parent(v), children(np), parent(c)
+  - EMI [index, switch]*: update emitter -> emitter(v)
+  - COL [index, colour]*: update colour -> colour(v)
+  - LIT [index, lights]*: update lights -> lights(v)
+
+GPU to CPU communication
+- 16 bit indices
+- header
+  - [a] [o, n, ap]*
+  - amount of asynchronous instructions
+  - instruction codes and numbers of subcalls of, pointers to asynchronous instructions
+- instructions
+  - REQ [parent]*: request children loadign
+  - SUG [parent]*: suggest children unloading

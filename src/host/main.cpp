@@ -17,51 +17,12 @@
 
 #define OpenCLDebug 0
 
+void testVoxelBinaryTree();
+
 int main(int argc, char* argv[]) {
-	// BEGIN: Voxel buffer binary tree testing
+	//testVoxelBinaryTree();
 
-	std::random_device rd;
-	std::mt19937 rng(rd());
-	std::uniform_int_distribution<int> uni(0, (0x01 << BUFFER_DEPTH) - 1);
-
-	std::cout << "Set Random" << std::endl << std::endl;
-	for (int i = 0; i < 64; ++i) {
-		manBuf::set(uni(rng), true);
-	}
-	manBuf::dis();
-
-	std::cout << std::endl << std::endl << "Set All" << std::endl << std::endl;
-	manBuf::set(0, 0x01 << BUFFER_DEPTH, true);
-	manBuf::dis();
-
-	std::cout << std::endl << std::endl << "Set Gap" << std::endl << std::endl;
-	manBuf::set(2, (0x01 << BUFFER_DEPTH) - 4, false);
-	manBuf::dis();
-
-	std::cout << std::endl << std::endl << "Set Block" << std::endl << std::endl;
-	manBuf::set(11, 18, true);
-	manBuf::set(39, 7, true);
-	manBuf::dis();
-
-	std::cout << std::endl << std::endl << "Allocation" << std::endl << std::endl;
-	std::vector<std::pair<uint32_t, uint32_t>> rs;
-	manBuf::alo(23, rs);
-	for (std::vector<std::pair<uint32_t, uint32_t>>::iterator it = rs.begin(); it != rs.end(); ++it) {
-		std::cout << "(" << it->first << ": " << it->second << ") ";
-	}
-	std::cout << std::endl;
-
-	std::cout << std::endl;
-	for (std::vector<std::pair<uint32_t, uint32_t>>::iterator it = rs.begin(); it != rs.end(); ++it) {
-		manBuf::set(it->first, it->second, true);
-	}
-	manBuf::dis();
-
-	std::cout << std::endl;
-
-	// END: Voxel buffer binary tree testing
-
-	/*if (SDL_Init(SDL_INIT_VIDEO) < 0) return -1;
+	if (SDL_Init(SDL_INIT_VIDEO) < 0) return -1;
 
 	SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
@@ -108,7 +69,7 @@ int main(int argc, char* argv[]) {
 	platform.getDevices(CL_DEVICE_TYPE_GPU, &devices);
 
 	cl::Device device = devices.front();
-	 
+
 	cl_context_properties props[] =
 	{
 		CL_GL_CONTEXT_KHR, (cl_context_properties)wglGetCurrentContext(),
@@ -118,9 +79,14 @@ int main(int argc, char* argv[]) {
 
 	cl::Context clContext = cl::Context(device, props);
 	
-	cl::BufferRenderGL clBuffer = cl::BufferRenderGL(clContext, CL_MEM_WRITE_ONLY, rbo, NULL);
+	cl::BufferRenderGL glBuffer = cl::BufferRenderGL(clContext, CL_MEM_WRITE_ONLY, rbo);
 	glFinish();
-	std::vector<cl::Memory> clMemory = { clBuffer };
+	std::vector<cl::Memory> glMemory = { glBuffer };
+
+	cl::Buffer vxBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, 0x01 << (BUFFER_DEPTH + 4));
+
+	cl::Buffer cgBuffer = cl::Buffer(clContext, CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY, 0x01 << 24);
+	cl::Buffer gcBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_READ_ONLY, 0x01 << 16);
 
 #if OpenCLDebug
 	char buff[256];
@@ -139,16 +105,24 @@ int main(int argc, char* argv[]) {
 #if OpenCLDebug
 	clBuild[29] = '1';
 #endif
-
+	
 	clProgram.build(clBuild);
 
 	cl::Kernel clKernel(clProgram, "test", NULL);
-	clKernel.setArg(0, clBuffer);
+	clKernel.setArg(0, glBuffer);
+	clKernel.setArg(1, vxBuffer);
+	clKernel.setArg(2, cgBuffer);
+	clKernel.setArg(3, gcBuffer);
 #if OpenCLDebug
-	clKernel.setArg(1, debBuf);
+	clKernel.setArg(4, debBuf);
 #endif
 
 	cl::CommandQueue clQueue = cl::CommandQueue(clContext, device);
+
+	uint8_t* cgMap;
+	uint32_t cgMapSize = 0x01;
+
+	uint8_t* gcMap;
 
 	int currentFrame, previousFrame = SDL_GetTicks(), fps;
 
@@ -157,18 +131,30 @@ int main(int argc, char* argv[]) {
 	SDL_Event event;
 
 	while (!quit) {
-		glClear(GL_COLOR_BUFFER_BIT);
+		cgMap = (uint8_t*)clQueue.enqueueMapBuffer(cgBuffer, CL_TRUE, CL_MAP_WRITE, 0, cgMapSize);
 
+		// Write CPU to GPU communication
+
+		clQueue.enqueueUnmapMemObject(cgBuffer, cgMap);
+		clQueue.finish();
+
+		glClear(GL_COLOR_BUFFER_BIT);
 		glFinish();
 
-		clQueue.enqueueAcquireGLObjects(&clMemory, NULL, NULL);
+		clQueue.enqueueAcquireGLObjects(&glMemory, NULL, NULL);
 		clQueue.enqueueTask(clKernel);
+
+		gcMap = (uint8_t*)clQueue.enqueueMapBuffer(gcBuffer, CL_TRUE, CL_MAP_READ, 0, 0x01 << 16);
+		
+		// Read GPU to CPU communication
+
+		clQueue.enqueueUnmapMemObject(gcBuffer, gcMap);
+
 #if OpenCLDebug
 		clQueue.enqueueReadBuffer(debBuf, CL_TRUE, 0, sizeof(buff), buff);
 		std::cout << buff;
 #endif
-		clQueue.enqueueReleaseGLObjects(&clMemory, NULL, NULL);
-
+		clQueue.enqueueReleaseGLObjects(&glMemory, NULL, NULL);
 		clQueue.finish();
 
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -182,7 +168,7 @@ int main(int argc, char* argv[]) {
 		SDL_GL_SwapWindow(window);
 
 		currentFrame = SDL_GetTicks();
-		fps = (60000 / (currentFrame - previousFrame));
+		fps = (1000 / ((currentFrame - previousFrame) | (currentFrame == previousFrame)));
 		sprintf(title, titat, fps);
 		SDL_SetWindowTitle(window, title);
 		previousFrame = currentFrame;
@@ -196,7 +182,48 @@ int main(int argc, char* argv[]) {
 
 	SDL_GL_DeleteContext(context);
 	SDL_DestroyWindow(window);
-	SDL_Quit();*/
+	SDL_Quit();
 
 	return 0;
+}
+
+void testVoxelBinaryTree() {
+	std::random_device rd;
+	std::mt19937 rng(rd());
+	std::uniform_int_distribution<int> uni(0, (0x01 << BUFFER_DEPTH) - 1);
+
+	std::cout << "Set Random" << std::endl << std::endl;
+	for (int i = 0; i < 64; ++i) {
+	manBuf::set(uni(rng), true);
+	}
+	manBuf::dis();
+
+	std::cout << std::endl << std::endl << "Set All" << std::endl << std::endl;
+	manBuf::set(0, 0x01 << BUFFER_DEPTH, true);
+	manBuf::dis();
+
+	std::cout << std::endl << std::endl << "Set Gap" << std::endl << std::endl;
+	manBuf::set(2, (0x01 << BUFFER_DEPTH) - 4, false);
+	manBuf::dis();
+
+	std::cout << std::endl << std::endl << "Set Block" << std::endl << std::endl;
+	manBuf::set(11, 18, true);
+	manBuf::set(39, 7, true);
+	manBuf::dis();
+
+	std::cout << std::endl << std::endl << "Allocation" << std::endl << std::endl;
+	std::vector<std::pair<uint32_t, uint32_t>> rs;
+	manBuf::alo(23, rs);
+	for (std::vector<std::pair<uint32_t, uint32_t>>::iterator it = rs.begin(); it != rs.end(); ++it) {
+	std::cout << "(" << it->first << ": " << it->second << ") ";
+	}
+	std::cout << std::endl;
+
+	std::cout << std::endl;
+	for (std::vector<std::pair<uint32_t, uint32_t>>::iterator it = rs.begin(); it != rs.end(); ++it) {
+	manBuf::set(it->first, it->second, true);
+	}
+	manBuf::dis();
+
+	std::cout << std::endl;
 }

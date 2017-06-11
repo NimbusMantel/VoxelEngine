@@ -13,7 +13,7 @@
 #define VOXEL_PARENT_AD(v, i, c) ((VOXEL_PARENT_PT(v[i - (c << 2)]) << 28) | (VOXEL_PARENT_PT(v[i - (c << 2) + 4]) << 24) | (VOXEL_PARENT_PT(v[i - (c << 2) + 8]) << 20) | (VOXEL_PARENT_PT(v[i - (c << 2) + 12]) << 16) | (VOXEL_PARENT_PT(v[i - (c << 2) + 16]) << 12) | (VOXEL_PARENT_PT(v[i - (c << 2) + 20]) << 8) | (VOXEL_PARENT_PT(v[i - (c << 2) + 24]) << 4) | VOXEL_PARENT_PT(v[i - (c << 2) + 28]))
 */
 
-#define BUFFER_DEPTH 6 //23
+#define BUFFER_DEPTH 23
 
 #define BUFFER_SANITY 1
 
