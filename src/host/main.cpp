@@ -12,18 +12,21 @@
 #include <Windows.h>
 
 #include "voxel/voxel.hpp"
+#include "kernel/instruct.hpp"
 
 #include <random>
 
 #define OpenCLDebug 0
 
+bool HOST_BIG_ENDIAN, DEVICE_BIG_ENDIAN;
+
 void testVoxelBinaryTree();
 
 int main(int argc, char* argv[]) {
 	//testVoxelBinaryTree();
-
+	
 	if (SDL_Init(SDL_INIT_VIDEO) < 0) return -1;
-
+	
 	SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -70,6 +73,9 @@ int main(int argc, char* argv[]) {
 
 	cl::Device device = devices.front();
 
+	union { uint32_t i; char c[4]; } bint = { 0x01020304 }; HOST_BIG_ENDIAN = (bint.c[0] == 0x01);
+	device.getInfo(CL_DEVICE_ENDIAN_LITTLE, &DEVICE_BIG_ENDIAN); DEVICE_BIG_ENDIAN = !DEVICE_BIG_ENDIAN;
+
 	cl_context_properties props[] =
 	{
 		CL_GL_CONTEXT_KHR, (cl_context_properties)wglGetCurrentContext(),
@@ -83,7 +89,7 @@ int main(int argc, char* argv[]) {
 	glFinish();
 	std::vector<cl::Memory> glMemory = { glBuffer };
 
-	cl::Buffer vxBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, 0x01 << (BUFFER_DEPTH + 4));
+	cl::Buffer vxBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, 0x80 << BUFFER_DEPTH);
 
 	cl::Buffer cgBuffer = cl::Buffer(clContext, CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY, 0x01 << 24);
 	cl::Buffer gcBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_READ_ONLY, 0x01 << 16);
@@ -93,10 +99,15 @@ int main(int argc, char* argv[]) {
 	cl::Buffer debBuf(clContext, CL_MEM_WRITE_ONLY | CL_MEM_HOST_READ_ONLY, sizeof(buff));
 #endif
 
+	std::ifstream istrm("src/kernel/instruct.hpp");
+	std::string isrc(std::istreambuf_iterator<char>(istrm), (std::istreambuf_iterator<char>()));
+	isrc = isrc.substr(isrc.find("/*KERNEL_INCLUDE_BEG*/") + 22, isrc.find("/*KERNEL_INCLUDE_END*/") - isrc.find("/*KERNEL_INCLUDE_BEG*/") - 22);
+
 	std::ifstream strm("src/kernel/kernel.cl");
 	std::string src(std::istreambuf_iterator<char>(strm), (std::istreambuf_iterator<char>()));
-
-	cl::Program::Sources sources(1, std::make_pair(src.c_str(), src.length() + 1));
+	src.replace(src.find("/*KERNEL_INCLUDE_INS*/"), 22, isrc);
+	
+	cl::Program::Sources sources = cl::Program::Sources(1, std::make_pair(src.c_str(), src.length() + 1));
 
 	cl::Program clProgram(clContext, sources);
 
@@ -108,21 +119,32 @@ int main(int argc, char* argv[]) {
 	
 	clProgram.build(clBuild);
 
-	cl::Kernel clKernel(clProgram, "test", NULL);
-	clKernel.setArg(0, glBuffer);
-	clKernel.setArg(1, vxBuffer);
-	clKernel.setArg(2, cgBuffer);
-	clKernel.setArg(3, gcBuffer);
-#if OpenCLDebug
-	clKernel.setArg(4, debBuf);
-#endif
+	cl::Kernel cgProKernel = cl::Kernel(clProgram, "cgProKernel");
+	cgProKernel.setArg(0, vxBuffer);
+	cgProKernel.setArg(1, cgBuffer);
+
+	cl::Kernel renderKernel = cl::Kernel(clProgram, "render");
+	renderKernel.setArg(0, vxBuffer);
+	renderKernel.setArg(1, glBuffer);
 
 	cl::CommandQueue clQueue = cl::CommandQueue(clContext, device);
 
 	uint8_t* cgMap;
-	uint32_t cgMapSize = 0x01;
+	uint32_t cgMapSize = 0x02;
 
 	uint8_t* gcMap;
+
+	cl::Event cgMapEvent;
+	cl::Event cgProEvent;
+	cl::Event glAquEvent;
+	cl::Event glRenEvent;
+
+	std::vector<cl::Event> cgProPrevents;
+	std::vector<cl::Event> glRenPrevents;
+	std::vector<cl::Event> glRelPrevents;
+
+	uint32_t cgInsSyncAmount = 0;
+	uint32_t cgInsAsyncAmount = 0;
 
 	int currentFrame, previousFrame = SDL_GetTicks(), fps;
 
@@ -135,26 +157,32 @@ int main(int argc, char* argv[]) {
 
 		// Write CPU to GPU communication
 
-		clQueue.enqueueUnmapMemObject(cgBuffer, cgMap);
+		clQueue.enqueueUnmapMemObject(cgBuffer, cgMap, 0, &cgMapEvent);
+
+		if ((cgInsSyncAmount + cgInsAsyncAmount) > 0) {
+			cgProKernel.setArg(2, cgInsSyncAmount);
+			cgProKernel.setArg(3, cgInsAsyncAmount);
+			cgProPrevents = {cgMapEvent};
+			clQueue.enqueueNDRangeKernel(cgProKernel, cl::NullRange, cl::NDRange(cgInsSyncAmount + cgInsAsyncAmount), cl::NullRange, &cgProPrevents, &cgProEvent);
+		}
+
 		clQueue.finish();
 
 		glClear(GL_COLOR_BUFFER_BIT);
 		glFinish();
 
-		clQueue.enqueueAcquireGLObjects(&glMemory, NULL, NULL);
-		clQueue.enqueueTask(clKernel);
+		clQueue.enqueueAcquireGLObjects(&glMemory, 0, &glAquEvent);
+		glRenPrevents = {glAquEvent};
+		clQueue.enqueueTask(renderKernel, &glRenPrevents, &glRenEvent);
+		glRelPrevents = {glRenEvent};
+		clQueue.enqueueReleaseGLObjects(&glMemory, &glRelPrevents);
 
 		gcMap = (uint8_t*)clQueue.enqueueMapBuffer(gcBuffer, CL_TRUE, CL_MAP_READ, 0, 0x01 << 16);
-		
+
 		// Read GPU to CPU communication
 
 		clQueue.enqueueUnmapMemObject(gcBuffer, gcMap);
 
-#if OpenCLDebug
-		clQueue.enqueueReadBuffer(debBuf, CL_TRUE, 0, sizeof(buff), buff);
-		std::cout << buff;
-#endif
-		clQueue.enqueueReleaseGLObjects(&glMemory, NULL, NULL);
 		clQueue.finish();
 
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -194,7 +222,7 @@ void testVoxelBinaryTree() {
 
 	std::cout << "Set Random" << std::endl << std::endl;
 	for (int i = 0; i < 64; ++i) {
-	manBuf::set(uni(rng), true);
+		manBuf::set(uni(rng), true);
 	}
 	manBuf::dis();
 
@@ -215,13 +243,13 @@ void testVoxelBinaryTree() {
 	std::vector<std::pair<uint32_t, uint32_t>> rs;
 	manBuf::alo(23, rs);
 	for (std::vector<std::pair<uint32_t, uint32_t>>::iterator it = rs.begin(); it != rs.end(); ++it) {
-	std::cout << "(" << it->first << ": " << it->second << ") ";
+		std::cout << "(" << it->first << ": " << it->second << ") ";
 	}
 	std::cout << std::endl;
 
 	std::cout << std::endl;
 	for (std::vector<std::pair<uint32_t, uint32_t>>::iterator it = rs.begin(); it != rs.end(); ++it) {
-	manBuf::set(it->first, it->second, true);
+		manBuf::set(it->first, it->second, true);
 	}
 	manBuf::dis();
 

@@ -191,15 +191,15 @@
     <ClCompile Include="src\voxel\voxel.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="src\host\instruct.h" />
+    <ClInclude Include="src\kernel\instruct.hpp" />
     <ClInclude Include="src\voxel\colour.hpp" />
     <ClInclude Include="src\voxel\voxel.hpp" />
   </ItemGroup>
   <ItemGroup>
-    <Intel_OpenCL_Build_Rules Include="src\kernel\kernel.cl" />
+    <Text Include="Notebook.txt" />
   </ItemGroup>
   <ItemGroup>
-    <Text Include="Notebook.txt" />
+    <Intel_OpenCL_Build_Rules Include="src\kernel\kernel.cl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
