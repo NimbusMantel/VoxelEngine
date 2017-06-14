@@ -4,6 +4,8 @@
 #include <vector>
 #include <utility>
 
+#include "kernel/instruct.hpp"
+
 /*
 #define VOXEL_IS_ACTIVE(v) (       v      )	>> 31
 #define VOXEL_SUB_INDEX(v) (v & 0x70000000) >> 28
@@ -31,4 +33,14 @@ namespace manBuf {
 	void alo(uint32_t siz, std::vector<std::pair<uint32_t, uint32_t>>& vec);
 
 	void dis();
+}
+
+namespace manCtG {
+	void ini();
+
+	void eqS(INS_CTG ins);
+
+	void eqA(INS_CTG ins);
+
+	uint32_t wri(uint8_t* buf, uint32_t& syn, uint32_t& asy);
 }

@@ -72,11 +72,12 @@ CPU to GPU communication
   - instruction codes and numbers of calls of, pointers to synchronous instructions
   - instruction codes and numbers of subcalls of, pointers to asynchronous instructions
 - instructions
-  - RLD [parent, children]*: load children -> pointer(p)
+  - RLD [parent, index, children]*: load children -> pointer(p)
   - ULD [parent]*: unload children -> pointer(p)
-  - ADD [parent, mask, voxels]*: add children -> children(p), poss. pointer(p)
+  - ADD [parent, mask, voxels]*: add children -> children(p)
   - REM [parent, mask]*: remove children -> children(p), poss. pointer(p)
   - MOV [fparent, fidx, tparent, tidx]*: move voxel -> children(op), parent(v), children(np), parent(c)
+  - EXP [parent, index]*: expand parent -> pointer(p)
   - EMI [index, switch]*: update emitter -> emitter(v)
   - COL [index, colour]*: update colour -> colour(v)
   - LIT [index, lights]*: update lights -> lights(v)

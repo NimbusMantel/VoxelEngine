@@ -188,6 +188,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\host\main.cpp" />
+    <ClCompile Include="src\kernel\instruct.cpp" />
     <ClCompile Include="src\voxel\voxel.cpp" />
   </ItemGroup>
   <ItemGroup>

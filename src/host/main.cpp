@@ -12,7 +12,6 @@
 #include <Windows.h>
 
 #include "voxel/voxel.hpp"
-#include "kernel/instruct.hpp"
 
 #include <random>
 
@@ -99,7 +98,7 @@ int main(int argc, char* argv[]) {
 	cl::Buffer debBuf(clContext, CL_MEM_WRITE_ONLY | CL_MEM_HOST_READ_ONLY, sizeof(buff));
 #endif
 
-	std::ifstream istrm("src/kernel/instruct.hpp");
+	std::ifstream istrm("src/kernel/instruct.cpp");
 	std::string isrc(std::istreambuf_iterator<char>(istrm), (std::istreambuf_iterator<char>()));
 	isrc = isrc.substr(isrc.find("/*KERNEL_INCLUDE_BEG*/") + 22, isrc.find("/*KERNEL_INCLUDE_END*/") - isrc.find("/*KERNEL_INCLUDE_BEG*/") - 22);
 
