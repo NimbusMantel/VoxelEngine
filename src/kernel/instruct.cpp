@@ -53,10 +53,8 @@ enum INS_GTC_P {
 	INS_GTC_SUG_P = 1
 };
 
-const uint8_t INS_CTG::num = 9;
-
-static const uint8_t ins_ctg_all[INS_CTG::num] = { INS_CTG_MOV_C, INS_CTG_REM_C, INS_CTG_EXP_C, INS_CTG_ADD_C, INS_CTG_ULD_C, INS_CTG_RLD_C, INS_CTG_EMI_C, INS_CTG_COL_C, INS_CTG_LIT_C };
-const uint8_t* INS_CTG::all = ins_ctg_all;
+static const uint8_t ins_ctg_all[INS_CTG::NUM] = { INS_CTG_MOV_C, INS_CTG_REM_C, INS_CTG_EXP_C, INS_CTG_ADD_C, INS_CTG_ULD_C, INS_CTG_RLD_C, INS_CTG_EMI_C, INS_CTG_COL_C, INS_CTG_LIT_C };
+const uint8_t* INS_CTG::ALL = ins_ctg_all;
 
 const uint8_t INS_CTG_RLD::opc = INS_CTG_RLD_C; const uint32_t INS_CTG_RLD::siz = INS_CTG_RLD_S; const uint8_t INS_CTG_RLD::pri = INS_CTG_RLD_P;
 const uint8_t INS_CTG_ULD::opc = INS_CTG_ULD_C; const uint32_t INS_CTG_ULD::siz = INS_CTG_ULD_S; const uint8_t INS_CTG_ULD::pri = INS_CTG_ULD_P;
@@ -67,3 +65,41 @@ const uint8_t INS_CTG_EXP::opc = INS_CTG_EXP_C; const uint32_t INS_CTG_EXP::siz 
 const uint8_t INS_CTG_EMI::opc = INS_CTG_EMI_C; const uint32_t INS_CTG_EMI::siz = INS_CTG_EMI_S; const uint8_t INS_CTG_EMI::pri = INS_CTG_EMI_P;
 const uint8_t INS_CTG_COL::opc = INS_CTG_COL_C; const uint32_t INS_CTG_COL::siz = INS_CTG_COL_S; const uint8_t INS_CTG_COL::pri = INS_CTG_COL_P;
 const uint8_t INS_CTG_LIT::opc = INS_CTG_LIT_C; const uint32_t INS_CTG_LIT::siz = INS_CTG_LIT_S; const uint8_t INS_CTG_LIT::pri = INS_CTG_LIT_P;
+
+// TO DO: Implement the different writing operations
+
+void INS_CTG_RLD::WRI(uint8_t* buf) {
+	return;
+}
+
+void INS_CTG_ULD::WRI(uint8_t* buf) {
+	return;
+}
+
+void INS_CTG_ADD::WRI(uint8_t* buf) {
+	return;
+}
+
+void INS_CTG_REM::WRI(uint8_t* buf) {
+	return;
+}
+
+void INS_CTG_MOV::WRI(uint8_t* buf) {
+	return;
+}
+
+void INS_CTG_EXP::WRI(uint8_t* buf) {
+	return;
+}
+
+void INS_CTG_EMI::WRI(uint8_t* buf) {
+	return;
+}
+
+void INS_CTG_COL::WRI(uint8_t* buf) {
+	return;
+}
+
+void INS_CTG_LIT::WRI(uint8_t* buf) {
+	return;
+}

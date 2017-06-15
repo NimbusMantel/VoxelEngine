@@ -145,6 +145,17 @@ int main(int argc, char* argv[]) {
 	uint32_t cgInsSyncAmount = 0;
 	uint32_t cgInsAsyncAmount = 0;
 
+	// Temporary buffer writing test BEGIN
+
+	uint8_t buf[1024];
+	
+	manCtG::eqS(std::make_unique<INS_CTG_ULD>(INS_CTG_ULD(1)));
+	manCtG::eqS(std::make_unique<INS_CTG_ULD>(INS_CTG_ULD(2)));
+
+	uint32_t siz = manCtG::wri((uint8_t*)buf, cgInsSyncAmount, cgInsAsyncAmount);
+
+	// Temporary buffer writing test END
+
 	int currentFrame, previousFrame = SDL_GetTicks(), fps;
 
 	bool quit = false;

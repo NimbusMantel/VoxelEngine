@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <vector>
 #include <utility>
+#include <memory>
 
 #include "kernel/instruct.hpp"
 
@@ -36,11 +37,9 @@ namespace manBuf {
 }
 
 namespace manCtG {
-	void ini();
+	void eqS(std::unique_ptr<INS_CTG> ins);
 
-	void eqS(INS_CTG ins);
-
-	void eqA(INS_CTG ins);
+	void eqA(std::unique_ptr<INS_CTG> ins);
 
 	uint32_t wri(uint8_t* buf, uint32_t& syn, uint32_t& asy);
 }

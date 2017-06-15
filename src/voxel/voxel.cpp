@@ -4,7 +4,7 @@
 #include <intrin.h>
 #include <iostream>
 #include <bitset>
-#include <map>
+#include <queue>
 
 #define ceil(n) ((int)(n) + (n > (int)(n)))
 
@@ -362,32 +362,140 @@ namespace manBuf {
 	}
 }
 
-static const uint8_t cPriorityMax = 15;
+static const uint8_t cPriorityMax = (0x01 << 4) - 1;
 
-std::map<uint8_t, std::vector<INS_CTG>> cPriorityQueue = {};
-std::map<uint8_t, std::vector<INS_CTG>> cAsyncInstructs = {};
-std::vector<INS_CTG> cSyncInstructs = {};
+static uint8_t cPriorityIndex = 0;
+
+std::queue<std::unique_ptr<INS_CTG>> cPriorityQueue[cPriorityMax + 1] = {std::queue<std::unique_ptr<INS_CTG>>()};
+std::vector<std::unique_ptr<INS_CTG>> cAsyncInstructs[INS_CTG::NUM] = {std::vector<std::unique_ptr<INS_CTG>>()};
+std::vector<std::unique_ptr<INS_CTG>> cSyncInstructs = {};
 
 namespace manCtG {
-	void ini() {
-		for (uint8_t i = 0; i <= cPriorityMax; ++i) {
-			cPriorityQueue[i] = std::vector<INS_CTG>();
-		}
+	void eqS(std::unique_ptr<INS_CTG> ins) {
+		uint8_t pi = (cPriorityIndex + ins->PRI()) & cPriorityMax;
 
-		for (uint8_t i = 0; i < INS_CTG::num; ++i) {
-			cAsyncInstructs[INS_CTG::all[i]] = std::vector<INS_CTG>();
-		}
+		ins->syn = (cPriorityQueue[pi].empty() ? false : (cPriorityQueue[pi].back()->OPC() == ins->OPC()));
+
+		cPriorityQueue[pi].push(std::move(ins));
 	}
 
-	void eqS(INS_CTG ins) {
-		return;
-	}
+	void eqA(std::unique_ptr<INS_CTG> ins) {
+		uint8_t pi = (cPriorityIndex + ins->PRI()) & cPriorityMax;
 
-	void eqA(INS_CTG ins) {
-		return;
+		ins->syn = false;
+
+		cPriorityQueue[pi].push(std::move(ins));
 	}
 
 	uint32_t wri(uint8_t* buf, uint32_t& syn, uint32_t& asy) {
-		return -1;
+		uint32_t size = 0;
+		syn = 0;
+		asy = 0;
+
+		// TO DO: Check with the max size and stop accordingly
+
+		std::unique_ptr<INS_CTG> ptr;
+
+		for (uint8_t pi = (cPriorityIndex - 1) & cPriorityMax; pi != cPriorityIndex; pi = (pi - 1) & cPriorityMax) {
+			while (cPriorityQueue[pi].size() > 0) {
+				ptr = std::move(cPriorityQueue[pi].front());
+
+				cPriorityQueue[pi].pop();
+
+				if (ptr->syn) {
+					cSyncInstructs.push_back(std::move(ptr));
+				}
+				else if (cPriorityQueue[pi].size() > 0 && cPriorityQueue[pi].front()->syn) {
+					cSyncInstructs.push_back(std::move(ptr));
+
+					syn += 1;
+				}
+				else {
+					cAsyncInstructs[ptr->OPC()].push_back(std::move(ptr));
+
+					asy += 1;
+				}
+			}
+		}
+
+		uint32_t bIdx = -7;
+		uint32_t headers = 0;
+
+		for (uint32_t i = 0; i < cSyncInstructs.size(); ++i) {
+			if (!cSyncInstructs[i]->syn) {
+				bIdx += 7;
+				headers += 1;
+
+				buf[bIdx] = cSyncInstructs[i]->OPC();
+				buf[bIdx + 1] = buf[bIdx + 2] = 0x00;
+				buf[bIdx + 3] = 0x01;
+			}
+			else {
+				buf[bIdx + 1] += 1;
+				buf[bIdx + 2] += (bool)buf[bIdx + 1];
+				buf[bIdx + 3] += ((bool)buf[bIdx + 1] && (bool)buf[bIdx + 2]);
+			}
+		}
+
+		for (uint8_t i = 0; i < INS_CTG::NUM; ++i) {
+			if (cAsyncInstructs[INS_CTG::ALL[i]].size()) {
+				bIdx += 7;
+				headers += 1;
+
+				buf[bIdx] = INS_CTG::ALL[i];
+				buf[bIdx + 1] = cAsyncInstructs[INS_CTG::ALL[i]].size() & 0xFF0000;
+				buf[bIdx + 2] = cAsyncInstructs[INS_CTG::ALL[i]].size() & 0x00FF00;
+				buf[bIdx + 3] = cAsyncInstructs[INS_CTG::ALL[i]].size() & 0x0000FF;
+			}
+		}
+
+		size = bIdx + 7;
+
+		uint32_t amount;
+		uint32_t iIdx = 0;
+
+		uint8_t insCode;
+		uint32_t insSize;
+
+		std::vector<std::unique_ptr<INS_CTG>>* insData;
+
+		for (bIdx = 0; bIdx < headers; ++bIdx) {
+			amount = ((((uint32_t)buf[bIdx * 7 + 1]) << 16) | (((uint16_t)buf[bIdx * 7 + 2]) << 8) | buf[bIdx * 7 + 3]);
+
+			buf[bIdx + 4] = size & 0x0000FF;
+			buf[bIdx + 5] = size & 0x00FF00;
+			buf[bIdx + 6] = size & 0xFF0000;
+
+			if (headers < syn) {
+				insCode = buf[bIdx];
+				insSize = cSyncInstructs[iIdx]->SIZ();
+
+				insData = &cSyncInstructs;
+			}
+			else {
+				insCode = buf[bIdx];
+				insSize = cAsyncInstructs[insCode][0]->SIZ();
+
+				insData = &cAsyncInstructs[insCode];
+			}
+
+			for (uint32_t i = 0; i < amount; ++i) {
+				(*insData)[iIdx]->WRI(buf + size);
+
+				iIdx += 1;
+
+				size += insSize;
+			}
+		}
+
+		cPriorityIndex = (cPriorityIndex + 1) & cPriorityMax;
+
+		cSyncInstructs.clear();
+
+		for (uint8_t i = 0; i < INS_CTG::NUM; ++i) {
+			cAsyncInstructs[i].clear();
+		}
+
+		return size;
 	}
 }

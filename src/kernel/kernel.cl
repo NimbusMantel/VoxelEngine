@@ -19,6 +19,7 @@ void cgUnload(uint32_t parent);
 void cgAdd(uint32_t parent, uint8_t mask, uint32_t c0_0, uint32_t c0_1, uint32_t c0_2, uint32_t c0_3, uint32_t c1_0, uint32_t c1_1, uint32_t c1_2, uint32_t c1_3, uint32_t c2_0, uint32_t c2_1, uint32_t c2_2, uint32_t c2_3, uint32_t c3_0, uint32_t c3_1, uint32_t c3_2, uint32_t c3_3, uint32_t c4_0, uint32_t c4_1, uint32_t c4_2, uint32_t c4_3, uint32_t c5_0, uint32_t c5_1, uint32_t c5_2, uint32_t c5_3, uint32_t c6_0, uint32_t c6_1, uint32_t c6_2, uint32_t c6_3, uint32_t c7_0, uint32_t c7_1, uint32_t c7_2, uint32_t c7_3);
 void cgRemove(uint32_t parent, uint8_t mask);
 void cgMove(uint32_t fparent, uint8_t fidx, uint32_t tparent, uint8_t tidx);
+void cgExpand(uint32_t parent, uint32_t index);
 void cgEmitter(uint32_t index, uint32_t emitter);
 void cgColour(uint32_t index, uint32_t colour);
 void cgLights(uint32_t index, uint32_t lights_0, uint32_t lights_1);
@@ -62,6 +63,7 @@ __kernel void cgProKernel(__global __read_write uint32_t* vxBuffer, __global __r
 		case INS_CTG_ADD_C: size = INS_CTG_ADD_S; break;
 		case INS_CTG_REM_C: size = INS_CTG_REM_S; break;
 		case INS_CTG_MOV_C: size = INS_CTG_MOV_S; break;
+		case INS_CTG_EXP_C: size = INS_CTG_EXP_S; break;
 		case INS_CTG_EMI_C: size = INS_CTG_EMI_S; break;
 		case INS_CTG_COL_C: size = INS_CTG_COL_S; break;
 		case INS_CTG_LIT_C: size = INS_CTG_LIT_S; break;
@@ -79,6 +81,7 @@ __kernel void cgProKernel(__global __read_write uint32_t* vxBuffer, __global __r
 			case INS_CTG_ADD_C: cgAdd(INT_BUF(cgBuffer, pointer), cgBuffer[pointer + 4], INT_BUF(cgBuffer, pointer + 5), INT_BUF(cgBuffer, pointer + 9), INT_BUF(cgBuffer, pointer + 13), INT_BUF(cgBuffer, pointer + 17), INT_BUF(cgBuffer, pointer + 21), INT_BUF(cgBuffer, pointer + 25), INT_BUF(cgBuffer, pointer + 29), INT_BUF(cgBuffer, pointer + 33), INT_BUF(cgBuffer, pointer + 37), INT_BUF(cgBuffer, pointer + 41), INT_BUF(cgBuffer, pointer + 45), INT_BUF(cgBuffer, pointer + 49), INT_BUF(cgBuffer, pointer + 53), INT_BUF(cgBuffer, pointer + 57), INT_BUF(cgBuffer, pointer + 61), INT_BUF(cgBuffer, pointer + 65), INT_BUF(cgBuffer, pointer + 69), INT_BUF(cgBuffer, pointer + 73), INT_BUF(cgBuffer, pointer + 77), INT_BUF(cgBuffer, pointer + 81), INT_BUF(cgBuffer, pointer + 85), INT_BUF(cgBuffer, pointer + 89), INT_BUF(cgBuffer, pointer + 93), INT_BUF(cgBuffer, pointer + 97), INT_BUF(cgBuffer, pointer + 101), INT_BUF(cgBuffer, pointer + 105), INT_BUF(cgBuffer, pointer + 109), INT_BUF(cgBuffer, pointer + 113), INT_BUF(cgBuffer, pointer + 117), INT_BUF(cgBuffer, pointer + 121), INT_BUF(cgBuffer, pointer + 125), INT_BUF(cgBuffer, pointer + 129)); break;
 			case INS_CTG_REM_C: cgRemove(INT_BUF(cgBuffer, pointer), cgBuffer[pointer + 4]); break; break;
 			case INS_CTG_MOV_C: cgMove(INT_BUF(cgBuffer, pointer), ((cgBuffer[pointer + 8] & 0xE0) >> 5), INT_BUF(cgBuffer, pointer + 4), ((cgBuffer[pointer + 8] & 0x1C) >> 2)); break;
+			case INS_CTG_EXP_C: cgExpand(INT_BUF(cgBuffer, pointer), INT_BUF(cgBuffer, pointer + 4)); break;
 			case INS_CTG_EMI_C: cgEmitter(INT_BUF(cgBuffer, pointer), ((cgBuffer[pointer + 4] & 0x80) >> 7)); break;
 			case INS_CTG_COL_C: cgColour(INT_BUF(cgBuffer, pointer), (((uint32_t)cgBuffer[pointer + 4] << 8) | cgBuffer[pointer + 5])); break;
 			case INS_CTG_LIT_C: cgLights(INT_BUF(cgBuffer, pointer), ((uint32_t)INT_BUF(cgBuffer, pointer + 4) << 8), (((uint32_t)cgBuffer[pointer + 4] << 8) | cgBuffer[pointer + 5])); break;
@@ -120,6 +123,10 @@ void cgRemove(uint32_t parent, uint8_t mask) {
 }
 
 void cgMove(uint32_t fparent, uint8_t fidx, uint32_t tparent, uint8_t tidx) {
+	return;
+}
+
+void cgExpand(uint32_t parent, uint32_t index) {
 	return;
 }
 
