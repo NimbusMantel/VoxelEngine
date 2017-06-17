@@ -4,7 +4,7 @@
 #include <intrin.h>
 #include <iostream>
 #include <bitset>
-#include <queue>
+#include <deque>
 
 #define ceil(n) ((int)(n) + (n > (int)(n)))
 
@@ -362,21 +362,179 @@ namespace manBuf {
 	}
 }
 
+static uint8_t cBuffer[0x01 << 24];
+static uint8_t* cBuf = (uint8_t*)cBuffer;
+
 static const uint8_t cPriorityMax = (0x01 << 4) - 1;
 
 static uint8_t cPriorityIndex = 0;
 
-std::queue<std::unique_ptr<INS_CTG>> cPriorityQueue[cPriorityMax + 1] = {std::queue<std::unique_ptr<INS_CTG>>()};
+std::deque<std::unique_ptr<INS_CTG>> cPriorityQueue[cPriorityMax + 1] = {std::deque<std::unique_ptr<INS_CTG>>()};
 std::vector<std::unique_ptr<INS_CTG>> cAsyncInstructs[INS_CTG::NUM] = {std::vector<std::unique_ptr<INS_CTG>>()};
 std::vector<std::unique_ptr<INS_CTG>> cSyncInstructs = {};
 
-namespace manCtG {
-	void eqS(std::unique_ptr<INS_CTG> ins) {
+uint32_t cWri(uint32_t& syn, uint32_t& asy) {
+	uint32_t size = 0;
+	syn = 0;
+	asy = 0;
+
+	std::unique_ptr<INS_CTG> ptr;
+
+	for (uint8_t pi = (cPriorityIndex - 1) & cPriorityMax; pi != cPriorityIndex; pi = (pi - 1) & cPriorityMax) {
+		while (cPriorityQueue[pi].size() > 0) {
+			if ((size & 0xFFFF00) == 0xFFFF00) {
+				if (cPriorityQueue[pi].front()->syn) {
+					if ((size + cPriorityQueue[pi].front()->SIZ()) > (0x01 << 24)) {
+						cPriorityQueue[pi].front()->syn = false;
+
+						break;
+					}
+				}
+				else if (cPriorityQueue[pi].size() > 1 && cPriorityQueue[pi][1]->syn) {
+					if ((size + cPriorityQueue[pi].front()->SIZ()) > (0x01 << 24)) {
+						break;
+					}
+					else if ((size + 7 + cPriorityQueue[pi].front()->SIZ()) > (0x01 << 24)) {
+						ptr = std::move(cPriorityQueue[pi].front());
+
+						cPriorityQueue[pi].pop_front();
+
+						cAsyncInstructs[ptr->OPC()].push_back(std::move(ptr));
+
+						asy += 1;
+
+						cPriorityQueue[pi].front()->syn = false;
+
+						break;
+					}
+				}
+				else {
+					if ((size + (0x07 & -(cAsyncInstructs[cPriorityQueue[pi].front()->OPC()].size() == 0)) + cPriorityQueue[pi].front()->SIZ()) > (0x01 << 24)) {
+						break;
+					}
+				}
+			}
+
+			ptr = std::move(cPriorityQueue[pi].front());
+
+			cPriorityQueue[pi].pop_front();
+
+			if (ptr->syn) {
+				cSyncInstructs.push_back(std::move(ptr));
+			}
+			else if (cPriorityQueue[pi].size() > 0 && cPriorityQueue[pi].front()->syn) {
+				cSyncInstructs.push_back(std::move(ptr));
+
+				syn += 1;
+			}
+			else {
+				cAsyncInstructs[ptr->OPC()].push_back(std::move(ptr));
+
+				asy += 1;
+			}
+		}
+	}
+
+	if (syn == 0 && asy == 0) return 0;
+
+	uint32_t bIdx = -7;
+	uint32_t headers = 0;
+
+	for (uint32_t i = 0; i < cSyncInstructs.size(); ++i) {
+		if (!cSyncInstructs[i]->syn) {
+			bIdx += 7;
+			headers += 7;
+
+			cBuf[bIdx] = cSyncInstructs[i]->OPC();
+			cBuf[bIdx + 1] = cBuf[bIdx + 2] = 0x00;
+			cBuf[bIdx + 3] = 0x01;
+		}
+		else {
+			cBuf[bIdx + 3] += 1;
+			cBuf[bIdx + 2] += (cBuf[bIdx + 3] == 0);
+			cBuf[bIdx + 1] += ((cBuf[bIdx + 2] == 0) && (cBuf[bIdx + 3] == 0));
+		}
+	}
+
+	for (uint8_t i = 0; i < INS_CTG::NUM; ++i) {
+		if (cAsyncInstructs[INS_CTG::ALL[i]].size()) {
+			bIdx += 7;
+			headers += 7;
+
+			cBuf[bIdx] = INS_CTG::ALL[i];
+			cBuf[bIdx + 1] = (cAsyncInstructs[INS_CTG::ALL[i]].size() & 0xFF0000) >> 16;
+			cBuf[bIdx + 2] = (cAsyncInstructs[INS_CTG::ALL[i]].size() & 0x00FF00) >> 8;
+			cBuf[bIdx + 3] = (cAsyncInstructs[INS_CTG::ALL[i]].size() & 0x0000FF);
+		}
+	}
+
+	size = bIdx + 7;
+
+	uint32_t amount;
+	uint32_t iIdx = 0;
+
+	uint8_t insCode;
+	uint32_t insSize;
+
+	std::vector<std::unique_ptr<INS_CTG>>* insData;
+
+	syn *= 7;
+
+	for (bIdx = 0; bIdx < headers; bIdx += 7) {
+		amount = ((((uint32_t)cBuf[bIdx + 1]) << 16) | (((uint16_t)cBuf[bIdx + 2]) << 8) | cBuf[bIdx + 3]);
+
+		cBuf[bIdx + 4] = (size & 0xFF0000) >> 16;
+		cBuf[bIdx + 5] = (size & 0x00FF00) >> 8;
+		cBuf[bIdx + 6] = (size & 0x0000FF);
+
+		if (bIdx < syn) {
+			insCode = cBuf[bIdx];
+			insSize = cSyncInstructs[iIdx]->SIZ();
+
+			insData = &cSyncInstructs;
+		}
+		else {
+			insCode = cBuf[bIdx];
+			insSize = cAsyncInstructs[insCode][0]->SIZ();
+
+			insData = &cAsyncInstructs[insCode];
+
+			iIdx = 0;
+		}
+
+		for (uint32_t i = 0; i < amount; ++i) {
+			(*insData)[iIdx]->WRI(cBuf + size);
+
+			iIdx += 1;
+
+			size += insSize;
+		}
+	}
+
+	syn /= 7;
+
+	cPriorityIndex = (cPriorityIndex + 1) & cPriorityMax;
+
+	cSyncInstructs.clear();
+
+	for (uint8_t i = 0; i < INS_CTG::NUM; ++i) {
+		cAsyncInstructs[i].clear();
+	}
+
+	return size;
+}
+
+namespace manCTG {
+	uint8_t* buf() {
+		return cBuf;
+	}
+
+	void eqS(std::unique_ptr<INS_CTG> ins, bool fBg /* = false */) {
 		uint8_t pi = (cPriorityIndex + ins->PRI()) & cPriorityMax;
 
-		ins->syn = (cPriorityQueue[pi].empty() ? false : (cPriorityQueue[pi].back()->OPC() == ins->OPC()));
+		ins->syn = ((fBg || cPriorityQueue[pi].empty()) ? false : (cPriorityQueue[pi].back()->OPC() == ins->OPC()));
 
-		cPriorityQueue[pi].push(std::move(ins));
+		cPriorityQueue[pi].push_back(std::move(ins));
 	}
 
 	void eqA(std::unique_ptr<INS_CTG> ins) {
@@ -384,118 +542,10 @@ namespace manCtG {
 
 		ins->syn = false;
 
-		cPriorityQueue[pi].push(std::move(ins));
+		cPriorityQueue[pi].push_back(std::move(ins));
 	}
 
-	uint32_t wri(uint8_t* buf, uint32_t& syn, uint32_t& asy) {
-		uint32_t size = 0;
-		syn = 0;
-		asy = 0;
-
-		// TO DO: Check with the max size and stop accordingly
-
-		std::unique_ptr<INS_CTG> ptr;
-
-		for (uint8_t pi = (cPriorityIndex - 1) & cPriorityMax; pi != cPriorityIndex; pi = (pi - 1) & cPriorityMax) {
-			while (cPriorityQueue[pi].size() > 0) {
-				ptr = std::move(cPriorityQueue[pi].front());
-
-				cPriorityQueue[pi].pop();
-
-				if (ptr->syn) {
-					cSyncInstructs.push_back(std::move(ptr));
-				}
-				else if (cPriorityQueue[pi].size() > 0 && cPriorityQueue[pi].front()->syn) {
-					cSyncInstructs.push_back(std::move(ptr));
-
-					syn += 1;
-				}
-				else {
-					cAsyncInstructs[ptr->OPC()].push_back(std::move(ptr));
-
-					asy += 1;
-				}
-			}
-		}
-
-		uint32_t bIdx = -7;
-		uint32_t headers = 0;
-
-		for (uint32_t i = 0; i < cSyncInstructs.size(); ++i) {
-			if (!cSyncInstructs[i]->syn) {
-				bIdx += 7;
-				headers += 1;
-
-				buf[bIdx] = cSyncInstructs[i]->OPC();
-				buf[bIdx + 1] = buf[bIdx + 2] = 0x00;
-				buf[bIdx + 3] = 0x01;
-			}
-			else {
-				buf[bIdx + 1] += 1;
-				buf[bIdx + 2] += (bool)buf[bIdx + 1];
-				buf[bIdx + 3] += ((bool)buf[bIdx + 1] && (bool)buf[bIdx + 2]);
-			}
-		}
-
-		for (uint8_t i = 0; i < INS_CTG::NUM; ++i) {
-			if (cAsyncInstructs[INS_CTG::ALL[i]].size()) {
-				bIdx += 7;
-				headers += 1;
-
-				buf[bIdx] = INS_CTG::ALL[i];
-				buf[bIdx + 1] = cAsyncInstructs[INS_CTG::ALL[i]].size() & 0xFF0000;
-				buf[bIdx + 2] = cAsyncInstructs[INS_CTG::ALL[i]].size() & 0x00FF00;
-				buf[bIdx + 3] = cAsyncInstructs[INS_CTG::ALL[i]].size() & 0x0000FF;
-			}
-		}
-
-		size = bIdx + 7;
-
-		uint32_t amount;
-		uint32_t iIdx = 0;
-
-		uint8_t insCode;
-		uint32_t insSize;
-
-		std::vector<std::unique_ptr<INS_CTG>>* insData;
-
-		for (bIdx = 0; bIdx < headers; ++bIdx) {
-			amount = ((((uint32_t)buf[bIdx * 7 + 1]) << 16) | (((uint16_t)buf[bIdx * 7 + 2]) << 8) | buf[bIdx * 7 + 3]);
-
-			buf[bIdx + 4] = size & 0x0000FF;
-			buf[bIdx + 5] = size & 0x00FF00;
-			buf[bIdx + 6] = size & 0xFF0000;
-
-			if (headers < syn) {
-				insCode = buf[bIdx];
-				insSize = cSyncInstructs[iIdx]->SIZ();
-
-				insData = &cSyncInstructs;
-			}
-			else {
-				insCode = buf[bIdx];
-				insSize = cAsyncInstructs[insCode][0]->SIZ();
-
-				insData = &cAsyncInstructs[insCode];
-			}
-
-			for (uint32_t i = 0; i < amount; ++i) {
-				(*insData)[iIdx]->WRI(buf + size);
-
-				iIdx += 1;
-
-				size += insSize;
-			}
-		}
-
-		cPriorityIndex = (cPriorityIndex + 1) & cPriorityMax;
-
-		cSyncInstructs.clear();
-
-		for (uint8_t i = 0; i < INS_CTG::NUM; ++i) {
-			cAsyncInstructs[i].clear();
-		}
-
-		return size;
+	uint32_t wri(uint32_t& syn, uint32_t& asy) {
+		return cWri(syn, asy);
 	}
 }

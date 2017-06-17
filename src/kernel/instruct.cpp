@@ -1,5 +1,8 @@
 #include "instruct.hpp"
 
+#define INT16_BUF(i, b, p) b[p] = ((i) & 0xFF00) >> 8; b[p + 1] = ((i) & 0x00FF);
+#define INT32_BUF(i, b, p) b[p] = ((i) & 0xFF000000) >> 24; b[p + 1] = ((i) & 0x00FF0000) >> 16; b[p + 2] = ((i) & 0x0000FF00) >> 8; b[p + 3] = ((i) & 0x000000FF);
+
 /*KERNEL_INCLUDE_BEG*/
 enum INS_CTG_C {
 	INS_CTG_RLD_C,
@@ -66,40 +69,66 @@ const uint8_t INS_CTG_EMI::opc = INS_CTG_EMI_C; const uint32_t INS_CTG_EMI::siz 
 const uint8_t INS_CTG_COL::opc = INS_CTG_COL_C; const uint32_t INS_CTG_COL::siz = INS_CTG_COL_S; const uint8_t INS_CTG_COL::pri = INS_CTG_COL_P;
 const uint8_t INS_CTG_LIT::opc = INS_CTG_LIT_C; const uint32_t INS_CTG_LIT::siz = INS_CTG_LIT_S; const uint8_t INS_CTG_LIT::pri = INS_CTG_LIT_P;
 
-// TO DO: Implement the different writing operations
-
 void INS_CTG_RLD::WRI(uint8_t* buf) {
-	return;
+	INT32_BUF(parent, buf, 0);
+
+	INT32_BUF(index, buf, 4);
+
+	for (uint8_t i = 0; i < 32; ++i) {
+		INT32_BUF(children[i], buf, 8 + i * 4);
+	}
 }
 
 void INS_CTG_ULD::WRI(uint8_t* buf) {
-	return;
+	INT32_BUF(parent, buf, 0);
 }
 
 void INS_CTG_ADD::WRI(uint8_t* buf) {
-	return;
+	INT32_BUF(parent, buf, 0);
+	
+	buf[4] = mask;
+
+	for (uint8_t i = 0; i < 32; ++i) {
+		INT32_BUF(children[i], buf, 5 + i * 4);
+	}
 }
 
 void INS_CTG_REM::WRI(uint8_t* buf) {
-	return;
+	INT32_BUF(parent, buf, 0);
+
+	buf[4] = mask;
 }
 
 void INS_CTG_MOV::WRI(uint8_t* buf) {
-	return;
+	INT32_BUF(fparent, buf, 0);
+
+	INT32_BUF(tparent, buf, 4);
+
+	buf[8] = (((fidx & 0x07) << 5) | ((tidx & 0x07) << 2));
 }
 
 void INS_CTG_EXP::WRI(uint8_t* buf) {
-	return;
+	INT32_BUF(parent, buf, 0);
+
+	INT32_BUF(index, buf, 4);
 }
 
 void INS_CTG_EMI::WRI(uint8_t* buf) {
-	return;
+	INT32_BUF(index, buf, 0);
+
+	buf[4] = emitter << 7;
 }
 
 void INS_CTG_COL::WRI(uint8_t* buf) {
-	return;
+	INT32_BUF(index, buf, 0);
+
+	INT16_BUF(colour, buf, 4);
 }
 
 void INS_CTG_LIT::WRI(uint8_t* buf) {
-	return;
+	INT32_BUF(index, buf, 0);
+
+	INT16_BUF(lights[0], buf, 4);
+	INT16_BUF(lights[1], buf, 6);
+	INT16_BUF(lights[2], buf, 8);
 }

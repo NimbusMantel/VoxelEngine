@@ -128,12 +128,12 @@ int main(int argc, char* argv[]) {
 
 	cl::CommandQueue clQueue = cl::CommandQueue(clContext, device);
 
-	uint8_t* cgMap;
-	uint32_t cgMapSize = 0x02;
+	uint8_t* cgBuf = manCtG::buf();
+	uint32_t cgBufSize;
 
 	uint8_t* gcMap;
 
-	cl::Event cgMapEvent;
+	cl::Event cgWriEvent;
 	cl::Event cgProEvent;
 	cl::Event glAquEvent;
 	cl::Event glRenEvent;
@@ -145,17 +145,6 @@ int main(int argc, char* argv[]) {
 	uint32_t cgInsSyncAmount = 0;
 	uint32_t cgInsAsyncAmount = 0;
 
-	// Temporary buffer writing test BEGIN
-
-	uint8_t buf[1024];
-	
-	manCtG::eqS(std::make_unique<INS_CTG_ULD>(INS_CTG_ULD(1)));
-	manCtG::eqS(std::make_unique<INS_CTG_ULD>(INS_CTG_ULD(2)));
-
-	uint32_t siz = manCtG::wri((uint8_t*)buf, cgInsSyncAmount, cgInsAsyncAmount);
-
-	// Temporary buffer writing test END
-
 	int currentFrame, previousFrame = SDL_GetTicks(), fps;
 
 	bool quit = false;
@@ -163,16 +152,16 @@ int main(int argc, char* argv[]) {
 	SDL_Event event;
 
 	while (!quit) {
-		cgMap = (uint8_t*)clQueue.enqueueMapBuffer(cgBuffer, CL_TRUE, CL_MAP_WRITE, 0, cgMapSize);
+		// Enqueue CPU to GPU instrcutions
 
-		// Write CPU to GPU communication
+		cgBufSize = manCtG::wri(cgInsSyncAmount, cgInsAsyncAmount);
+		
+		if (cgBufSize > 0) {
+			clQueue.enqueueWriteBuffer(cgBuffer, true, 0, cgBufSize, (void*)cgBuf, 0, &cgWriEvent);
 
-		clQueue.enqueueUnmapMemObject(cgBuffer, cgMap, 0, &cgMapEvent);
-
-		if ((cgInsSyncAmount + cgInsAsyncAmount) > 0) {
 			cgProKernel.setArg(2, cgInsSyncAmount);
 			cgProKernel.setArg(3, cgInsAsyncAmount);
-			cgProPrevents = {cgMapEvent};
+			cgProPrevents = {cgWriEvent};
 			clQueue.enqueueNDRangeKernel(cgProKernel, cl::NullRange, cl::NDRange(cgInsSyncAmount + cgInsAsyncAmount), cl::NullRange, &cgProPrevents, &cgProEvent);
 		}
 
@@ -189,7 +178,7 @@ int main(int argc, char* argv[]) {
 
 		gcMap = (uint8_t*)clQueue.enqueueMapBuffer(gcBuffer, CL_TRUE, CL_MAP_READ, 0, 0x01 << 16);
 
-		// Read GPU to CPU communication
+		// TO DO: Read GPU to CPU communication
 
 		clQueue.enqueueUnmapMemObject(gcBuffer, gcMap);
 
