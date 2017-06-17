@@ -375,6 +375,8 @@ std::vector<std::unique_ptr<INS_CTG>> cSyncInstructs = {};
 
 uint32_t cWri(uint32_t& syn, uint32_t& asy) {
 	uint32_t size = 0;
+	uint32_t nSiz = 0;
+
 	syn = 0;
 	asy = 0;
 
@@ -382,52 +384,63 @@ uint32_t cWri(uint32_t& syn, uint32_t& asy) {
 
 	for (uint8_t pi = (cPriorityIndex - 1) & cPriorityMax; pi != cPriorityIndex; pi = (pi - 1) & cPriorityMax) {
 		while (cPriorityQueue[pi].size() > 0) {
-			if ((size & 0xFFFF00) == 0xFFFF00) {
-				if (cPriorityQueue[pi].front()->syn) {
-					if ((size + cPriorityQueue[pi].front()->SIZ()) > (0x01 << 24)) {
-						cPriorityQueue[pi].front()->syn = false;
-
-						break;
-					}
-				}
-				else if (cPriorityQueue[pi].size() > 1 && cPriorityQueue[pi][1]->syn) {
-					if ((size + cPriorityQueue[pi].front()->SIZ()) > (0x01 << 24)) {
-						break;
-					}
-					else if ((size + 7 + cPriorityQueue[pi].front()->SIZ()) > (0x01 << 24)) {
-						ptr = std::move(cPriorityQueue[pi].front());
-
-						cPriorityQueue[pi].pop_front();
-
-						cAsyncInstructs[ptr->OPC()].push_back(std::move(ptr));
-
-						asy += 1;
-
-						cPriorityQueue[pi].front()->syn = false;
-
-						break;
-					}
-				}
-				else {
-					if ((size + (0x07 & -(cAsyncInstructs[cPriorityQueue[pi].front()->OPC()].size() == 0)) + cPriorityQueue[pi].front()->SIZ()) > (0x01 << 24)) {
-						break;
-					}
-				}
-			}
-
 			ptr = std::move(cPriorityQueue[pi].front());
 
 			cPriorityQueue[pi].pop_front();
 
 			if (ptr->syn) {
+				nSiz = size + ptr->SIZ();
+
+				if (nSiz > (0x01 << 24)) {
+					ptr->syn = false;
+
+					cPriorityQueue[pi].push_front(std::move(ptr));
+
+					break;
+				}
+
+				size = nSiz;
+				
 				cSyncInstructs.push_back(std::move(ptr));
 			}
 			else if (cPriorityQueue[pi].size() > 0 && cPriorityQueue[pi].front()->syn) {
+				nSiz = size + ptr->SIZ();
+				
+				if (nSiz > (0x01 << 24)) {
+					cPriorityQueue[pi].push_front(std::move(ptr));
+
+					break;
+				}
+
+				nSiz += 7;
+
+				if (nSiz > (0x01 << 24)) {
+					cAsyncInstructs[ptr->OPC()].push_back(std::move(ptr));
+
+					asy += 1;
+
+					cPriorityQueue[pi].front()->syn = false;
+
+					break;
+				}
+
+				size = nSiz;
+
 				cSyncInstructs.push_back(std::move(ptr));
 
 				syn += 1;
 			}
 			else {
+				nSiz = size + (0x07 & -(cAsyncInstructs[ptr->OPC()].size() == 0)) + ptr->SIZ();
+
+				if (nSiz > (0x01 << 24)) {
+					cPriorityQueue[pi].push_front(std::move(ptr));
+
+					break;
+				}
+
+				size = nSiz;
+
 				cAsyncInstructs[ptr->OPC()].push_back(std::move(ptr));
 
 				asy += 1;

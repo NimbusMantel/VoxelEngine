@@ -128,7 +128,7 @@ int main(int argc, char* argv[]) {
 
 	cl::CommandQueue clQueue = cl::CommandQueue(clContext, device);
 
-	uint8_t* cgBuf = manCtG::buf();
+	uint8_t* cgBuf = manCTG::buf();
 	uint32_t cgBufSize;
 
 	uint8_t* gcMap;
@@ -153,8 +153,8 @@ int main(int argc, char* argv[]) {
 
 	while (!quit) {
 		// Enqueue CPU to GPU instrcutions
-
-		cgBufSize = manCtG::wri(cgInsSyncAmount, cgInsAsyncAmount);
+		
+		cgBufSize = manCTG::wri(cgInsSyncAmount, cgInsAsyncAmount);
 		
 		if (cgBufSize > 0) {
 			clQueue.enqueueWriteBuffer(cgBuffer, true, 0, cgBufSize, (void*)cgBuf, 0, &cgWriEvent);
