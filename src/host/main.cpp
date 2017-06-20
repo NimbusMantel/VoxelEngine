@@ -24,6 +24,8 @@ void testVoxelBinaryTree();
 int main(int argc, char* argv[]) {
 	//testVoxelBinaryTree();
 	
+	manVox::init();
+
 	if (SDL_Init(SDL_INIT_VIDEO) < 0) return -1;
 	
 	SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);

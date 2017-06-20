@@ -36,3 +36,7 @@ namespace manCTG {
 
 	uint32_t wri(uint32_t& syn, uint32_t& asy);
 }
+
+namespace manVox {
+	void init();
+}

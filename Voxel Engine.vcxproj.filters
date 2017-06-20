@@ -39,9 +39,4 @@
   <ItemGroup>
     <Text Include="Notebook.txt" />
   </ItemGroup>
-  <ItemGroup>
-    <Intel_OpenCL_Build_Rules Include="src\kernel\kernel.cl">
-      <Filter>OpenCL Files</Filter>
-    </Intel_OpenCL_Build_Rules>
-  </ItemGroup>
 </Project>

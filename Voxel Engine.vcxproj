@@ -199,9 +199,6 @@
   <ItemGroup>
     <Text Include="Notebook.txt" />
   </ItemGroup>
-  <ItemGroup>
-    <Intel_OpenCL_Build_Rules Include="src\kernel\kernel.cl" />
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="$(VCTargetsPath)\BuildCustomizations\IntelOpenCL.targets" />
