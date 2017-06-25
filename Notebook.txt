@@ -52,6 +52,7 @@ Voxel material colour on the GPU
 - colours reapproximated by multiplication by (beta / ((2 ^ (bits + 1)) - 1))
 
 Voxel baked lighting on the GPU
+
 - inner light: stored in l0
 - six adjacent lights: three stored in sibling voxels and l1 to l3
 - emitter voxel: unshaded, front light discarded for (1, 1, 1)
@@ -91,3 +92,16 @@ GPU to CPU communication
 - instructions
   - REQ [parent]*: request children loadign
   - SUG [parent]*: suggest children unloading
+
+New voxel lighting proposal
+- 32-bit structure: 1-active, 3-index, 4-parent, 8-children, 1-search, 7-activity, (8-unused)
+- 64 bit colour: 6-pred, 6-pgreen, 6-pblue, 6-beta,
+                 5-mred, 5-pgreen, 5pblue, 1-emitter
+                 8-lred, 8-lgreen, 8-lblue
+- inner light stores
+  - pure light for inactive voxels
+  - the average light of all uncovered sides for opaque voxels
+  - the average between the pure light and the average light of all uncovered sides for transparent voxels
+- front light: previous inner light / (1, 1, 1) for emitter voxels
+- back light: next inner light
+- EMI command removed, COL contains emitter flag, LIT only refers to the inner light
