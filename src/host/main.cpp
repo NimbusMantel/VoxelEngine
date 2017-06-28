@@ -19,6 +19,11 @@
 
 bool HOST_BIG_ENDIAN, DEVICE_BIG_ENDIAN;
 
+static const uint8_t litDir[64] = { 0x00, 0x09, 0x09, 0x1A, 0x09, 0x22, 0x22, 0x33, 0x09, 0x22, 0x22, 0x33, 0x1A, 0x33, 0x33, 0x4C,
+									0x09, 0x22, 0x22, 0x33, 0x22, 0x43, 0x43, 0x64, 0x22, 0x43, 0x43, 0x64, 0x33, 0x64, 0x64, 0x95,
+									0x09, 0x22, 0x22, 0x33, 0x22, 0x43, 0x43, 0x64, 0x22, 0x43, 0x43, 0x64, 0x43, 0x64, 0x64, 0x95,
+									0x1A, 0x33, 0x33, 0x4C, 0x33, 0x64, 0x64, 0x95, 0x33, 0x64, 0x64, 0x95, 0x4C, 0x95, 0x95, 0xDE };
+
 void testVoxelBinaryTree();
 
 int main(int argc, char* argv[]) {
@@ -95,6 +100,8 @@ int main(int argc, char* argv[]) {
 	cl::Buffer cgBuffer = cl::Buffer(clContext, CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY, 0x01 << 24);
 	cl::Buffer gcBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_READ_ONLY, 0x01 << 16);
 
+	cl::Buffer ldLookup = cl::Buffer(clContext, CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY, 64);
+
 #if OpenCLDebug
 	char buff[256];
 	cl::Buffer debBuf(clContext, CL_MEM_WRITE_ONLY | CL_MEM_HOST_READ_ONLY, sizeof(buff));
@@ -127,6 +134,7 @@ int main(int argc, char* argv[]) {
 	cl::Kernel renderKernel = cl::Kernel(clProgram, "render");
 	renderKernel.setArg(0, vxBuffer);
 	renderKernel.setArg(1, glBuffer);
+	renderKernel.setArg(2, ldLookup);
 
 	cl::CommandQueue clQueue = cl::CommandQueue(clContext, device);
 
@@ -152,6 +160,9 @@ int main(int argc, char* argv[]) {
 	bool quit = false;
 
 	SDL_Event event;
+
+	clQueue.enqueueWriteBuffer(ldLookup, true, 0, 64, (void*)&litDir);
+	clQueue.finish();
 
 	while (!quit) {
 		// Enqueue CPU to GPU instrcutions

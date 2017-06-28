@@ -93,15 +93,16 @@ GPU to CPU communication
   - REQ [parent]*: request children loadign
   - SUG [parent]*: suggest children unloading
 
-New voxel lighting proposal
+New voxel material and lighting proposal
 - 32-bit structure: 1-active, 3-index, 4-parent, 8-children, 1-search, 7-activity, (8-unused)
-- 64 bit colour: 6-pred, 6-pgreen, 6-pblue, 6-beta,
+- 48 bit colour: 6-pred, 6-pgreen, 6-pblue, 6-beta,
                  5-mred, 5-pgreen, 5pblue, 1-emitter
-                 8-lred, 8-lgreen, 8-lblue
-- inner light stores
-  - pure light for inactive voxels
-  - the average light of all uncovered sides for opaque voxels
-  - the average between the pure light and the average light of all uncovered sides for transparent voxels
+- 24 bit light source: 6-sreds, 6-sgreens, 6-sblues, 6-shighlights
+- lookup table for colour values: 5-cubes, 3-sides
+- light source stores
+  - average light value: 255 * cubes / 27 * (2 * sides + highlights) / (3 * sides)
+  - side dependent variations
+    - WORK IN PROGRESS
 - front light: previous inner light / (1, 1, 1) for emitter voxels
 - back light: next inner light
-- EMI command removed, COL contains emitter flag, LIT only refers to the inner light
+- EMI command removed, COL contains emitter flag, LIT refers to the light source

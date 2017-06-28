@@ -92,7 +92,18 @@ __kernel void cgProKernel(__global __read_write uint32_t* vxBuffer, __global __r
 	}
 }
 
-__kernel void render(__global __read_write uint32_t* vxBuffer, __write_only image2d_t rbo) {
+__kernel void render(__global __read_write uint32_t* vxBuffer, __write_only image2d_t rbo, __global __read_only uint8_t* ldLookup) {
+	__local uint8_t litDir[64];
+
+	int ini = get_local_id(0) + get_local_size(0) * get_local_id(1);
+	int stp = get_local_size(0) * get_local_size(1);
+
+	for (uint8_t i = ini; i < 64; i += stp) {
+		litDir[i] = ldLookup[i];
+	}
+
+	barrier(CLK_LOCAL_MEM_FENCE);
+
 	int width = get_image_width(rbo);
 	int height = get_image_height(rbo);
 
