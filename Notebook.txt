@@ -11,13 +11,11 @@ Voxel buffer management on the CPU
 Voxel buffer on CPU and GPU are synchronized
 
 Voxel strucuture on the GPU
-- 32-bit structure: 1-active, 3-index, 4-parent, 8-children, 1-search, 7-activity, 1-emitter, (7-unused)
+- 32-bit structure: 1-active, 3-index, 4-parent, 8-children, 1-search, 7-activity, (8-unused)
 - 32-bit children: 32-pointer (absolute, refer to the block of voxel data (4*4=16 bytes))
-- 64 bit colour: 4-mred, 4-mgreen, 4-mblue, 4-beta,
-                 4-l0red, 4-l0green, 4-l0blue,
-                 4-l1red, 4-l1green, 4-l1blue,
-                 4-l2red, 4-l2green, 4-l2blue,
-                 4-l3red, 4-l3green, 4-l3blue
+- 40 bit colour: 6-pred, 6-pgreen, 6-pblue, 6-beta,
+                 5-mred, 5-pgreen, 5-pblue, 1-emitter
+- 24 bit light: 6-sreds, 6-sgreens, 6-sblues, 6-shighs
 
 Voxel structure on the CPU
 - 32-bit structure: 1-active, 3-index, 4-parent, 8-children, (16-unused)
@@ -44,18 +42,17 @@ CPU unloading checks
 - calculation of the current memory pressure via the amount of memory needs to be inserted and how much space is left
 - only unloading of voxel data which isn't in very close proximity to the player (but not in full detail) or needed for physics
 
-Voxel material colour on the GPU
-- "A physically Based Colour Model" by Robert J Oddy, Philip J Willis:
-  ratio of particle and medium colour defined by beta value
-- beta value bit distribution: 0-1(0), 2-4(1), 5-10(2), 11-13(3), 14-15(4)
-- colours premultiplied by ((2 ^ (bits + 1)) - 1)
-- colours reapproximated by multiplication by (beta / ((2 ^ (bits + 1)) - 1))
-
-Voxel baked lighting on the GPU
-
-- inner light: stored in l0
-- six adjacent lights: three stored in sibling voxels and l1 to l3
-- emitter voxel: unshaded, front light discarded for (1, 1, 1)
+Voxel material on the GPU
+- Voxel material colour system
+  - "A physically Based Colour Model" by Robert J Oddy, Philip J Willis
+  - ratio of particle and medium colour defined by beta value
+- Voxel baked lighting system
+  - local lookup table for colour values: 5-cubes, 3-sides
+  - light memory stores
+    - average light value: 255 * cubes / 27 * (2 * sides + highs) / (3 * sides)
+    - side dependent variations (WORK IN PROGRESS)
+  - front light: previous voxel's light / (1, 1, 1) for emitter voxels
+  - back light: next voxel's light
 
 Pixel calculation
 - Init: RGBpixel = (0, 0, 0); RGBback = (1, 1, 1); RGBlight = (0, 0, 0); buf;
@@ -76,12 +73,11 @@ CPU to GPU communication
   - RLD [parent, index, children]*: load children -> pointer(p)
   - ULD [parent]*: unload children -> pointer(p)
   - ADD [parent, mask, voxels]*: add children -> children(p)
-  - REM [parent, mask]*: remove children -> children(p), poss. pointer(p)
-  - MOV [fparent, fidx, tparent, tidx]*: move voxel -> children(op), parent(v), children(np), parent(c)
+  - REM [parent, mask]*: remove children -> children(p) (Only called for the topmost parent)
+  - MOV [fparent, fidx, tparent, tidx]*: move voxel -> children(op), index(v), parent(v), children(np), parent(c)
   - EXP [parent, index]*: expand parent -> pointer(p)
-  - EMI [index, switch]*: update emitter -> emitter(v)
   - COL [index, colour]*: update colour -> colour(v)
-  - LIT [index, lights]*: update lights -> lights(v)
+  - LIT [index, light]*: update light -> light(v)
 
 GPU to CPU communication
 - 16 bit indices
@@ -92,17 +88,3 @@ GPU to CPU communication
 - instructions
   - REQ [parent]*: request children loadign
   - SUG [parent]*: suggest children unloading
-
-New voxel material and lighting proposal
-- 32-bit structure: 1-active, 3-index, 4-parent, 8-children, 1-search, 7-activity, (8-unused)
-- 48 bit colour: 6-pred, 6-pgreen, 6-pblue, 6-beta,
-                 5-mred, 5-pgreen, 5pblue, 1-emitter
-- 24 bit light source: 6-sreds, 6-sgreens, 6-sblues, 6-shighlights
-- lookup table for colour values: 5-cubes, 3-sides
-- light source stores
-  - average light value: 255 * cubes / 27 * (2 * sides + highlights) / (3 * sides)
-  - side dependent variations
-    - WORK IN PROGRESS
-- front light: previous inner light / (1, 1, 1) for emitter voxels
-- back light: next inner light
-- EMI command removed, COL contains emitter flag, LIT refers to the light source
