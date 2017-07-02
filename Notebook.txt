@@ -72,8 +72,8 @@ CPU to GPU communication
 - instructions
   - RLD [parent, index, children]*: load children -> pointer(p)
   - ULD [parent]*: unload children -> pointer(p)
-  - ADD [parent, mask, voxels]*: add children -> children(p)
-  - REM [parent, mask]*: remove children -> children(p) (Only called for the topmost parent)
+  - ADD [parent, children]*: add children -> children(p) (first voxel must be valid)
+  - REM [parent, mask]*: remove children -> children(p) (only called for the topmost parent)
   - MOV [fparent, fidx, tparent, tidx]*: move voxel -> children(op), index(v), parent(v), children(np), parent(c)
   - EXP [parent, index]*: expand parent -> pointer(p)
   - COL [index, colour]*: update colour -> colour(v)

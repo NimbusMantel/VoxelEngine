@@ -382,7 +382,9 @@ uint32_t cWri(uint32_t& syn, uint32_t& asy) {
 
 	std::unique_ptr<INS_CTG> ptr;
 
-	for (uint8_t pi = (cPriorityIndex - 1) & cPriorityMax; pi != cPriorityIndex; pi = (pi - 1) & cPriorityMax) {
+	uint8_t pi = (cPriorityIndex - 1) & cPriorityMax;
+
+	while (true) {
 		while (cPriorityQueue[pi].size() > 0) {
 			ptr = std::move(cPriorityQueue[pi].front());
 
@@ -446,6 +448,12 @@ uint32_t cWri(uint32_t& syn, uint32_t& asy) {
 				asy += 1;
 			}
 		}
+
+		if (pi == cPriorityIndex) {
+			break;
+		}
+
+		pi = (pi - 1) & cPriorityMax;
 	}
 
 	if (syn == 0 && asy == 0) return 0;
@@ -499,7 +507,7 @@ uint32_t cWri(uint32_t& syn, uint32_t& asy) {
 		cBuf[bIdx + 4] = (size & 0xFF0000) >> 16;
 		cBuf[bIdx + 5] = (size & 0x00FF00) >> 8;
 		cBuf[bIdx + 6] = (size & 0x0000FF);
-
+		
 		if (bIdx < syn) {
 			insCode = cBuf[bIdx];
 			insSize = cSyncInstructs[iIdx]->SIZ();

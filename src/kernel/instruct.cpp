@@ -17,7 +17,7 @@ enum INS_CTG_C {
 enum INS_CTG_S {
 	INS_CTG_RLD_S = 136,
 	INS_CTG_ULD_S = 4,
-	INS_CTG_ADD_S = 133,
+	INS_CTG_ADD_S = 36,
 	INS_CTG_REM_S = 5,
 	INS_CTG_MOV_S = 9,
 	INS_CTG_EXP_S = 8,
@@ -81,10 +81,8 @@ void INS_CTG_ULD::WRI(uint8_t* buf) {
 void INS_CTG_ADD::WRI(uint8_t* buf) {
 	INT32_BUF(parent, buf, 0);
 	
-	buf[4] = mask;
-
-	for (uint8_t i = 0; i < 32; ++i) {
-		INT32_BUF(children[i], buf, 5 + i * 4);
+	for (uint8_t i = 0; i < 8; ++i) {
+		INT32_BUF(children[i], buf, 4 + i * 4);
 	}
 }
 

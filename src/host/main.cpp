@@ -15,7 +15,7 @@
 
 #include <random>
 
-#define OpenCLDebug 0
+#define OpenCLDebug 1
 
 bool HOST_BIG_ENDIAN, DEVICE_BIG_ENDIAN;
 
@@ -25,10 +25,9 @@ static const uint8_t litDir[64] = { 0x00, 0x09, 0x09, 0x1A, 0x09, 0x22, 0x22, 0x
 									0x1A, 0x33, 0x33, 0x4C, 0x33, 0x64, 0x64, 0x95, 0x33, 0x64, 0x64, 0x95, 0x4C, 0x95, 0x95, 0xDE };
 
 void testVoxelBinaryTree();
+void testVoxelBufferData();
 
 int main(int argc, char* argv[]) {
-	//testVoxelBinaryTree();
-
 	if (SDL_Init(SDL_INIT_VIDEO) < 0) return -1;
 	
 	SDL_GL_SetAttribute(SDL_GL_ACCELERATED_VISUAL, 1);
@@ -174,6 +173,8 @@ int main(int argc, char* argv[]) {
 		clQueue.finish();
 	}
 
+	testVoxelBufferData();
+
 	while (!quit) {
 		// Enqueue CPU to GPU instrcutions
 		
@@ -276,4 +277,69 @@ void testVoxelBinaryTree() {
 	manBuf::dis();
 
 	std::cout << std::endl;
+}
+
+void testVoxelBufferData() {
+	uint64_t cols[24] = { 0x00 };
+
+	cols[23] = 0x03F03F0001FFFFFF;
+
+	uint64_t pred = 0, pgreen = 63, pblue = 0, beta = 63, mred = 31, mgreen = 31, mblue = 31;
+
+	for (int i = 22; i >= 0; --i) {
+		pred = ((pred * beta) / max(beta, 1));
+		pgreen = ((pgreen * beta) / max(beta, 1));
+		pblue = ((pblue * beta) / max(beta, 1));
+		mred = ((7 * 31 * 31 + mred * (31 - beta)) / max(248 - beta, 1));
+		mgreen = ((7 * 31 * 31 + mgreen * (31 - beta)) / max(248 - beta, 1));
+		mblue = ((7 * 31 * 31 + mblue * (31 - beta)) / max(248 - beta, 1));
+		beta = (beta / 8);
+
+		cols[i] = (pred << 56) | (pgreen << 52) | (pblue << 46) | (beta << 40) | (mred << 35) | (mgreen << 30) | (mblue << 25) | 0x0000000001FFFFFF;
+	}
+
+	std::unique_ptr<INS_CTG> t;
+
+	uint8_t d[5] = { (cols[0] >> 56) & 0xFF, (cols[0] >> 48) & 0xFF, (cols[0] >> 40) & 0xFF, (cols[0] >> 32) & 0xFF, (cols[0] >> 24) & 0xFF };
+	std::unique_ptr<uint8_t[]> c(new uint8_t[5]());
+	memcpy(c.get(), &d, 5 * 4);
+	t.reset(new INS_CTG_COL(0, std::move(c)));
+	manCTG::eqA(std::move(t));
+
+	d[0] = (cols[0] >> 16) & 0xFF; d[1] = (cols[0] >> 8) & 0xFF; d[2] = cols[0] & 0xFF;
+	std::unique_ptr<uint8_t[]> l(new uint8_t[3]());
+	memcpy(l.get(), &d, 3 * 4);
+	t.reset(new INS_CTG_LIT(0, std::move(l)));
+	manCTG::eqA(std::move(t));
+
+	uint32_t par = 0x00;
+	uint32_t idx = 0x08;
+
+	for (int i = 1; i <= 23; ++i) {
+		idx = 8 * i;
+		
+		t.reset(new INS_CTG_EXP(par, idx));
+		manCTG::eqS(std::move(t));
+
+		par = idx + 7;
+	}
+
+	uint32_t o[8] = { 0x00 };
+	std::unique_ptr<uint32_t[]> v(new uint32_t[8]());
+
+	par = 0x00;
+
+	for (int i = 1; i <= 23; ++i) {
+		o[0] = 0xF0000000 | ((par & 0x0F) << 24);
+		o[1] = 8 * (i + 1) + 7;
+		o[2] = cols[i] >> 32;
+		o[3] = cols[i] & 0xFFFFFFFF;
+		
+		v.reset(new uint32_t[8]());
+		memcpy(v.get(), &o, 8 * 4);
+		t.reset(new INS_CTG_ADD(par, std::move(v)));
+		manCTG::eqS(std::move(t));
+
+		par = 8 * i + 7;
+	}
 }
