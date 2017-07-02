@@ -28,8 +28,6 @@ void testVoxelBinaryTree();
 
 int main(int argc, char* argv[]) {
 	//testVoxelBinaryTree();
-	
-	manVox::init();
 
 	if (SDL_Init(SDL_INIT_VIDEO) < 0) return -1;
 	
@@ -102,18 +100,13 @@ int main(int argc, char* argv[]) {
 
 	cl::Buffer ldLookup = cl::Buffer(clContext, CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY, 64);
 
-#if OpenCLDebug
-	char buff[256];
-	cl::Buffer debBuf(clContext, CL_MEM_WRITE_ONLY | CL_MEM_HOST_READ_ONLY, sizeof(buff));
-#endif
-
 	std::ifstream istrm("src/kernel/instruct.cpp");
 	std::string isrc(std::istreambuf_iterator<char>(istrm), (std::istreambuf_iterator<char>()));
 	isrc = isrc.substr(isrc.find("/*KERNEL_INCLUDE_BEG*/") + 22, isrc.find("/*KERNEL_INCLUDE_END*/") - isrc.find("/*KERNEL_INCLUDE_BEG*/") - 22);
 
 	std::ifstream strm("src/kernel/kernel.cl");
 	std::string src(std::istreambuf_iterator<char>(strm), (std::istreambuf_iterator<char>()));
-	src.replace(src.find("/*KERNEL_INCLUDE_INS*/"), 22, isrc);
+	src.replace(src.find("/*KERNEL_INCLUDE_BEG*/"), src.find("/*KERNEL_INCLUDE_END*/") - src.find("/*KERNEL_INCLUDE_BEG*/") + 22, isrc);
 	
 	cl::Program::Sources sources = cl::Program::Sources(1, std::make_pair(src.c_str(), src.length() + 1));
 
@@ -161,8 +154,25 @@ int main(int argc, char* argv[]) {
 
 	SDL_Event event;
 
-	clQueue.enqueueWriteBuffer(ldLookup, true, 0, 64, (void*)&litDir);
-	clQueue.finish();
+	// Init light lookup table
+
+	{
+		clQueue.enqueueWriteBuffer(ldLookup, true, 0, 64, (void*)&litDir);
+		clQueue.finish();
+	}
+
+	// Init voxel buffer by inserting the root
+
+	{
+		manVox::init();
+		cgBufSize = manCTG::wri(cgInsSyncAmount, cgInsAsyncAmount);
+		clQueue.enqueueWriteBuffer(cgBuffer, true, 0, cgBufSize, (void*)cgBuf, 0, &cgWriEvent);
+		cgProKernel.setArg(2, cgInsSyncAmount);
+		cgProKernel.setArg(3, cgInsAsyncAmount);
+		cgProPrevents = { cgWriEvent };
+		clQueue.enqueueNDRangeKernel(cgProKernel, cl::NullRange, cl::NDRange(cgInsSyncAmount + cgInsAsyncAmount), cl::NullRange, &cgProPrevents, &cgProEvent);
+		clQueue.finish();
+	}
 
 	while (!quit) {
 		// Enqueue CPU to GPU instrcutions

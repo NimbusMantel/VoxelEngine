@@ -10,7 +10,41 @@ typedef unsigned int		uint32_t;
 
 
 // instruction language
-/*KERNEL_INCLUDE_INS*/
+/*KERNEL_INCLUDE_BEG*/
+
+// enum values placeholders
+
+enum PLACEHOLDER {
+	INS_CTG_RLD_C,
+	INS_CTG_ULD_C,
+	INS_CTG_ADD_C,
+	INS_CTG_REM_C,
+	INS_CTG_MOV_C,
+	INS_CTG_EXP_C,
+	INS_CTG_COL_C,
+	INS_CTG_LIT_C,
+
+	INS_CTG_RLD_S,
+	INS_CTG_ULD_S,
+	INS_CTG_ADD_S,
+	INS_CTG_REM_S,
+	INS_CTG_MOV_S,
+	INS_CTG_EXP_S,
+	INS_CTG_COL_S,
+	INS_CTG_LIT_S,
+
+	INS_GTC_REQ_C,
+	INS_GTC_SUG_C,
+
+	INS_GTC_REQ_S,
+	INS_GTC_SUG_S
+};
+
+// opencl debug placeholder
+
+#define OpenCLDebug 1
+
+/*KERNEL_INCLUDE_END*/
 
 // function declarations
 
@@ -35,25 +69,29 @@ __kernel void cgProKernel(__global __read_write uint32_t* vxBuffer, __global __r
 	uint32_t size;
 
 	if (tid < syncInsAmount) {
-		insCode = cgBuffer[tid << 3];
-		amount = (cgBuffer[(tid << 3) | 0x01] << 16) | (cgBuffer[(tid << 3) | 0x02] << 8) | cgBuffer[(tid << 3) | 0x03];
-		pointer = (cgBuffer[(tid << 3) | 0x04] << 24) | (cgBuffer[(tid << 3) | 0x05] << 16) | (cgBuffer[(tid << 3) | 0x06] << 8) | cgBuffer[(tid << 3) | 0x07];
+		tid *= 7;
+
+		insCode = cgBuffer[tid];
+		amount = (cgBuffer[tid + 1] << 16) | (cgBuffer[tid + 2] << 8) | cgBuffer[tid + 3];
+		pointer = (cgBuffer[tid + 4] << 16) | (cgBuffer[tid + 5] << 8) | cgBuffer[tid + 6];
+
+		tid /= 7;
 	}
 	else {
 		tid -= syncInsAmount;
 
-		pointer = syncInsAmount << 3;
-		amount = (cgBuffer[pointer | 0x01] << 16) | (cgBuffer[pointer | 0x02] << 8) | cgBuffer[pointer | 0x03];
-
+		pointer = syncInsAmount * 7;
+		amount = (cgBuffer[pointer + 1] << 16) | (cgBuffer[pointer + 2] << 8) | cgBuffer[pointer + 3];
+		
 		while (tid >= amount) {
 			tid -= amount;
 
-			pointer += 8;
-			amount = (cgBuffer[pointer | 0x01] << 16) | (cgBuffer[pointer | 0x02] << 8) | cgBuffer[pointer | 0x03];
+			pointer += 7;
+			amount = (cgBuffer[pointer + 1] << 16) | (cgBuffer[pointer + 2] << 8) | cgBuffer[pointer + 3];
 		}
-
+		
 		insCode = cgBuffer[pointer];
-		pointer = (cgBuffer[pointer | 0x04] << 24) | (cgBuffer[pointer | 0x05] << 16) | (cgBuffer[pointer | 0x06] << 8) | cgBuffer[pointer | 0x07];
+		pointer = (cgBuffer[pointer + 4] << 16) | (cgBuffer[pointer + 5] << 8) | cgBuffer[pointer + 6];
 	}
 
 	switch (insCode) {
@@ -66,11 +104,21 @@ __kernel void cgProKernel(__global __read_write uint32_t* vxBuffer, __global __r
 		case INS_CTG_COL_C: size = INS_CTG_COL_S; break;
 		case INS_CTG_LIT_C: size = INS_CTG_LIT_S; break;
 	}
-
+	
 	if (tid >= syncInsAmount) {
 		pointer += (tid * size);
 		amount = 1;
 	}
+
+#if OpenCLDebug
+	printf("cgProKernel(syn: %u, ayn: %u)\n", syncInsAmount, asyncInsAmount);
+	printf("   ins: %u\n", insCode);
+	printf("   siz: %u\n", size);
+	printf("   amt: %u\n", amount);
+	printf("   tid: %u\n", tid);
+	printf("   ptr: %u\n", pointer);
+	printf("\n");
+#endif
 
 	while (amount > 0) {
 		switch (insCode) {
@@ -127,14 +175,33 @@ void cgLoad(__global uint32_t* vxBuffer, uint32_t parent, uint32_t index, uint32
 	vxBuffer[idx + 28] = c7_0; vxBuffer[idx + 29] = c7_1; vxBuffer[idx + 30] = c7_2; vxBuffer[idx + 31] = c7_3;
 
 	vxBuffer[(parent << 2) + 1] = index;
+
+#if OpenCLDebug
+	printf("cgLoad(parent: %u, index: %u)\n", parent, index);
+	printf("   ptr: %u\n", vxBuffer[(parent << 2) + 1]);
+	printf("   c_0: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 0], vxBuffer[idx + 1], vxBuffer[idx + 2], vxBuffer[idx + 3]);
+	printf("   c_1: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 4], vxBuffer[idx + 5], vxBuffer[idx + 6], vxBuffer[idx + 7]);
+	printf("   c_2: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 8], vxBuffer[idx + 9], vxBuffer[idx + 10], vxBuffer[idx + 11]);
+	printf("   c_3: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 12], vxBuffer[idx + 13], vxBuffer[idx + 14], vxBuffer[idx + 15]);
+	printf("   c_4: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 16], vxBuffer[idx + 17], vxBuffer[idx + 18], vxBuffer[idx + 19]);
+	printf("   c_5: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 20], vxBuffer[idx + 21], vxBuffer[idx + 22], vxBuffer[idx + 23]);
+	printf("   c_6: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 24], vxBuffer[idx + 25], vxBuffer[idx + 26], vxBuffer[idx + 27]);
+	printf("   c_7: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 28], vxBuffer[idx + 29], vxBuffer[idx + 30], vxBuffer[idx + 31]);
+	printf("\n");
+#endif
 }
 
 void cgUnload(__global uint32_t* vxBuffer, uint32_t parent) {
 	vxBuffer[(parent << 2) + 1] = 0x00;
+
+#if OpenCLDebug
+	printf("cgUnload(parent: %u)\n", parent);
+	printf("\n");
+#endif
 }
 
 void cgAdd(__global uint32_t* vxBuffer, uint32_t parent, uint8_t mask, uint32_t c0_0, uint32_t c0_1, uint32_t c0_2, uint32_t c0_3, uint32_t c1_0, uint32_t c1_1, uint32_t c1_2, uint32_t c1_3, uint32_t c2_0, uint32_t c2_1, uint32_t c2_2, uint32_t c2_3, uint32_t c3_0, uint32_t c3_1, uint32_t c3_2, uint32_t c3_3, uint32_t c4_0, uint32_t c4_1, uint32_t c4_2, uint32_t c4_3, uint32_t c5_0, uint32_t c5_1, uint32_t c5_2, uint32_t c5_3, uint32_t c6_0, uint32_t c6_1, uint32_t c6_2, uint32_t c6_3, uint32_t c7_0, uint32_t c7_1, uint32_t c7_2, uint32_t c7_3) {
-	uint32_t idx = vxBuffer[(parent << 2) + 1];
+	uint32_t idx = vxBuffer[(parent << 2) + 1] << 2;
 	
 	if (mask & 0x80) { vxBuffer[idx + 0] = c0_0; vxBuffer[idx + 1] = c0_1; vxBuffer[idx + 2] = c0_2; vxBuffer[idx + 3] = c0_3; }
 	if (mask & 0x40) { vxBuffer[idx + 4] = c1_0; vxBuffer[idx + 5] = c1_1; vxBuffer[idx + 6] = c1_2; vxBuffer[idx + 7] = c1_3; }
@@ -146,10 +213,24 @@ void cgAdd(__global uint32_t* vxBuffer, uint32_t parent, uint8_t mask, uint32_t 
 	if (mask & 0x01) { vxBuffer[idx + 28] = c7_0; vxBuffer[idx + 29] = c7_1; vxBuffer[idx + 30] = c7_2; vxBuffer[idx + 31] = c7_3; }
 
 	vxBuffer[parent << 2] |= ((uint32_t)mask << 16);
+
+#if OpenCLDebug
+	printf("cgAdd(parent: %u, mask: %c%c%c%c%c%c%c%c)\n", parent, ((mask & 0x80) ? '1' : '0'), ((mask & 0x40) ? '1' : '0'), ((mask & 0x20) ? '1' : '0'), ((mask & 0x10) ? '1' : '0'), ((mask & 0x08) ? '1' : '0'), ((mask & 0x04) ? '1' : '0'), ((mask & 0x02) ? '1' : '0'), ((mask & 0x01) ? '1' : '0'));
+	printf("   chm: %c%c%c%c%c%c%c%c\n", ((vxBuffer[parent << 2] & 0x00800000) ? '1' : '0'), ((vxBuffer[parent << 2] & 0x00400000) ? '1' : '0'), ((vxBuffer[parent << 2] & 0x00200000) ? '1' : '0'), ((vxBuffer[parent << 2] & 0x00100000) ? '1' : '0'), ((vxBuffer[parent << 2] & 0x00080000) ? '1' : '0'), ((vxBuffer[parent << 2] & 0x00040000) ? '1' : '0'), ((vxBuffer[parent << 2] & 0x00020000) ? '1' : '0'), ((vxBuffer[parent << 2] & 0x00010000) ? '1' : '0'));
+	printf("   c_0: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 0], vxBuffer[idx + 1], vxBuffer[idx + 2], vxBuffer[idx + 3]);
+	printf("   c_1: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 4], vxBuffer[idx + 5], vxBuffer[idx + 6], vxBuffer[idx + 7]);
+	printf("   c_2: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 8], vxBuffer[idx + 9], vxBuffer[idx + 10], vxBuffer[idx + 11]);
+	printf("   c_3: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 12], vxBuffer[idx + 13], vxBuffer[idx + 14], vxBuffer[idx + 15]);
+	printf("   c_4: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 16], vxBuffer[idx + 17], vxBuffer[idx + 18], vxBuffer[idx + 19]);
+	printf("   c_5: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 20], vxBuffer[idx + 21], vxBuffer[idx + 22], vxBuffer[idx + 23]);
+	printf("   c_6: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 24], vxBuffer[idx + 25], vxBuffer[idx + 26], vxBuffer[idx + 27]);
+	printf("   c_7: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 28], vxBuffer[idx + 29], vxBuffer[idx + 30], vxBuffer[idx + 31]);
+	printf("\n");
+#endif
 }
 
 void cgRemove(__global uint32_t* vxBuffer, uint32_t parent, uint8_t mask) {
-	uint32_t idx = vxBuffer[(parent << 2) + 1];
+	uint32_t idx = vxBuffer[(parent << 2) + 1] << 2;
 
 	if (mask & 0x80) { vxBuffer[idx + 0] &= 0x7F000000; vxBuffer[idx + 1] = 0x00; vxBuffer[idx + 2] = 0x00; vxBuffer[idx + 3] = 0x00; }
 	if (mask & 0x40) { vxBuffer[idx + 4] &= 0x7F000000; vxBuffer[idx + 5] = 0x00; vxBuffer[idx + 6] = 0x00; vxBuffer[idx + 7] = 0x00; }
@@ -161,11 +242,25 @@ void cgRemove(__global uint32_t* vxBuffer, uint32_t parent, uint8_t mask) {
 	if (mask & 0x01) { vxBuffer[idx + 28] &= 0x7F000000; vxBuffer[idx + 29] = 0x00; vxBuffer[idx + 30] = 0x00; vxBuffer[idx + 31] = 0x00; }
 
 	vxBuffer[parent << 2] &= ~((uint32_t)mask << 16);
+
+#if OpenCLDebug
+	printf("cgRemove(parent: %u, mask: %c%c%c%c%c%c%c%c)\n", parent, ((mask & 0x80) ? '1' : '0'), ((mask & 0x40) ? '1' : '0'), ((mask & 0x20) ? '1' : '0'), ((mask & 0x10) ? '1' : '0'), ((mask & 0x08) ? '1' : '0'), ((mask & 0x04) ? '1' : '0'), ((mask & 0x02) ? '1' : '0'), ((mask & 0x01) ? '1' : '0'));
+	printf("   chm: %c%c%c%c%c%c%c%c\n", ((vxBuffer[parent << 2] & 0x00800000) ? '1' : '0'), ((vxBuffer[parent << 2] & 0x00400000) ? '1' : '0'), ((vxBuffer[parent << 2] & 0x00200000) ? '1' : '0'), ((vxBuffer[parent << 2] & 0x00100000) ? '1' : '0'), ((vxBuffer[parent << 2] & 0x00080000) ? '1' : '0'), ((vxBuffer[parent << 2] & 0x00040000) ? '1' : '0'), ((vxBuffer[parent << 2] & 0x00020000) ? '1' : '0'), ((vxBuffer[parent << 2] & 0x00010000) ? '1' : '0'));
+	printf("   c_0: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 0], vxBuffer[idx + 1], vxBuffer[idx + 2], vxBuffer[idx + 3]);
+	printf("   c_1: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 4], vxBuffer[idx + 5], vxBuffer[idx + 6], vxBuffer[idx + 7]);
+	printf("   c_2: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 8], vxBuffer[idx + 9], vxBuffer[idx + 10], vxBuffer[idx + 11]);
+	printf("   c_3: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 12], vxBuffer[idx + 13], vxBuffer[idx + 14], vxBuffer[idx + 15]);
+	printf("   c_4: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 16], vxBuffer[idx + 17], vxBuffer[idx + 18], vxBuffer[idx + 19]);
+	printf("   c_5: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 20], vxBuffer[idx + 21], vxBuffer[idx + 22], vxBuffer[idx + 23]);
+	printf("   c_6: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 24], vxBuffer[idx + 25], vxBuffer[idx + 26], vxBuffer[idx + 27]);
+	printf("   c_7: 0x%08X 0x%08X 0x%08X 0x%08X\n", vxBuffer[idx + 28], vxBuffer[idx + 29], vxBuffer[idx + 30], vxBuffer[idx + 31]);
+	printf("\n");
+#endif
 }
 
 void cgMove(__global uint32_t* vxBuffer, uint32_t fparent, uint8_t fidx, uint32_t tparent, uint8_t tidx) {
-	uint32_t fcidx = vxBuffer[(fparent << 2) + 1] | (fidx << 2);
-	uint32_t tcidx = vxBuffer[(tparent << 2) + 1] | (tidx << 2);
+	uint32_t fcidx = (vxBuffer[(fparent << 2) + 1] << 2) | (fidx << 2);
+	uint32_t tcidx = (vxBuffer[(tparent << 2) + 1] << 2) | (tidx << 2);
 
 	vxBuffer[fparent << 2] &= ~(0x00800000 >> fidx);
 	vxBuffer[tparent << 2] |= (0x00800000 >> tidx);
@@ -180,6 +275,15 @@ void cgMove(__global uint32_t* vxBuffer, uint32_t fparent, uint8_t fidx, uint32_
 	vxBuffer[fcidx + 2] = 0x00;
 	vxBuffer[fcidx + 3] = 0x00;
 
+#if OpenCLDebug
+	printf("cgMove(fparent: %u, fidx: %u, tparent: %u, tidx: %u)\n", fparent, fidx, tparent, tidx);
+	printf("   fcm: %c%c%c%c%c%c%c%c\n", ((vxBuffer[fparent << 2] & 0x00800000) ? '1' : '0'), ((vxBuffer[fparent << 2] & 0x00400000) ? '1' : '0'), ((vxBuffer[fparent << 2] & 0x00200000) ? '1' : '0'), ((vxBuffer[fparent << 2] & 0x00100000) ? '1' : '0'), ((vxBuffer[fparent << 2] & 0x00080000) ? '1' : '0'), ((vxBuffer[fparent << 2] & 0x00040000) ? '1' : '0'), ((vxBuffer[fparent << 2] & 0x00020000) ? '1' : '0'), ((vxBuffer[fparent << 2] & 0x00010000) ? '1' : '0'));
+	printf("   f_%u: 0x%08X 0x%08X 0x%08X 0x%08X\n", fidx, vxBuffer[fcidx + 0], vxBuffer[fcidx + 1], vxBuffer[fcidx + 2], vxBuffer[fcidx + 3]);
+	printf("   tcm: %c%c%c%c%c%c%c%c\n", ((vxBuffer[tparent << 2] & 0x00800000) ? '1' : '0'), ((vxBuffer[tparent << 2] & 0x00400000) ? '1' : '0'), ((vxBuffer[tparent << 2] & 0x00200000) ? '1' : '0'), ((vxBuffer[tparent << 2] & 0x00100000) ? '1' : '0'), ((vxBuffer[tparent << 2] & 0x00080000) ? '1' : '0'), ((vxBuffer[tparent << 2] & 0x00040000) ? '1' : '0'), ((vxBuffer[tparent << 2] & 0x00020000) ? '1' : '0'), ((vxBuffer[tparent << 2] & 0x00010000) ? '1' : '0'));
+	printf("   t_%u: 0x%08X 0x%08X 0x%08X 0x%08X\n", tidx, vxBuffer[tcidx + 0], vxBuffer[tcidx + 1], vxBuffer[tcidx + 2], vxBuffer[tcidx + 3]);
+	printf("   tix: %u\n", vxBuffer[(tparent << 2) + 1] | tidx);
+#endif
+
 	fcidx = vxBuffer[tcidx + 1];
 
 	vxBuffer[fcidx + 0] = (vxBuffer[fcidx + 0] & 0xF0FFFFFF) | ((tcidx & 0xF0000000) >> 4);
@@ -190,6 +294,11 @@ void cgMove(__global uint32_t* vxBuffer, uint32_t fparent, uint8_t fidx, uint32_
 	vxBuffer[fcidx + 20] = (vxBuffer[fcidx + 20] & 0xF0FFFFFF) | ((tcidx & 0x00000F00) << 16);
 	vxBuffer[fcidx + 24] = (vxBuffer[fcidx + 24] & 0xF0FFFFFF) | ((tcidx & 0x000000F0) << 20);
 	vxBuffer[fcidx + 28] = (vxBuffer[fcidx + 28] & 0xF0FFFFFF) | ((tcidx & 0x0000000F) << 24);
+
+#if OpenCLDebug
+	printf("par: %u\n", ((vxBuffer[fcidx + 0] & 0x0F000000) << 4) | (vxBuffer[fcidx + 4] & 0x0F000000) | ((vxBuffer[fcidx + 8] & 0x0F000000) >> 4) | ((vxBuffer[fcidx + 12] & 0x0F000000) >> 8) | ((vxBuffer[fcidx + 16] & 0x0F000000) >> 12) | ((vxBuffer[fcidx + 20] & 0x0F000000) >> 16) | ((vxBuffer[fcidx + 24] & 0x0F000000) >> 20) | ((vxBuffer[fcidx + 28] & 0x0F000000) >> 24));
+	printf("\n");
+#endif
 }
 
 void cgExpand(__global uint32_t* vxBuffer, uint32_t parent, uint32_t index) {
@@ -205,6 +314,12 @@ void cgExpand(__global uint32_t* vxBuffer, uint32_t parent, uint32_t index) {
 	vxBuffer[idx + 28] = (0x70000000 | ((parent & 0x0000000F) << 24)); vxBuffer[idx + 29] = 0x00; vxBuffer[idx + 30] = 0x00; vxBuffer[idx + 31] = 0x00;
 
 	vxBuffer[(parent << 2) + 1] = index;
+
+#if OpenCLDebug
+	printf("cgExpand(parent: %u, index: %u)\n", parent, index);
+	printf("   ptr: %u\n", vxBuffer[(parent << 2) + 1]);
+	printf("\n");
+#endif
 }
 
 void cgColour(__global uint32_t* vxBuffer, uint32_t index, uint32_t colour_0, uint32_t colour_1) {
@@ -212,10 +327,22 @@ void cgColour(__global uint32_t* vxBuffer, uint32_t index, uint32_t colour_0, ui
 	
 	vxBuffer[idx + 2] = colour_0;
 	vxBuffer[idx + 3] = (vxBuffer[idx + 3] & 0x00FFFFFF) | colour_1;
+
+#if OpenCLDebug
+	printf("cgColour(index: %u)\n", index);
+	printf("   col: 0x%08X%02X\n", vxBuffer[idx + 2], vxBuffer[idx + 3] >> 24);
+	printf("\n");
+#endif
 }
 
 void cgLight(__global uint32_t* vxBuffer, uint32_t index, uint32_t light) {
 	uint32_t idx = index << 2;
 
 	vxBuffer[idx + 3] = (vxBuffer[idx + 3] & 0xFF000000) | light;
+
+#if OpenCLDebug
+	printf("cgLight(index: %u)\n", index);
+	printf("   lit: 0x%06X\n", vxBuffer[idx + 3] & 0x00FFFFFF);
+	printf("\n");
+#endif
 }
