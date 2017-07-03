@@ -7,84 +7,165 @@ Colour model according to "A physically Based Colour Model"
                        by Robert J Oddy and Philip J Willis
 */
 
-namespace Colour {
-	const uint16_t sqrs[256] = { 0, 1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144, 169, 196, 225, 256, 289, 324, 361, 400, 441, 484, 529, 576, 625, 676, 729, 784, 841, 900, 961, 1024, 1089, 1156, 1225, 1296, 1369, 1444, 1521, 1600, 1681, 1764, 1849, 1936, 2025, 2116, 2209, 2304, 2401, 2500, 2601, 2704, 2809, 2916, 3025, 3136, 3249, 3364, 3481, 3600, 3721, 3844, 3969, 4096, 4225, 4356, 4489, 4624, 4761, 4900, 5041, 5184, 5329, 5476, 5625, 5776, 5929, 6084, 6241, 6400, 6561, 6724, 6889, 7056, 7225, 7396, 7569, 7744, 7921, 8100, 8281, 8464, 8649, 8836, 9025, 9216, 9409, 9604, 9801, 10000, 10201, 10404, 10609, 10816, 11025, 11236, 11449, 11664, 11881, 12100, 12321, 12544, 12769, 12996, 13225, 13456, 13689, 13924, 14161, 14400, 14641, 14884, 15129, 15376, 15625, 15876, 16129, 16384, 16641, 16900, 17161, 17424, 17689, 17956, 18225, 18496, 18769, 19044, 19321, 19600, 19881, 20164, 20449, 20736, 21025, 21316, 21609, 21904, 22201, 22500, 22801, 23104, 23409, 23716, 24025, 24336, 24649, 24964, 25281, 25600, 25921, 26244, 26569, 26896, 27225, 27556, 27889, 28224, 28561, 28900, 29241, 29584, 29929, 30276, 30625, 30976, 31329, 31684, 32041, 32400, 32761, 33124, 33489, 33856, 34225, 34596, 34969, 35344, 35721, 36100, 36481, 36864, 37249, 37636, 38025, 38416, 38809, 39204, 39601, 40000, 40401, 40804, 41209, 41616, 42025, 42436, 42849, 43264, 43681, 44100, 44521, 44944, 45369, 45796, 46225, 46656, 47089, 47524, 47961, 48400, 48841, 49284, 49729, 50176, 50625, 51076, 51529, 51984, 52441, 52900, 53361, 53824, 54289, 54756, 55225, 55696, 56169, 56644, 57121, 57600, 58081, 58564, 59049, 59536, 60025, 60516, 61009, 61504, 62001, 62500, 63001, 63504, 64009, 64516, 65025 };
+namespace Material {
+	const uint32_t cbrs[64] = { 0, 1, 8, 27, 64, 125, 216, 343, 512, 729, 1000, 1331, 1728, 2197, 2744, 3375, 4096, 4913, 5832, 6859, 8000, 9261, 10648, 12167, 13824, 15625, 17576, 19683, 21952, 24389, 27000, 29791, 32768, 35937, 39304, 42875, 46656, 50653, 54872, 59319, 64000, 68921, 74088, 79507, 85184, 91125, 97336, 103823, 110592, 117649, 125000, 132651, 140608, 148877, 157464, 166375, 175616, 185193, 195112, 205379, 216000, 226981, 238328, 250047 };
 
-	typedef uint64_t colPBM;
-	typedef uint32_t colRGB;
+	typedef uint64_t matPbMl;
 
-	inline colPBM col_to_par(colPBM col) {
-		return ((col & 0xFFFFFF0000000000) >> 40);
+	inline matPbMl mat_to_parR(matPbMl mat) {
+		return ((mat & 0xFC00000000000000) >> 58);
 	}
 
-	inline colPBM par_to_col(colPBM par) {
-		return ((par & 0x0000000000FFFFFF) << 40);
+	inline matPbMl parR_to_mat(matPbMl parR) {
+		return ((parR & 0x000000000000003F) << 58);
 	}
 
-	inline colPBM col_to_bet(colPBM col) {
-		return ((col & 0x000000FF00000000) >> 32);
+	inline matPbMl mat_to_parG(matPbMl mat) {
+		return ((mat & 0x03F0000000000000) >> 52);
 	}
 
-	inline colPBM bet_to_col(colPBM bet) {
-		return ((bet & 0x00000000000000FF) << 32);
+	inline matPbMl parG_to_mat(matPbMl parG) {
+		return ((parG & 0x000000000000003F) << 52);
 	}
 
-	inline colPBM col_to_med(colPBM col) {
-		return ((col & 0x00000000FFFFFF00) >> 8);
+	inline matPbMl mat_to_parB(matPbMl mat) {
+		return ((mat & 0x000FC00000000000) >> 46);
 	}
 
-	inline colPBM med_to_col(colPBM med) {
-		return ((med & 0x0000000000FFFFFF) << 8);
+	inline matPbMl parB_to_mat(matPbMl parB) {
+		return ((parB & 0x000000000000003F) << 46);
 	}
 
-	inline colPBM rgb_to_red(colPBM rgb) {
-		return ((rgb & 0xFF0000) >> 16);
+	inline matPbMl mat_to_beta(matPbMl mat) {
+		return ((mat & 0x00003F0000000000) >> 40);
 	}
 
-	inline colPBM rgb_to_gre(colPBM rgb) {
-		return ((rgb & 0x00FF00) >> 8);
+	inline matPbMl beta_to_mat(matPbMl beta) {
+		return ((beta & 0x000000000000003F) << 40);
 	}
 
-	inline colPBM rgb_to_blu(colPBM rgb) {
-		return (rgb & 0x0000FF);
+	inline matPbMl mat_to_medR(matPbMl mat) {
+		return ((mat & 0x000000F800000000) >> 35);
 	}
 
-	inline colPBM rgb_to_rgb(colPBM red, colPBM gre, colPBM blu) {
-		return ((red << 16) | (gre << 8) | blu);
+	inline matPbMl medR_to_mat(matPbMl medR) {
+		return ((medR & 0x000000000000001F) << 35);
 	}
 
-	inline colPBM col_sqre(colPBM col) {
-		return (col * col);
+	inline matPbMl mat_to_medG(matPbMl mat) {
+		return ((mat & 0x00000007C0000000) >> 30);
 	}
 
-	inline colPBM col_sqrt(colPBM col) {
-		colPBM s = 0x00;
+	inline matPbMl medG_to_mat(matPbMl medG) {
+		return ((medG & 0x000000000000001F) << 30);
+	}
 
-		s |= (col >= sqrs[s | 0x80]) << 7;
-		s |= (col >= sqrs[s | 0x40]) << 6;
-		s |= (col >= sqrs[s | 0x20]) << 5;
-		s |= (col >= sqrs[s | 0x10]) << 4;
-		s |= (col >= sqrs[s | 0x08]) << 3;
-		s |= (col >= sqrs[s | 0x04]) << 2;
-		s |= (col >= sqrs[s | 0x02]) << 1;
-		s |= (col >= sqrs[s | 0x01]);
+	inline matPbMl mat_to_medB(matPbMl mat) {
+		return ((mat & 0x000000003E000000) >> 25);
+	}
+
+	inline matPbMl medB_to_mat(matPbMl medB) {
+		return ((medB & 0x000000000000001F) << 25);
+	}
+
+	inline matPbMl mat_to_emit(matPbMl mat) {
+		return ((mat & 0x0000000001000000) >> 24);
+	}
+
+	inline matPbMl emit_to_mat(matPbMl emit) {
+		return ((emit & 0x0000000000000001) << 24);
+	}
+
+	inline matPbMl mat_to_col(matPbMl mat) {
+		return ((mat & 0xFFFFFFFFFF000000) >> 24);
+	}
+
+	inline matPbMl col_to_mat(matPbMl col) {
+		return ((col & 0x000000FFFFFFFFFF) << 24);
+	}
+
+	inline matPbMl mat_to_litR(matPbMl mat) {
+		return ((mat & 0x0000000000FC0000) >> 18);
+	}
+
+	inline matPbMl litR_to_mat(matPbMl litR) {
+		return ((litR & 0x000000000000003F) << 18);
+	}
+
+	inline matPbMl mat_to_litG(matPbMl mat) {
+		return ((mat & 0x000000000003F000) >> 12);
+	}
+
+	inline matPbMl litG_to_mat(matPbMl litG) {
+		return ((litG & 0x000000000000003F) << 12);
+	}
+
+	inline matPbMl mat_to_litB(matPbMl mat) {
+		return ((mat & 0x0000000000000FC0) >> 6);
+	}
+
+	inline matPbMl litB_to_mat(matPbMl litB) {
+		return ((litB & 0x000000000000003F) << 6);
+	}
+
+	inline matPbMl mat_to_litH(matPbMl mat) {
+		return (mat & 0x000000000000003F);
+	}
+
+	inline matPbMl litH_to_mat(matPbMl litH) {
+		return (litH & 0x000000000000003F);
+	}
+
+	inline matPbMl mat_to_lit(matPbMl mat) {
+		return (mat & 0x0000000000FFFFFF);
+	}
+
+	inline matPbMl lit_to_mat(matPbMl lit) {
+		return (lit & 0x0000000000FFFFFF);
+	}
+
+	inline matPbMl mat_cube(matPbMl val) {
+		return (val * val * val);
+	}
+	
+	inline matPbMl mat_cbrt(matPbMl val) {
+		matPbMl s = 0x00;
+
+		s |= (val >= cbrs[s | 0x80]) << 7;
+		s |= (val >= cbrs[s | 0x40]) << 6;
+		s |= (val >= cbrs[s | 0x20]) << 5;
+		s |= (val >= cbrs[s | 0x10]) << 4;
+		s |= (val >= cbrs[s | 0x08]) << 3;
+		s |= (val >= cbrs[s | 0x04]) << 2;
+		s |= (val >= cbrs[s | 0x02]) << 1;
+		s |= (val >= cbrs[s | 0x01]);
 
 		return s;
 	}
 
-	inline colPBM col_dv_min(colPBM col) {
-		return (col + (col == 0x00));
+	inline matPbMl mat_dv_min(matPbMl val) {
+		return (val | (val == 0x00));
 	}
 
-	inline colPBM col_pl_col(colPBM colA, colPBM colB) {
-		return par_to_col(rgb_to_rgb(col_sqrt((col_to_bet(colA)*col_sqre(rgb_to_red(col_to_par(colA))) + col_to_bet(colB)*col_sqre(rgb_to_red(col_to_par(colB)))) / col_dv_min(col_to_bet(colA) + col_to_bet(colB))), col_sqrt((col_to_bet(colA)*col_sqre(rgb_to_gre(col_to_par(colA))) + col_to_bet(colB)*col_sqre(rgb_to_gre(col_to_par(colB)))) / col_dv_min(col_to_bet(colA) + col_to_bet(colB))), col_sqrt((col_to_bet(colA)*col_sqre(rgb_to_blu(col_to_par(colA))) + col_to_bet(colB)*col_sqre(rgb_to_blu(col_to_par(colB)))) / col_dv_min(col_to_bet(colA) + col_to_bet(colB))))) | bet_to_col((col_to_bet(colA) + col_to_bet(colB)) >> 1) | med_to_col(rgb_to_rgb(col_sqrt(((0xff - col_to_bet(colA))*col_sqre(rgb_to_red(col_to_med(colA))) + (0xff - col_to_bet(colB))*col_sqre(rgb_to_red(col_to_med(colB)))) / col_dv_min(0x01fe - col_to_bet(colA) - col_to_bet(colB))), col_sqrt(((0xff - col_to_bet(colA))*col_sqre(rgb_to_gre(col_to_med(colA))) + (0xff - col_to_bet(colB))*col_sqre(rgb_to_gre(col_to_med(colB)))) / col_dv_min(0x01fe - col_to_bet(colA) - col_to_bet(colB))), col_sqrt(((0xff - col_to_bet(colA))*col_sqre(rgb_to_blu(col_to_med(colA))) + (0xff - col_to_bet(colB))*col_sqre(rgb_to_blu(col_to_med(colB)))) / col_dv_min(0x01fe - col_to_bet(colA) - col_to_bet(colB)))));
+	inline matPbMl col_pl_col(matPbMl matA, matPbMl matB) {
+		return (parR_to_mat(mat_cbrt((mat_to_beta(matA) * mat_cube(mat_to_parR(matA)) + mat_to_beta(matB) * mat_cube(mat_to_parR(matB))) / mat_dv_min(mat_to_beta(matA) + mat_to_beta(matB)))) |
+			parG_to_mat(mat_cbrt((mat_to_beta(matA) * mat_cube(mat_to_parG(matA)) + mat_to_beta(matB) * mat_cube(mat_to_parG(matB))) / mat_dv_min(mat_to_beta(matA) + mat_to_beta(matB)))) |
+			parB_to_mat(mat_cbrt((mat_to_beta(matA) * mat_cube(mat_to_parB(matA)) + mat_to_beta(matB) * mat_cube(mat_to_parB(matB))) / mat_dv_min(mat_to_beta(matA) + mat_to_beta(matB)))) |
+			beta_to_mat(mat_cbrt((mat_cube(mat_to_beta(matA)) + mat_cube(mat_to_beta(matB))) >> 2)) |
+			medR_to_mat(mat_cbrt(((63 - mat_to_beta(matA)) * mat_cube(mat_to_medR(matA)) + (63 - mat_to_beta(matB)) * mat_cube(mat_to_medR(matB))) / mat_dv_min(126 - mat_to_beta(matA) - mat_to_beta(matB)))) |
+			medG_to_mat(mat_cbrt(((63 - mat_to_beta(matA)) * mat_cube(mat_to_medG(matA)) + (63 - mat_to_beta(matB)) * mat_cube(mat_to_medG(matB))) / mat_dv_min(126 - mat_to_beta(matA) - mat_to_beta(matB)))) |
+			medB_to_mat(mat_cbrt(((63 - mat_to_beta(matA)) * mat_cube(mat_to_medB(matA)) + (63 - mat_to_beta(matB)) * mat_cube(mat_to_medB(matB))) / mat_dv_min(126 - mat_to_beta(matA) - mat_to_beta(matB)))) |
+			emit_to_mat(mat_to_emit(matA) & mat_to_emit(matB)));
 	}
 
-	inline colPBM col_ov_col(colPBM colA, colPBM colB) {
-		return par_to_col(rgb_to_rgb((((col_to_bet(colA)*rgb_to_red(col_to_par(colA))) >> 8) + ((rgb_to_red(col_to_med(colA))*(0xff - col_to_bet(colA))*col_to_bet(colB)*rgb_to_red(col_to_par(colB))) >> 16)), (((col_to_bet(colA)*rgb_to_gre(col_to_par(colA))) >> 8) + ((rgb_to_gre(col_to_med(colA))*(0xff - col_to_bet(colA))*col_to_bet(colB)*rgb_to_gre(col_to_par(colB))) >> 16)), (((col_to_bet(colA)*rgb_to_blu(col_to_par(colA))) >> 8) + ((rgb_to_blu(col_to_med(colA))*(0xff - col_to_bet(colA))*col_to_bet(colB)*rgb_to_blu(col_to_par(colB))) >> 16)))) | bet_to_col(col_to_bet(colA) + (((0xff - col_to_bet(colA))*col_to_bet(colB)) >> 8)) | med_to_col(rgb_to_rgb(((rgb_to_red(col_to_med(colA))*rgb_to_red(col_to_med(colB))) >> 8), ((rgb_to_gre(col_to_med(colA))*rgb_to_gre(col_to_med(colB))) >> 8), ((rgb_to_blu(col_to_med(colA))*rgb_to_blu(col_to_med(colB))) >> 8)));
-	}
-
-	inline colRGB col_to_pix(colPBM col, colRGB fro, colRGB bac) {
-		return (colRGB)rgb_to_rgb(col_sqrt(((col_to_bet(col)*col_sqre((rgb_to_red(col_to_par(col))*rgb_to_red(fro)) >> 8)) + ((0xff - col_to_bet(col))*col_sqre((rgb_to_red(col_to_med(col))*rgb_to_red(bac)) >> 8))) >> 8), col_sqrt(((col_to_bet(col)*col_sqre((rgb_to_gre(col_to_par(col))*rgb_to_gre(fro)) >> 8)) + ((0xff - col_to_bet(col))*col_sqre((rgb_to_gre(col_to_med(col))*rgb_to_gre(bac)) >> 8))) >> 8), col_sqrt(((col_to_bet(col)*col_sqre((rgb_to_blu(col_to_par(col))*rgb_to_blu(fro)) >> 8)) + ((0xff - col_to_bet(col))*col_sqre((rgb_to_blu(col_to_med(col))*rgb_to_blu(bac)) >> 8))) >> 8));
+	inline matPbMl mat_avg_col(matPbMl m0, matPbMl m1, matPbMl m2, matPbMl m3, matPbMl m4, matPbMl m5, matPbMl m6, matPbMl m7) {
+		return (parR_to_mat(mat_cbrt((mat_to_beta(m0) * mat_cube(mat_to_parR(m0)) + mat_to_beta(m1) * mat_cube(mat_to_parR(m1)) + mat_to_beta(m2) * mat_cube(mat_to_parR(m2)) + mat_to_beta(m3) * mat_cube(mat_to_parR(m3)) + mat_to_beta(m4) * mat_cube(mat_to_parR(m4)) + mat_to_beta(m5) * mat_cube(mat_to_parR(m5)) + mat_to_beta(m6) * mat_cube(mat_to_parR(m6)) + mat_to_beta(m7) * mat_cube(mat_to_parR(m7))) / mat_dv_min(mat_to_beta(m0) + mat_to_beta(m1) + mat_to_beta(m2) + mat_to_beta(m3) + mat_to_beta(m4) + mat_to_beta(m5) + mat_to_beta(m6) + mat_to_beta(m7)))) |
+			parG_to_mat(mat_cbrt((mat_to_beta(m0) * mat_cube(mat_to_parG(m0)) + mat_to_beta(m1) * mat_cube(mat_to_parG(m1)) + mat_to_beta(m2) * mat_cube(mat_to_parG(m2)) + mat_to_beta(m3) * mat_cube(mat_to_parG(m3)) + mat_to_beta(m4) * mat_cube(mat_to_parG(m4)) + mat_to_beta(m5) * mat_cube(mat_to_parG(m5)) + mat_to_beta(m6) * mat_cube(mat_to_parG(m6)) + mat_to_beta(m7) * mat_cube(mat_to_parG(m7))) / mat_dv_min(mat_to_beta(m0) + mat_to_beta(m1) + mat_to_beta(m2) + mat_to_beta(m3) + mat_to_beta(m4) + mat_to_beta(m5) + mat_to_beta(m6) + mat_to_beta(m7)))) |
+			parB_to_mat(mat_cbrt((mat_to_beta(m0) * mat_cube(mat_to_parB(m0)) + mat_to_beta(m1) * mat_cube(mat_to_parB(m1)) + mat_to_beta(m2) * mat_cube(mat_to_parB(m2)) + mat_to_beta(m3) * mat_cube(mat_to_parB(m3)) + mat_to_beta(m4) * mat_cube(mat_to_parB(m4)) + mat_to_beta(m5) * mat_cube(mat_to_parB(m5)) + mat_to_beta(m6) * mat_cube(mat_to_parB(m6)) + mat_to_beta(m7) * mat_cube(mat_to_parB(m7))) / mat_dv_min(mat_to_beta(m0) + mat_to_beta(m1) + mat_to_beta(m2) + mat_to_beta(m3) + mat_to_beta(m4) + mat_to_beta(m5) + mat_to_beta(m6) + mat_to_beta(m7)))) |
+			beta_to_mat(mat_cbrt((mat_cube(mat_to_beta(m0)) + mat_cube(mat_to_beta(m1)) + mat_cube(mat_to_beta(m2)) + mat_cube(mat_to_beta(m3)) + mat_cube(mat_to_beta(m4)) + mat_cube(mat_to_beta(m5)) + mat_cube(mat_to_beta(m6)) + mat_cube(mat_to_beta(m7))) >> 2)) |
+			medR_to_mat(mat_cbrt(((63 - mat_to_beta(m0)) * mat_cube(mat_to_medR(m0)) + (63 - mat_to_beta(m1)) * mat_cube(mat_to_medR(m1)) + (63 - mat_to_beta(m2)) * mat_cube(mat_to_medR(m2)) + (63 - mat_to_beta(m3)) * mat_cube(mat_to_medR(m3)) + (63 - mat_to_beta(m4)) * mat_cube(mat_to_medR(m4)) + (63 - mat_to_beta(m5)) * mat_cube(mat_to_medR(m5)) + (63 - mat_to_beta(m6)) * mat_cube(mat_to_medR(m6)) + (63 - mat_to_beta(m7)) * mat_cube(mat_to_medR(m7))) / mat_dv_min(504 - mat_to_beta(m0) - mat_to_beta(m1) - mat_to_beta(m2) - mat_to_beta(m3) - mat_to_beta(m4) - mat_to_beta(m5) - mat_to_beta(m6) - mat_to_beta(m7)))) |
+			medG_to_mat(mat_cbrt(((63 - mat_to_beta(m0)) * mat_cube(mat_to_medG(m0)) + (63 - mat_to_beta(m1)) * mat_cube(mat_to_medG(m1)) + (63 - mat_to_beta(m2)) * mat_cube(mat_to_medG(m2)) + (63 - mat_to_beta(m3)) * mat_cube(mat_to_medG(m3)) + (63 - mat_to_beta(m4)) * mat_cube(mat_to_medG(m4)) + (63 - mat_to_beta(m5)) * mat_cube(mat_to_medG(m5)) + (63 - mat_to_beta(m6)) * mat_cube(mat_to_medG(m6)) + (63 - mat_to_beta(m7)) * mat_cube(mat_to_medG(m7))) / mat_dv_min(504 - mat_to_beta(m0) - mat_to_beta(m1) - mat_to_beta(m2) - mat_to_beta(m3) - mat_to_beta(m4) - mat_to_beta(m5) - mat_to_beta(m6) - mat_to_beta(m7)))) |
+			medB_to_mat(mat_cbrt(((63 - mat_to_beta(m0)) * mat_cube(mat_to_medB(m0)) + (63 - mat_to_beta(m1)) * mat_cube(mat_to_medB(m1)) + (63 - mat_to_beta(m2)) * mat_cube(mat_to_medB(m2)) + (63 - mat_to_beta(m3)) * mat_cube(mat_to_medB(m3)) + (63 - mat_to_beta(m4)) * mat_cube(mat_to_medB(m4)) + (63 - mat_to_beta(m5)) * mat_cube(mat_to_medB(m5)) + (63 - mat_to_beta(m6)) * mat_cube(mat_to_medB(m6)) + (63 - mat_to_beta(m7)) * mat_cube(mat_to_medB(m7))) / mat_dv_min(504 - mat_to_beta(m0) - mat_to_beta(m1) - mat_to_beta(m2) - mat_to_beta(m3) - mat_to_beta(m4) - mat_to_beta(m5) - mat_to_beta(m6) - mat_to_beta(m7)))) |
+			emit_to_mat((mat_to_emit(m0) + mat_to_emit(m1) + mat_to_emit(m2) + mat_to_emit(m3) + mat_to_emit(m4) + mat_to_emit(m5) + mat_to_emit(m6) + mat_to_emit(m7)) > 4));
 	}
 }
