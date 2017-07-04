@@ -141,7 +141,7 @@ __kernel void cgProKernel(__global __read_write uint32_t* vxBuffer, __global __r
 	}
 }
 
-__kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only image2d_t rbo, __global __read_only uint8_t* ldLookup, __global __read_only float* rvLookup) {
+__kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only image2d_t rbo, __global __read_only uint8_t* ldLookup, __global __read_only float* rvLookup, __constant __read_only float* rotMat) {
 	__local uint8_t litDir[64];
 
 	int ini = get_local_id(0) + get_local_size(0) * get_local_id(1);
@@ -156,6 +156,10 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 	int2 pixel = { get_global_id(0), get_global_id(1) };
 
 	float3 dir = vload3(pixel.y * get_image_width(rbo) + pixel.x, rvLookup);
+
+	dir = (float3)(rotMat[0] * dir.x + rotMat[1] * dir.y + rotMat[2] * dir.z,
+		rotMat[3] * dir.x + rotMat[4] * dir.y + rotMat[5] * dir.z,
+		rotMat[6] * dir.x + rotMat[7] * dir.y + rotMat[8] * dir.z);
 	
 	write_imagef(rbo, pixel, (float4)(dir.x / 2.0f + 0.5f, dir.y / 2.0f + 0.5f, dir.z / 2.0f + 0.5f, 1));
 }

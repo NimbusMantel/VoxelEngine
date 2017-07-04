@@ -25,6 +25,10 @@ const uint16_t height = 360;
 
 const uint8_t fov = 70;
 
+float rotX = 0.0f;
+float rotY = 0.0f;
+float rotZ = 0.0f;
+
 void testVoxelBinaryTree();
 void testVoxelBufferData();
 
@@ -98,6 +102,7 @@ int main(int argc, char* argv[]) {
 
 	cl::Buffer rvLookup = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, sizeof(cl_float) * 3 * width * height);
 	cl::Buffer ldLookup = cl::Buffer(clContext, CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY, 64);
+	cl::Buffer rtMatrix = cl::Buffer(clContext, CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY, sizeof(cl_float) * 9);
 
 	std::ifstream istrm("src/kernel/instruct.cpp");
 	std::string isrc(std::istreambuf_iterator<char>(istrm), (std::istreambuf_iterator<char>()));
@@ -131,7 +136,8 @@ int main(int argc, char* argv[]) {
 	renderKernel.setArg(1, glBuffer);
 	renderKernel.setArg(2, ldLookup);
 	renderKernel.setArg(3, rvLookup);
-
+	renderKernel.setArg(4, rtMatrix);
+	
 	cl::CommandQueue clQueue = cl::CommandQueue(clContext, device);
 
 	uint8_t* cgBuf = manCTG::buf();
@@ -142,6 +148,7 @@ int main(int argc, char* argv[]) {
 	cl::Event cgWriEvent;
 	cl::Event cgProEvent;
 	cl::Event glAquEvent;
+	cl::Event rtMatEvent;
 	cl::Event glRenEvent;
 
 	std::vector<cl::Event> cgProPrevents;
@@ -151,6 +158,8 @@ int main(int argc, char* argv[]) {
 	uint32_t cgInsSyncAmount = 0;
 	uint32_t cgInsAsyncAmount = 0;
 	uint32_t cgInsSumAmount;
+
+	float rotMat[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
 
 	int currentFrame, previousFrame = SDL_GetTicks(), fps;
 
@@ -237,7 +246,20 @@ int main(int argc, char* argv[]) {
 		glFinish();
 
 		clQueue.enqueueAcquireGLObjects(&glMemory, 0, &glAquEvent);
-		glRenPrevents = {glAquEvent};
+
+		rotMat[0] = cosf(rotY) * cosf(rotZ);
+		rotMat[1] = -cosf(rotY) * sinf(rotZ);
+		rotMat[2] = sinf(rotY);
+		rotMat[3] = sinf(rotX) * sinf(rotY) * cosf(rotZ) + cosf(rotX) * sinf(rotZ);
+		rotMat[4] = -sinf(rotX) * sinf(rotY) * sinf(rotZ) + cosf(rotX) * cosf(rotZ);
+		rotMat[5] = -sinf(rotX) * cosf(rotY);
+		rotMat[6] = -cosf(rotX) * sinf(rotY) * cosf(rotZ) + sinf(rotX) * sinf(rotZ);
+		rotMat[7] = cosf(rotX) * sinf(rotY) * sinf(rotZ) + sinf(rotX) * cosf(rotZ);
+		rotMat[8] = cosf(rotX) * cosf(rotY);
+
+		clQueue.enqueueWriteBuffer(rtMatrix, true, 0, sizeof(cl_float) * 9, (void*)(&rotMat), 0, &rtMatEvent);
+
+		glRenPrevents = { glAquEvent, rtMatEvent };
 		glRenPrevents.clear();
 		
 		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
