@@ -1,6 +1,7 @@
 // Typedefs
 
 typedef unsigned char		uint8_t;
+typedef unsigned short		uint16_t;
 typedef unsigned int		uint32_t;
 typedef unsigned long		uint64_t;
 
@@ -60,6 +61,14 @@ void cgLight(__global uint32_t* vxBuffer, uint32_t index, uint32_t light);
 
 
 // kernels
+
+__kernel void rayInitKernel(__global __write_only float* rvLookup, float pixWidth, float pixHeight, float halWidth, float halHeight, uint16_t width) {
+	int2 pixel = { get_global_id(0), get_global_id(1) };
+	
+	float3 v = { pixel.x * pixWidth - halWidth, pixel.y * pixHeight - halHeight, -1.0f };
+
+	vstore3(v / length(v), pixel.y * width + pixel.x, rvLookup);
+}
 
 __kernel void cgProKernel(__global __read_write uint32_t* vxBuffer, __global __read_only uint8_t* cgBuffer, uint32_t syncInsAmount, uint32_t asyncInsAmount) {
 	size_t tid = get_global_id(0);
@@ -132,7 +141,7 @@ __kernel void cgProKernel(__global __read_write uint32_t* vxBuffer, __global __r
 	}
 }
 
-__kernel void render(__global __read_write uint32_t* vxBuffer, __write_only image2d_t rbo, __global __read_only uint8_t* ldLookup) {
+__kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only image2d_t rbo, __global __read_only uint8_t* ldLookup, __global __read_only float* rvLookup) {
 	__local uint8_t litDir[64];
 
 	int ini = get_local_id(0) + get_local_size(0) * get_local_id(1);
@@ -144,14 +153,11 @@ __kernel void render(__global __read_write uint32_t* vxBuffer, __write_only imag
 
 	barrier(CLK_LOCAL_MEM_FENCE);
 
-	int width = get_image_width(rbo);
-	int height = get_image_height(rbo);
+	int2 pixel = { get_global_id(0), get_global_id(1) };
 
-	for (int h = 0; h < height; ++h) {
-		for (int w = 0; w < width; ++w) {
-			write_imagef(rbo, (int2)(w, h), (float4)(1, 1, 0, 1));
-		}
-	}
+	float3 dir = vload3(pixel.y * get_image_width(rbo) + pixel.x, rvLookup);
+	
+	write_imagef(rbo, pixel, (float4)(dir.x / 2.0f + 0.5f, dir.y / 2.0f + 0.5f, dir.z / 2.0f + 0.5f, 1));
 }
 
 

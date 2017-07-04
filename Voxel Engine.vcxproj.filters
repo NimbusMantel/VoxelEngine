@@ -26,13 +26,13 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="src\voxel\colour.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="src\voxel\voxel.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\kernel\instruct.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\voxel\material.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

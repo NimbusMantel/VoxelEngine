@@ -193,7 +193,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\kernel\instruct.hpp" />
-    <ClInclude Include="src\voxel\colour.hpp" />
+    <ClInclude Include="src\voxel\material.hpp" />
     <ClInclude Include="src\voxel\voxel.hpp" />
   </ItemGroup>
   <ItemGroup>

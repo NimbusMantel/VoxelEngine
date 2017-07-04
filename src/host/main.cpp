@@ -12,7 +12,7 @@
 #include <Windows.h>
 
 #include "voxel/voxel.hpp"
-#include "voxel/colour.hpp"
+#include "voxel/material.hpp"
 
 #include <random>
 
@@ -20,10 +20,10 @@
 
 bool HOST_BIG_ENDIAN, DEVICE_BIG_ENDIAN;
 
-static const uint8_t litDir[64] = { 0x00, 0x09, 0x09, 0x1A, 0x09, 0x22, 0x22, 0x33, 0x09, 0x22, 0x22, 0x33, 0x1A, 0x33, 0x33, 0x4C,
-									0x09, 0x22, 0x22, 0x33, 0x22, 0x43, 0x43, 0x64, 0x22, 0x43, 0x43, 0x64, 0x33, 0x64, 0x64, 0x95,
-									0x09, 0x22, 0x22, 0x33, 0x22, 0x43, 0x43, 0x64, 0x22, 0x43, 0x43, 0x64, 0x43, 0x64, 0x64, 0x95,
-									0x1A, 0x33, 0x33, 0x4C, 0x33, 0x64, 0x64, 0x95, 0x33, 0x64, 0x64, 0x95, 0x4C, 0x95, 0x95, 0xDE };
+const uint16_t width = 640;
+const uint16_t height = 360;
+
+const uint8_t fov = 70;
 
 void testVoxelBinaryTree();
 void testVoxelBufferData();
@@ -35,8 +35,6 @@ int main(int argc, char* argv[]) {
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
-
-	const int width = 640, height = 360;
 
 	char titat[] = "Voxel Engine (%d fps)";
 	char title[32];
@@ -98,6 +96,7 @@ int main(int argc, char* argv[]) {
 	cl::Buffer cgBuffer = cl::Buffer(clContext, CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY, 0x01 << 24);
 	cl::Buffer gcBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_READ_ONLY, 0x01 << 16);
 
+	cl::Buffer rvLookup = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, sizeof(cl_float) * 3 * width * height);
 	cl::Buffer ldLookup = cl::Buffer(clContext, CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY, 64);
 
 	std::ifstream istrm("src/kernel/instruct.cpp");
@@ -120,14 +119,18 @@ int main(int argc, char* argv[]) {
 	
 	clProgram.build(clBuild);
 
+	cl::Kernel rayInitKernel = cl::Kernel(clProgram, "rayInitKernel");
+	rayInitKernel.setArg(0, rvLookup);
+	
 	cl::Kernel cgProKernel = cl::Kernel(clProgram, "cgProKernel");
 	cgProKernel.setArg(0, vxBuffer);
 	cgProKernel.setArg(1, cgBuffer);
 
-	cl::Kernel renderKernel = cl::Kernel(clProgram, "render");
+	cl::Kernel renderKernel = cl::Kernel(clProgram, "renderKernel");
 	renderKernel.setArg(0, vxBuffer);
 	renderKernel.setArg(1, glBuffer);
 	renderKernel.setArg(2, ldLookup);
+	renderKernel.setArg(3, rvLookup);
 
 	cl::CommandQueue clQueue = cl::CommandQueue(clContext, device);
 
@@ -147,6 +150,7 @@ int main(int argc, char* argv[]) {
 
 	uint32_t cgInsSyncAmount = 0;
 	uint32_t cgInsAsyncAmount = 0;
+	uint32_t cgInsSumAmount;
 
 	int currentFrame, previousFrame = SDL_GetTicks(), fps;
 
@@ -154,10 +158,35 @@ int main(int argc, char* argv[]) {
 
 	SDL_Event event;
 
+	// Init ray direction vectors
+
+	{
+		float fovRad = (M_PI * fov) / 360.0f;
+		float hwRat = height / (float)width;
+		float halfW = tanf(fovRad);
+		float halfH = hwRat * halfW;
+		float pixelW = (halfW * 2.0f) / (float)(width - 1);
+		float pixelH = (halfH * 2.0f) / (float)(height - 1);
+		
+		rayInitKernel.setArg(1, pixelW);
+		rayInitKernel.setArg(2, pixelH);
+		rayInitKernel.setArg(3, halfW);
+		rayInitKernel.setArg(4, halfH);
+		rayInitKernel.setArg(5, width);
+		
+		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
+			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
+				clQueue.enqueueNDRangeKernel(rayInitKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange);
+			}
+		}
+
+		clQueue.finish();
+	}
+
 	// Init light lookup table
 
 	{
-		clQueue.enqueueWriteBuffer(ldLookup, true, 0, 64, (void*)&litDir);
+		clQueue.enqueueWriteBuffer(ldLookup, true, 0, 64, (void*)&Material::litDir);
 		clQueue.finish();
 	}
 
@@ -165,12 +194,20 @@ int main(int argc, char* argv[]) {
 
 	{
 		manVox::init();
+
 		cgBufSize = manCTG::wri(cgInsSyncAmount, cgInsAsyncAmount);
+		cgInsSumAmount = cgInsSyncAmount + cgInsAsyncAmount;
+
 		clQueue.enqueueWriteBuffer(cgBuffer, true, 0, cgBufSize, (void*)cgBuf, 0, &cgWriEvent);
+
 		cgProKernel.setArg(2, cgInsSyncAmount);
 		cgProKernel.setArg(3, cgInsAsyncAmount);
 		cgProPrevents = { cgWriEvent };
-		clQueue.enqueueNDRangeKernel(cgProKernel, cl::NullRange, cl::NDRange(cgInsSyncAmount + cgInsAsyncAmount), cl::NullRange, &cgProPrevents, &cgProEvent);
+
+		for (uint32_t i = 0; i < cgInsSumAmount; i += min(1024, cgInsSumAmount - i)) {
+			clQueue.enqueueNDRangeKernel(cgProKernel, cl::NDRange(i), cl::NDRange(min(1024, cgInsSumAmount - i)), cl::NullRange, &cgProPrevents, &cgProEvent);
+		}
+
 		clQueue.finish();
 	}
 
@@ -180,6 +217,7 @@ int main(int argc, char* argv[]) {
 		// Enqueue CPU to GPU instrcutions
 		
 		cgBufSize = manCTG::wri(cgInsSyncAmount, cgInsAsyncAmount);
+		cgInsSumAmount = cgInsSyncAmount + cgInsAsyncAmount;
 		
 		if (cgBufSize > 0) {
 			clQueue.enqueueWriteBuffer(cgBuffer, true, 0, cgBufSize, (void*)cgBuf, 0, &cgWriEvent);
@@ -187,7 +225,10 @@ int main(int argc, char* argv[]) {
 			cgProKernel.setArg(2, cgInsSyncAmount);
 			cgProKernel.setArg(3, cgInsAsyncAmount);
 			cgProPrevents = {cgWriEvent};
-			clQueue.enqueueNDRangeKernel(cgProKernel, cl::NullRange, cl::NDRange(cgInsSyncAmount + cgInsAsyncAmount), cl::NullRange, &cgProPrevents, &cgProEvent);
+
+			for (uint32_t i = 0; i < cgInsSumAmount; i += min(1024, cgInsSumAmount - i)) {
+				clQueue.enqueueNDRangeKernel(cgProKernel, cl::NDRange(i), cl::NDRange(min(1024, cgInsSumAmount - i)), cl::NullRange, &cgProPrevents, &cgProEvent);
+			}
 		}
 
 		clQueue.finish();
@@ -197,8 +238,16 @@ int main(int argc, char* argv[]) {
 
 		clQueue.enqueueAcquireGLObjects(&glMemory, 0, &glAquEvent);
 		glRenPrevents = {glAquEvent};
-		clQueue.enqueueTask(renderKernel, &glRenPrevents, &glRenEvent);
-		glRelPrevents = {glRenEvent};
+		glRenPrevents.clear();
+		
+		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
+			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
+				clQueue.enqueueNDRangeKernel(renderKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange, &glRenPrevents, &glRenEvent);
+
+				glRenPrevents.push_back(std::move(glRenEvent));
+			}
+		}
+
 		clQueue.enqueueReleaseGLObjects(&glMemory, &glRelPrevents);
 
 		gcMap = (uint8_t*)clQueue.enqueueMapBuffer(gcBuffer, CL_TRUE, CL_MAP_READ, 0, 0x01 << 16);
