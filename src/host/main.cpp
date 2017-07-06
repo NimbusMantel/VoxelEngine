@@ -25,9 +25,20 @@ const uint16_t height = 360;
 
 const uint8_t fov = 70;
 
+const float rayCoef = width * 0.56875f;
+
 float rotX = 0.0f;
 float rotY = 0.0f;
 float rotZ = 0.0f;
+
+uint32_t tmp;
+
+float dist = 0.0000762939453125f;
+
+uint16_t mousePosX = 0;
+uint32_t mousePosY = 0;
+
+bool isDragging = false;
 
 void testVoxelBinaryTree();
 void testVoxelBufferData();
@@ -116,11 +127,9 @@ int main(int argc, char* argv[]) {
 
 	cl::Program clProgram(clContext, sources);
 
-	char clBuild[] = "-cl-std=CL1.2 -D OpenCLDebug=0";
+	char* clBuild = new char[30]();
 
-#if OpenCLDebug
-	clBuild[29] = '1';
-#endif
+	sprintf(clBuild, "-cl-std=CL1.2 -D OpenCLDebug=%u", (bool)OpenCLDebug);
 	
 	clProgram.build(clBuild);
 
@@ -137,6 +146,7 @@ int main(int argc, char* argv[]) {
 	renderKernel.setArg(2, ldLookup);
 	renderKernel.setArg(3, rvLookup);
 	renderKernel.setArg(4, rtMatrix);
+	renderKernel.setArg(6, rayCoef);
 	
 	cl::CommandQueue clQueue = cl::CommandQueue(clContext, device);
 
@@ -160,7 +170,8 @@ int main(int argc, char* argv[]) {
 	uint32_t cgInsSumAmount;
 
 	float rotMat[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
-
+	cl_float3 norPos = { 1.5f, 1.5f, 1.5000762939453125f };
+	
 	int currentFrame, previousFrame = SDL_GetTicks(), fps;
 
 	bool quit = false;
@@ -261,6 +272,12 @@ int main(int argc, char* argv[]) {
 
 		glRenPrevents = { glAquEvent, rtMatEvent };
 		glRenPrevents.clear();
+
+		norPos.x = (dist * sinf(rotY) * 0.5f) + 1.5f;
+		norPos.y = (dist * sinf(-rotX) * cosf(rotY) * 0.5f) + 1.5f;
+		norPos.z = (dist * cosf(-rotX) * cosf(rotY) * 0.5f) + 1.5f;
+
+		renderKernel.setArg(5, norPos);
 		
 		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
 			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
@@ -269,7 +286,7 @@ int main(int argc, char* argv[]) {
 				glRenPrevents.push_back(std::move(glRenEvent));
 			}
 		}
-
+		
 		clQueue.enqueueReleaseGLObjects(&glMemory, &glRelPrevents);
 
 		gcMap = (uint8_t*)clQueue.enqueueMapBuffer(gcBuffer, CL_TRUE, CL_MAP_READ, 0, 0x01 << 16);
@@ -299,6 +316,32 @@ int main(int argc, char* argv[]) {
 		while (SDL_PollEvent(&event)) {
 			if ((event.type == SDL_QUIT) || (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE)) {
 				quit = true;
+			}
+			else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
+				isDragging = true;
+
+				mousePosX = event.button.x;
+				mousePosY = height - 1 - event.button.y;
+
+				SDL_SetRelativeMouseMode(SDL_TRUE);
+			}
+			else if (event.type == SDL_MOUSEBUTTONUP && event.button.button == SDL_BUTTON_LEFT) {
+				isDragging = false;
+
+				mousePosX = event.button.x;
+				mousePosY = height - 1 - event.button.y;
+
+				SDL_SetRelativeMouseMode(SDL_FALSE);
+			}
+			else if (event.type == SDL_MOUSEMOTION && isDragging) {
+				mousePosX = event.motion.x;
+				mousePosY = height - 1 - event.motion.y;
+
+				rotY += 1.0f - powf(3.0f, event.motion.xrel / (float)width);
+				rotX += 1.0f - powf(3.0f, event.motion.yrel / (float)height);
+			}
+			else if (event.type == SDL_MOUSEWHEEL) {
+				dist = max(dist + event.wheel.y * 0.00000095367431640625f, 0);
 			}
 		}
 	}
@@ -352,12 +395,14 @@ void testVoxelBinaryTree() {
 }
 
 void testVoxelBufferData() {
-	Material::matPbMl mats[24] = { 0x00 };
+	Material::matPbMl mats[VOXEL_DEPTH + 1] = { 0x00 };
 
-	mats[23] = 0x03F03F0001FFFFFF;
+	mats[VOXEL_DEPTH] = Material::parR_to_mat(0) | Material::parG_to_mat(63) | Material::parB_to_mat(0) | Material::beta_to_mat(63) |
+						Material::medR_to_mat(0) | Material::medG_to_mat(0) | Material::medB_to_mat(0) | Material::emit_to_mat(1) | 0x0000000000FFFFFF;
 
-	for (int i = 22; i >= 0; --i) {
-		mats[i] = Material::mat_avg_col(mats[i + 1], 0x000000FFFFFFFFFF, 0x000000FFFFFFFFFF, 0x000000FFFFFFFFFF, 0x000000FFFFFFFFFF, 0x000000FFFFFFFFFF, 0x000000FFFFFFFFFF, 0x000000FFFFFFFFFF) | 0x0000000000FFFFFF;
+	for (int i = (VOXEL_DEPTH - 1); i >= 0; --i) {
+		mats[i] = Material::mat_avg_col(mats[i + 1], 0x000000FFFFFFFFFF, 0x000000FFFFFFFFFF, 0x000000FFFFFFFFFF,
+			0x000000FFFFFFFFFF, 0x000000FFFFFFFFFF, 0x000000FFFFFFFFFF, 0x000000FFFFFFFFFF) | 0x0000000000FFFFFF;
 	}
 
 	std::unique_ptr<INS_CTG> t;
@@ -377,7 +422,7 @@ void testVoxelBufferData() {
 	uint32_t par = 0x00;
 	uint32_t idx = 0x08;
 
-	for (int i = 1; i <= 23; ++i) {
+	for (int i = 1; i <= VOXEL_DEPTH; ++i) {
 		idx = 8 * i;
 		
 		t.reset(new INS_CTG_EXP(par, idx));
@@ -391,9 +436,21 @@ void testVoxelBufferData() {
 
 	par = 0x00;
 
-	for (int i = 1; i <= 23; ++i) {
-		o[0] = 0xF0000000 | ((par & 0x0F) << 24);
-		o[1] = 8 * (i + 1) + 7;
+	o[0] = 0xF0000000;
+	o[1] = 16;
+	o[2] = mats[1] >> 32;
+	o[3] = mats[1] & 0xFFFFFFFF;
+
+	v.reset(new uint32_t[8]());
+	memcpy(v.get(), &o, 8 * 4);
+	t.reset(new INS_CTG_ADD(par, std::move(v)));
+	manCTG::eqS(std::move(t));
+
+	par = 15;
+
+	for (int i = 2; i <= VOXEL_DEPTH; ++i) {
+		o[0] = 0x80000000 | ((par & 0x0F) << 24);
+		o[1] = 8 * (i + 1);
 		o[2] = mats[i] >> 32;
 		o[3] = mats[i] & 0xFFFFFFFF;
 		
@@ -402,6 +459,6 @@ void testVoxelBufferData() {
 		t.reset(new INS_CTG_ADD(par, std::move(v)));
 		manCTG::eqS(std::move(t));
 
-		par = 8 * i + 7;
+		par = 8 * i;
 	}
 }

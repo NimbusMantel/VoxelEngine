@@ -9,6 +9,8 @@
 
 #define BUFFER_DEPTH 23
 
+#define VOXEL_DEPTH 16
+
 #define BUFFER_SANITY 1
 
 namespace manBuf {

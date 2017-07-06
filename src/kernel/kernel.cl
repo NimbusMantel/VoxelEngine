@@ -10,7 +10,6 @@ typedef unsigned long		uint64_t;
 
 #define INT_BUF(b, p) (((uint32_t)b[p] << 24) | ((uint32_t)b[p + 1] << 16) | ((uint32_t)b[p + 2] << 8) | b[p + 3])
 
-
 // instruction language
 /*KERNEL_INCLUDE_BEG*/
 
@@ -47,6 +46,11 @@ enum PLACEHOLDER {
 #define OpenCLDebug 1
 
 /*KERNEL_INCLUDE_END*/
+
+// voxel depth constant
+
+#define VoxelDepth 23
+
 
 // function declarations
 
@@ -141,7 +145,12 @@ __kernel void cgProKernel(__global __read_write uint32_t* vxBuffer, __global __r
 	}
 }
 
-__kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only image2d_t rbo, __global __read_only uint8_t* ldLookup, __global __read_only float* rvLookup, __constant __read_only float* rotMat) {
+/*
+Raycasting algorithm based on CUDA implementation in "Efficient Sparse Voxel Octrees – Analysis, Extensions, and Implementation"
+                                                  by Samuli Laine and Tero Karras of NVIDA Research
+*/
+
+__kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only image2d_t rbo, __global __read_only uint8_t* ldLookup, __global __read_only float* rvLookup, __constant __read_only float* rotMat, float3 norPos, float rayCoef) {
 	__local uint8_t litDir[64];
 
 	int ini = get_local_id(0) + get_local_size(0) * get_local_id(1);
@@ -152,16 +161,159 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 	}
 
 	barrier(CLK_LOCAL_MEM_FENCE);
-
-	int2 pixel = { get_global_id(0), get_global_id(1) };
+	
+	const int2 pixel = { get_global_id(0), get_global_id(1) };
 
 	float3 dir = vload3(pixel.y * get_image_width(rbo) + pixel.x, rvLookup);
 
 	dir = (float3)(rotMat[0] * dir.x + rotMat[1] * dir.y + rotMat[2] * dir.z,
 		rotMat[3] * dir.x + rotMat[4] * dir.y + rotMat[5] * dir.z,
 		rotMat[6] * dir.x + rotMat[7] * dir.y + rotMat[8] * dir.z);
+
+	const float epsilon = as_float((0x0000007F - VoxelDepth) << 23);
+
+	uint2 stack[VoxelDepth];
+
+	if (fabs(dir.x) < epsilon) dir.x = as_float(as_uint(epsilon) ^ (as_uint(dir.x) & 0x80000000));
+	if (fabs(dir.y) < epsilon) dir.y = as_float(as_uint(epsilon) ^ (as_uint(dir.y) & 0x80000000));
+	if (fabs(dir.z) < epsilon) dir.z = as_float(as_uint(epsilon) ^ (as_uint(dir.z) & 0x80000000));
+
+	uint8_t octant_mask = 0x00;
+
+	if (dir.x > 0.0f) { octant_mask ^= 1; norPos.x = 3.0f - norPos.x; }
+	if (dir.y > 0.0f) { octant_mask ^= 2; norPos.y = 3.0f - norPos.y; }
+	if (dir.z > 0.0f) { octant_mask ^= 4; norPos.z = 3.0f - norPos.z; }
+
+	float tx_coef = 1.0f / -fabs(dir.x);
+	float ty_coef = 1.0f / -fabs(dir.y);
+	float tz_coef = 1.0f / -fabs(dir.z);
+
+	float tx_bias = tx_coef * norPos.x;
+	float ty_bias = ty_coef * norPos.y;
+	float tz_bias = tz_coef * norPos.z;
+
+	float t_min = fmax(fmax(2.0f * tx_coef - tx_bias, 2.0f * ty_coef - ty_bias), 2.0f * tz_coef - tz_bias);
+	float t_max = fmin(fmin(tx_coef - tx_bias, ty_coef - ty_bias), tz_coef - tz_bias);
 	
-	write_imagef(rbo, pixel, (float4)(dir.x / 2.0f + 0.5f, dir.y / 2.0f + 0.5f, dir.z / 2.0f + 0.5f, 1));
+	float h = t_max;
+
+	t_min = fmax(t_min, 0.0f);
+	t_max = fmin(t_max, 1.0f);
+
+	__global uint32_t* parent = vxBuffer;
+	uint4 voxel = { 0x00, 0x00, 0x00, 0x00 };
+
+	uint8_t idx = 0;
+
+	float3 pos = { 1.0f, 1.0f, 1.0f };
+
+	uint8_t scale = VoxelDepth - 1;
+	float scaExp2 = 0.5f;
+
+	if ((norPos.x - 1.5f) > t_min) { idx ^= 1; pos.x = 1.5f; }
+	if ((norPos.y - 1.5f) > t_min) { idx ^= 2; pos.y = 1.5f; }
+	if ((norPos.z - 1.5f) > t_min) { idx ^= 4; pos.z = 1.5f; }
+	
+	float tx_corner, ty_corner, tz_corner, tc_max;
+	uint8_t cidx;
+	uint8_t step_mask;
+
+	uint32_t difBits;
+
+	uint32_t shx, shy, shz;
+
+	float4 colour = { 0, 0, 0, 1 };
+
+	while (scale < VoxelDepth) {
+		if ((voxel.x & 0x80000000) == 0) {
+			voxel = *((__global uint4*)parent);
+		}
+
+		tx_corner = pos.x * tx_coef - tx_bias;
+		ty_corner = pos.y * ty_coef - ty_bias;
+		tz_corner = pos.z * tz_coef - tz_bias;
+		tc_max = fmin(fmin(tx_corner, ty_corner), tz_corner);
+
+		if ((voxel.x & 0x00FF0000) == 0x00) {
+			break;
+		}
+
+		if (tc_max > (scaExp2 * rayCoef)) {
+			break;
+		}
+
+		cidx = idx ^ octant_mask;
+
+		if ((voxel.x & (0x00800000 >> cidx)) != 0x00 && t_min <= t_max) {
+			if (tc_max < h) {
+				stack[scale] = (uint2)((parent - vxBuffer) >> 2, as_uint(t_max));
+			}
+			
+			h = tc_max;
+
+			parent = vxBuffer + ((voxel.y + cidx) << 2);
+
+			idx = 0;
+			scale--;
+			scaExp2 *= 0.5f;
+
+			if ((scaExp2 * tx_coef + tx_corner) > t_min) { idx ^= 1; pos.x += scaExp2; }
+			if ((scaExp2 * ty_coef + ty_corner) > t_min) { idx ^= 2; pos.y += scaExp2; }
+			if ((scaExp2 * tz_coef + tz_corner) > t_min) { idx ^= 4; pos.z += scaExp2; }
+
+			t_max = fmin(t_max, tc_max);
+			voxel.x = 0x00;
+
+			continue;
+		}
+		
+		step_mask = 0;
+
+		if (tx_corner <= tc_max) { step_mask ^= 1; pos.x -= scaExp2; }
+		if (ty_corner <= tc_max) { step_mask ^= 2; pos.y -= scaExp2; }
+		if (tz_corner <= tc_max) { step_mask ^= 4; pos.z -= scaExp2; }
+
+		t_min = tc_max;
+		idx ^= step_mask;
+
+		if ((idx & step_mask) != 0) {
+			difBits = 0;
+
+			if ((step_mask & 0x01) != 0) difBits |= as_uint(pos.x) ^ as_int(pos.x + scaExp2);
+			if ((step_mask & 0x02) != 0) difBits |= as_uint(pos.y) ^ as_int(pos.y + scaExp2);
+			if ((step_mask & 0x04) != 0) difBits |= as_uint(pos.z) ^ as_int(pos.z + scaExp2);
+
+			scale = (as_int((float)difBits) >> 23) - 127;
+			scaExp2 = as_float((127 - (VoxelDepth - scale)) << 23);
+			
+			shx = as_uint(pos.x) >> scale;
+			shy = as_uint(pos.y) >> scale;
+			shz = as_uint(pos.z) >> scale;
+
+			pos.x = as_float(shx << scale);
+			pos.y = as_float(shy << scale);
+			pos.z = as_float(shz << scale);
+
+			idx = (shx & 0x01) | ((shy & 0x01) << 1) | ((shz & 0x01) << 2);
+
+			parent = vxBuffer + (stack[scale].x << 2);
+			t_max = as_float(stack[scale].y);
+
+			h = 0.0f;
+			voxel.x = 0x00;
+		}
+	}
+
+	if (scale >= VoxelDepth) {
+		t_min = 2.0f;
+	}
+	else {
+		colour.x = ((voxel.z & 0xFC000000) >> 26) / 64.0f;
+		colour.y = ((voxel.z & 0x03F00000) >> 20) / 64.0f;
+		colour.z = ((voxel.z & 0x000FC000) >> 14) / 64.0f;
+	}
+
+	write_imagef(rbo, pixel, colour);
 }
 
 
