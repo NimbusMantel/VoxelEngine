@@ -170,7 +170,7 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 		rotMat[3] * dir.x + rotMat[4] * dir.y + rotMat[5] * dir.z,
 		rotMat[6] * dir.x + rotMat[7] * dir.y + rotMat[8] * dir.z);
 
-	const float epsilon = as_float((0x0000007F - VoxelDepth) << 23);
+	const float epsilon = as_float((127 - VoxelDepth) << 23);
 
 	uint2 stack[VoxelDepth];
 
@@ -308,9 +308,13 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 		t_min = 2.0f;
 	}
 	else {
-		colour.x = ((voxel.z & 0xFC000000) >> 26) / 64.0f;
-		colour.y = ((voxel.z & 0x03F00000) >> 20) / 64.0f;
-		colour.z = ((voxel.z & 0x000FC000) >> 14) / 64.0f;
+		colour.w = ((voxel.z & 0x00003F00) >> 8) / 63.0f;
+
+		colour.x = (((voxel.z & 0xFC000000) >> 26) / 63.0f) * colour.w + (((voxel.z & 0x000000F8) >> 3) / 31.0f) * (1.0f - colour.w);
+		colour.y = (((voxel.z & 0x03F00000) >> 20) / 63.0f) * colour.w + ((((voxel.z & 0x00000007) << 2) | ((voxel.w & 0xC0000000) >> 30)) / 31.0f) * (1.0f - colour.w);
+		colour.z = (((voxel.z & 0x000FC000) >> 14) / 63.0f) * colour.w + (((voxel.w & 0x3E000000) >> 25) / 31.0f) * (1.0f - colour.w);
+
+		colour.w = 1.0f;
 	}
 
 	write_imagef(rbo, pixel, colour);

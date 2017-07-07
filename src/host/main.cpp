@@ -27,18 +27,32 @@ const uint8_t fov = 70;
 
 const float rayCoef = width * 0.56875f;
 
+uint32_t tmp = (127 - VOXEL_DEPTH) << 23;
+
+const float scale = *((float*)(&tmp));
+
+float posX = 0.0f;
+float posY = 0.0f;
+float posZ = 10.0f;
+
 float rotX = 0.0f;
 float rotY = 0.0f;
 float rotZ = 0.0f;
 
-uint32_t tmp;
+float dist = 10.0f;
 
-float dist = 0.0000762939453125f;
+float velX = 0.0f;
+float velY = 0.0f;
+float velZ = 0.0f;
 
 uint16_t mousePosX = 0;
 uint32_t mousePosY = 0;
 
 bool isDragging = false;
+bool isFullscreen = false;
+
+uint16_t fullWidth;
+uint16_t fullHeight;
 
 void testVoxelBinaryTree();
 void testVoxelBufferData();
@@ -54,7 +68,15 @@ int main(int argc, char* argv[]) {
 	char titat[] = "Voxel Engine (%d fps)";
 	char title[32];
 
-	SDL_Window* window = SDL_CreateWindow("Voxel Engine (0 fps)", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, SDL_WINDOW_OPENGL);
+	SDL_DisplayMode mode;
+	SDL_GetDesktopDisplayMode(0, &mode);
+
+	fullWidth = mode.w;
+	fullHeight = mode.h;
+
+	SDL_Window* window = SDL_CreateWindow("Voxel Engine (0 fps)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, fullWidth, fullHeight, SDL_WINDOW_OPENGL);
+	SDL_SetWindowSize(window, width, height);
+	SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 	
 	if (window == NULL) return -1;
 
@@ -169,8 +191,8 @@ int main(int argc, char* argv[]) {
 	uint32_t cgInsAsyncAmount = 0;
 	uint32_t cgInsSumAmount;
 
-	float rotMat[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
-	cl_float3 norPos = { 1.5f, 1.5f, 1.5000762939453125f };
+	float rotMat[9] = { 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f };
+	cl_float3 norPos = { 1.5f, 1.5f, 1.5f };
 	
 	int currentFrame, previousFrame = SDL_GetTicks(), fps;
 
@@ -273,9 +295,9 @@ int main(int argc, char* argv[]) {
 		glRenPrevents = { glAquEvent, rtMatEvent };
 		glRenPrevents.clear();
 
-		norPos.x = (dist * sinf(rotY) * 0.5f) + 1.5f;
-		norPos.y = (dist * sinf(-rotX) * cosf(rotY) * 0.5f) + 1.5f;
-		norPos.z = (dist * cosf(-rotX) * cosf(rotY) * 0.5f) + 1.5f;
+		norPos.x = posX * scale + 1.5f;
+		norPos.y = posY * scale + 1.5f;
+		norPos.z = posZ * scale + 1.5f;
 
 		renderKernel.setArg(5, norPos);
 		
@@ -303,7 +325,7 @@ int main(int argc, char* argv[]) {
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
 		glReadBuffer(GL_COLOR_ATTACHMENT0);
 
-		glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		glBlitFramebuffer(0, 0, width, height, 0, 0, isFullscreen ? fullWidth : width, isFullscreen ? fullHeight : height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
 		SDL_GL_SwapWindow(window);
 
@@ -314,12 +336,29 @@ int main(int argc, char* argv[]) {
 		previousFrame = currentFrame;
 
 		while (SDL_PollEvent(&event)) {
-			if ((event.type == SDL_QUIT) || (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE)) {
+			if (event.type == SDL_QUIT) {
 				quit = true;
+			}
+			else if (event.type == SDL_KEYDOWN) {
+				if (event.key.keysym.sym == SDLK_ESCAPE) {
+					if (isFullscreen) {
+						isFullscreen = false;
+
+						SDL_SetWindowFullscreen(window, 0);
+					}
+					else {
+						quit = true;
+					}
+				}
+				else if (event.key.keysym.sym == SDLK_f) {
+					isFullscreen = !isFullscreen;
+
+					SDL_SetWindowFullscreen(window, isFullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+				}
 			}
 			else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
 				isDragging = true;
-
+				
 				mousePosX = event.button.x;
 				mousePosY = height - 1 - event.button.y;
 
@@ -333,17 +372,23 @@ int main(int argc, char* argv[]) {
 
 				SDL_SetRelativeMouseMode(SDL_FALSE);
 			}
-			else if (event.type == SDL_MOUSEMOTION && isDragging) {
+			else if (event.type == SDL_MOUSEMOTION) {
 				mousePosX = event.motion.x;
 				mousePosY = height - 1 - event.motion.y;
 
-				rotY += 1.0f - powf(3.0f, event.motion.xrel / (float)width);
-				rotX += 1.0f - powf(3.0f, event.motion.yrel / (float)height);
+				if (isDragging) {
+					rotY += 1.0f - powf(3.0f, event.motion.xrel / (float)width);
+					rotX += 1.0f - powf(3.0f, event.motion.yrel / (float)height);
+				}
 			}
 			else if (event.type == SDL_MOUSEWHEEL) {
-				dist = max(dist + event.wheel.y * 0.00000095367431640625f, 0);
+				dist = max(dist - event.wheel.y * 0.5f, 0.1f);
 			}
 		}
+
+		posX = dist * sinf(rotY);
+		posY = dist * sinf(-rotX) * cosf(rotY);
+		posZ = dist * cosf(-rotX) * cosf(rotY);
 	}
 
 	SDL_GL_DeleteContext(context);
