@@ -24,6 +24,9 @@
     <ClCompile Include="src\kernel\instruct.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\host\camera.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\voxel\voxel.hpp">
@@ -33,6 +36,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\voxel\material.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\host\camera.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

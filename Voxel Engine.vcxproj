@@ -187,11 +187,13 @@
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\host\camera.cpp" />
     <ClCompile Include="src\host\main.cpp" />
     <ClCompile Include="src\kernel\instruct.cpp" />
     <ClCompile Include="src\voxel\voxel.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\host\camera.hpp" />
     <ClInclude Include="src\kernel\instruct.hpp" />
     <ClInclude Include="src\voxel\material.hpp" />
     <ClInclude Include="src\voxel\voxel.hpp" />

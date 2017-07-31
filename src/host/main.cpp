@@ -11,6 +11,7 @@
 
 #include <Windows.h>
 
+#include "host/camera.hpp"
 #include "voxel/voxel.hpp"
 #include "voxel/material.hpp"
 
@@ -23,6 +24,8 @@ bool HOST_BIG_ENDIAN, DEVICE_BIG_ENDIAN;
 const uint16_t width = 640;
 const uint16_t height = 360;
 
+const uint16_t size = min(width, height);
+
 const uint8_t fov = 70;
 
 const float rayCoef = width * 0.56875f;
@@ -31,19 +34,8 @@ uint32_t tmp = (127 - VOXEL_DEPTH) << 23;
 
 const float scale = *((float*)(&tmp));
 
-float posX = 0.0f;
-float posY = 0.0f;
-float posZ = 10.0f;
-
-float rotX = 0.0f;
-float rotY = 0.0f;
-float rotZ = 0.0f;
-
-float dist = 10.0f;
-
-float velX = 0.0f;
-float velY = 0.0f;
-float velZ = 0.0f;
+float pos[3], rot[9];
+float vel[3] = { 0.0f, 0.0f, 0.0f };
 
 uint16_t mousePosX = 0;
 uint32_t mousePosY = 0;
@@ -190,9 +182,10 @@ int main(int argc, char* argv[]) {
 	uint32_t cgInsSyncAmount = 0;
 	uint32_t cgInsAsyncAmount = 0;
 	uint32_t cgInsSumAmount;
+	
+	cl_float3 norPos;
 
-	float rotMat[9] = { 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f };
-	cl_float3 norPos = { 1.5f, 1.5f, 1.5f };
+	camera::rad(10.0f);
 	
 	int currentFrame, previousFrame = SDL_GetTicks(), fps;
 
@@ -280,24 +273,18 @@ int main(int argc, char* argv[]) {
 
 		clQueue.enqueueAcquireGLObjects(&glMemory, 0, &glAquEvent);
 
-		rotMat[0] = cosf(rotY) * cosf(rotZ);
-		rotMat[1] = -cosf(rotY) * sinf(rotZ);
-		rotMat[2] = sinf(rotY);
-		rotMat[3] = sinf(rotX) * sinf(rotY) * cosf(rotZ) + cosf(rotX) * sinf(rotZ);
-		rotMat[4] = -sinf(rotX) * sinf(rotY) * sinf(rotZ) + cosf(rotX) * cosf(rotZ);
-		rotMat[5] = -sinf(rotX) * cosf(rotY);
-		rotMat[6] = -cosf(rotX) * sinf(rotY) * cosf(rotZ) + sinf(rotX) * sinf(rotZ);
-		rotMat[7] = cosf(rotX) * sinf(rotY) * sinf(rotZ) + sinf(rotX) * cosf(rotZ);
-		rotMat[8] = cosf(rotX) * cosf(rotY);
+		camera::mat(rot);
 
-		clQueue.enqueueWriteBuffer(rtMatrix, true, 0, sizeof(cl_float) * 9, (void*)(&rotMat), 0, &rtMatEvent);
+		clQueue.enqueueWriteBuffer(rtMatrix, true, 0, sizeof(cl_float) * 9, (void*)rot, 0, &rtMatEvent);
 
 		glRenPrevents = { glAquEvent, rtMatEvent };
 		glRenPrevents.clear();
 
-		norPos.x = posX * scale + 1.5f;
-		norPos.y = posY * scale + 1.5f;
-		norPos.z = posZ * scale + 1.5f;
+		camera::pos(pos[0], pos[1], pos[2]);
+
+		norPos.x = pos[0] * scale + 1.5f;
+		norPos.y = pos[1] * scale + 1.5f;
+		norPos.z = pos[2] * scale + 1.5f;
 
 		renderKernel.setArg(5, norPos);
 		
@@ -355,6 +342,70 @@ int main(int argc, char* argv[]) {
 
 					SDL_SetWindowFullscreen(window, isFullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
 				}
+				else if (event.key.keysym.sym == SDLK_c) {
+					if (camera::mod() == camera::Mode::FREE) {
+						camera::mod(camera::Mode::ARCBALL);
+
+						if (!isDragging) {
+							SDL_SetRelativeMouseMode(SDL_FALSE);
+						}
+					}
+					else if (camera::mod() == camera::Mode::ARCBALL) {
+						camera::mod(camera::Mode::FREE);
+
+						SDL_SetRelativeMouseMode(SDL_TRUE);
+					}
+				}
+				else if (event.key.keysym.sym == SDLK_UP) {
+					vel[2] = 0.1f;
+				}
+				else if (event.key.keysym.sym == SDLK_DOWN) {
+					vel[2] = -0.1f;
+				}
+				else if (event.key.keysym.sym == SDLK_LEFT) {
+					vel[0] = -0.1f;
+				}
+				else if (event.key.keysym.sym == SDLK_RIGHT) {
+					vel[0] = 0.1f;
+				}
+				else if (event.key.keysym.sym == SDLK_HOME) {
+					vel[1] = 0.1f;
+				}
+				else if (event.key.keysym.sym == SDLK_END) {
+					vel[1] = -0.1f;
+				}
+				else if (event.key.keysym.sym == SDLK_w) {
+					camera::rot(0.0f, 0.01f);
+				}
+				else if (event.key.keysym.sym == SDLK_a) {
+					camera::rot(-0.01f, 0.0f);
+				}
+				else if (event.key.keysym.sym == SDLK_s) {
+					camera::rot(0.0f, -0.01f);
+				}
+				else if (event.key.keysym.sym == SDLK_d) {
+					camera::rot(0.01f, 0.0f);
+				}
+			}
+			else if (event.type == SDL_KEYUP) {
+				if (event.key.keysym.sym == SDLK_UP) {
+					vel[2] = 0.0f;
+				}
+				else if (event.key.keysym.sym == SDLK_DOWN) {
+					vel[2] = 0.0f;
+				}
+				else if (event.key.keysym.sym == SDLK_LEFT) {
+					vel[0] = 0.0f;
+				}
+				else if (event.key.keysym.sym == SDLK_RIGHT) {
+					vel[0] = 0.0f;
+				}
+				else if (event.key.keysym.sym == SDLK_HOME) {
+					vel[1] = 0.0f;
+				}
+				else if (event.key.keysym.sym == SDLK_END) {
+					vel[1] = 0.0f;
+				}
 			}
 			else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
 				isDragging = true;
@@ -370,25 +421,28 @@ int main(int argc, char* argv[]) {
 				mousePosX = event.button.x;
 				mousePosY = height - 1 - event.button.y;
 
-				SDL_SetRelativeMouseMode(SDL_FALSE);
+				if (camera::mod() != camera::Mode::FREE) {
+					SDL_SetRelativeMouseMode(SDL_FALSE);
+				}
 			}
 			else if (event.type == SDL_MOUSEMOTION) {
 				mousePosX = event.motion.x;
 				mousePosY = height - 1 - event.motion.y;
 
-				if (isDragging) {
-					rotY += 1.0f - powf(3.0f, event.motion.xrel / (float)width);
-					rotX += 1.0f - powf(3.0f, event.motion.yrel / (float)height);
+				if (camera::mod() == camera::Mode::FREE || (camera::mod() == camera::Mode::ARCBALL && isDragging)) {
+					camera::rot(0.02f * event.motion.xrel / (0.5f * size), -0.02f * event.motion.yrel / (0.5f * size));
 				}
 			}
 			else if (event.type == SDL_MOUSEWHEEL) {
-				dist = max(dist - event.wheel.y * 0.5f, 0.1f);
+				if (camera::mod() == camera::Mode::ARCBALL) {
+					camera::rad(event.wheel.y * -0.5f);
+				}
 			}
 		}
-
-		posX = dist * sinf(rotY);
-		posY = dist * sinf(-rotX) * cosf(rotY);
-		posZ = dist * cosf(-rotX) * cosf(rotY);
+		
+		if (vel[0] != 0.0f || vel[1] != 0.0f || vel[2] != 0.0f) {
+			camera::mov(vel[0], vel[1], vel[2]);
+		}
 	}
 
 	SDL_GL_DeleteContext(context);
