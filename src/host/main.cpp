@@ -126,7 +126,6 @@ int main(int argc, char* argv[]) {
 	cl::Buffer gcBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_READ_ONLY, 0x01 << 16);
 
 	cl::Buffer rvLookup = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, sizeof(cl_float) * 3 * width * height);
-	cl::Buffer ldLookup = cl::Buffer(clContext, CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY, 64);
 	cl::Buffer rtMatrix = cl::Buffer(clContext, CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY, sizeof(cl_float) * 9);
 
 	std::ifstream istrm("src/kernel/instruct.cpp");
@@ -157,10 +156,9 @@ int main(int argc, char* argv[]) {
 	cl::Kernel renderKernel = cl::Kernel(clProgram, "renderKernel");
 	renderKernel.setArg(0, vxBuffer);
 	renderKernel.setArg(1, glBuffer);
-	renderKernel.setArg(2, ldLookup);
-	renderKernel.setArg(3, rvLookup);
-	renderKernel.setArg(4, rtMatrix);
-	renderKernel.setArg(6, rayCoef);
+	renderKernel.setArg(2, rvLookup);
+	renderKernel.setArg(3, rtMatrix);
+	renderKernel.setArg(5, rayCoef);
 	
 	cl::CommandQueue clQueue = cl::CommandQueue(clContext, device);
 
@@ -215,13 +213,6 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		clQueue.finish();
-	}
-
-	// Init light lookup table
-
-	{
-		clQueue.enqueueWriteBuffer(ldLookup, true, 0, 64, (void*)&Material::litDir);
 		clQueue.finish();
 	}
 
@@ -286,7 +277,7 @@ int main(int argc, char* argv[]) {
 		norPos.y = pos[1] * scale + 1.5f;
 		norPos.z = pos[2] * scale + 1.5f;
 
-		renderKernel.setArg(5, norPos);
+		renderKernel.setArg(4, norPos);
 		
 		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
 			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
@@ -494,25 +485,29 @@ void testVoxelBinaryTree() {
 }
 
 void testVoxelBufferData() {
-	Material::matPbMl mats[VOXEL_DEPTH + 1] = { 0x00 };
+	mat mats[VOXEL_DEPTH + 1] = { mat() };
 
-	mats[VOXEL_DEPTH] = Material::parR_to_mat(0) | Material::parG_to_mat(63) | Material::parB_to_mat(0) | Material::beta_to_mat(63) |
-						Material::medR_to_mat(0) | Material::medG_to_mat(0) | Material::medB_to_mat(0) | Material::emit_to_mat(1) | 0x0000000000FFFFFF;
+	mats[VOXEL_DEPTH] = mat(col(1.0f, 0.0f, 0.0f), 0.1f, col(0.5f, 1.0f, 0.5f), true);
+	
+	mat abt[8] = { mat() };
 
 	for (int i = (VOXEL_DEPTH - 1); i >= 0; --i) {
-		mats[i] = Material::mat_avg_col(mats[i + 1], 0x000000FFFFFFFFFF, 0x000000FFFFFFFFFF, 0x000000FFFFFFFFFF,
-			0x000000FFFFFFFFFF, 0x000000FFFFFFFFFF, 0x000000FFFFFFFFFF, 0x000000FFFFFFFFFF) | 0x0000000000FFFFFF;
+		abt[0] = mats[i + 1];
+
+		mats[i] = mat::abstract(abt);
 	}
 
 	std::unique_ptr<INS_CTG> t;
 
-	uint8_t d[5] = { (mats[0] >> 56) & 0xFF, (mats[0] >> 48) & 0xFF, (mats[0] >> 40) & 0xFF, (mats[0] >> 32) & 0xFF, (mats[0] >> 24) & 0xFF };
+	uint64_t tmp = mats[0].toBinary();
+
+	uint8_t d[5] = { (tmp >> 56) & 0xFF, (tmp >> 48) & 0xFF, (tmp >> 40) & 0xFF, (tmp >> 32) & 0xFF, (tmp >> 24) & 0xFF };
 	std::unique_ptr<uint8_t[]> c(new uint8_t[5]());
 	memcpy(c.get(), &d, 5 * 4);
 	t.reset(new INS_CTG_COL(0, std::move(c)));
 	manCTG::eqA(std::move(t));
 
-	d[0] = (mats[0] >> 16) & 0xFF; d[1] = (mats[0] >> 8) & 0xFF; d[2] = mats[0] & 0xFF;
+	d[0] = (tmp >> 16) & 0xFF; d[1] = (tmp >> 8) & 0xFF; d[2] = tmp & 0xFF;
 	std::unique_ptr<uint8_t[]> l(new uint8_t[3]());
 	memcpy(l.get(), &d, 3 * 4);
 	t.reset(new INS_CTG_LIT(0, std::move(l)));
@@ -535,10 +530,12 @@ void testVoxelBufferData() {
 
 	par = 0x00;
 
+	tmp = mats[1].toBinary();
+
 	o[0] = 0xF0000000;
 	o[1] = 16;
-	o[2] = mats[1] >> 32;
-	o[3] = mats[1] & 0xFFFFFFFF;
+	o[2] = tmp >> 32;
+	o[3] = tmp & 0xFFFFFFFF;
 
 	v.reset(new uint32_t[8]());
 	memcpy(v.get(), &o, 8 * 4);
@@ -547,11 +544,13 @@ void testVoxelBufferData() {
 
 	par = 15;
 
-	for (int i = 2; i <= VOXEL_DEPTH; ++i) {
-		o[0] = 0x80000000 | ((par & 0x0F) << 24);
+	for (int i = 2; i <= (VOXEL_DEPTH - 1); ++i) {
+		tmp = mats[i].toBinary();
+
+		o[0] = 0x80000000 | ((par & 0xF0000000) >> 4);
 		o[1] = 8 * (i + 1);
-		o[2] = mats[i] >> 32;
-		o[3] = mats[i] & 0xFFFFFFFF;
+		o[2] = tmp >> 32;
+		o[3] = tmp & 0xFFFFFFFF;
 		
 		v.reset(new uint32_t[8]());
 		memcpy(v.get(), &o, 8 * 4);
@@ -560,4 +559,23 @@ void testVoxelBufferData() {
 
 		par = 8 * i;
 	}
+
+	tmp = mats[VOXEL_DEPTH].toBinary();
+
+	o[0] = 0x80000000 | ((par & 0xF0000000) >> 4);
+	o[1] = 0x00000000;
+	o[2] = tmp >> 32;
+	o[3] = tmp & 0xFFFFFFFF;
+
+	tmp = mat(col(1.0f, 1.0f, 1.0f), 1.0f, col(0.0f, 0.0f, 0.0f), true).toBinary();
+
+	o[4] = 0xA0000000 | ((par & 0x00F00000) << 4);
+	o[5] = 0x00000000;
+	o[6] = tmp >> 32;
+	o[7] = tmp & 0xFFFFFFFF;
+
+	v.reset(new uint32_t[8]());
+	memcpy(v.get(), &o, 8 * 4);
+	t.reset(new INS_CTG_ADD(par, std::move(v)));
+	manCTG::eqS(std::move(t));
 }

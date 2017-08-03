@@ -1,3 +1,6 @@
+Voxel Engine Notebook
+---------------------
+
 Voxel buffer management on the CPU
 - Bitmask for each block of voxel children (8*4*4=128 bytes)
 - Storage in binary tree 32-bit array
@@ -13,9 +16,10 @@ Voxel buffer on CPU and GPU are synchronized
 Voxel strucuture on the GPU
 - 32-bit structure: 1-active, 3-index, 4-parent, 8-children, 1-search, 7-activity, (8-unused)
 - 32-bit children: 32-pointer (absolute, refer to the block of voxel data (4*4=16 bytes))
-- 40 bit colour: 6-pred, 6-pgreen, 6-pblue, 6-beta,
-                 5-mred, 5-pgreen, 5-pblue, 1-emitter
-- 24 bit light: 6-sreds, 6-sgreens, 6-sblues, 6-shighs
+- 40-bit colour: 6-pred, 6-pgreen, 6-pblue, 6-beta,
+                 5-mred, 5-mgreen, 5-mblue, 1-emitter
+- 18-bit light: 6-sred, 6-sgreen, 6-sblue
+- 06-bit modifier: 6-shigh | (6-unused)
 
 Voxel structure on the CPU
 - 32-bit structure: 1-active, 3-index, 4-parent, 8-children, (16-unused)
@@ -47,20 +51,25 @@ Voxel material on the GPU
   - "A physically Based Colour Model" by Robert J Oddy, Philip J Willis
   - ratio of particle and medium colour defined by beta value
 - Voxel baked lighting system
-  - local lookup table for colour values: 5-cubes, 3-sides
   - light memory stores
-    - average light value: 255 * cubes / 27 * (2 * sides + highs) / (3 * sides)
-    - side dependent variations (WORK IN PROGRESS)
-  - front light: previous voxel's light / (1, 1, 1) for emitter voxels
-  - back light: next voxel's light
-
-Pixel calculation
-- Init: RGBpixel = (0, 0, 0); RGBback = (1, 1, 1); RGBlight = (0, 0, 0); buf;
-- Input: RGBparticle, beta, RGBmedium, RGBlfore, RGBlback
-- Algorithm: buf = (beta * RGBparticle * RGBlfore) + RGBlight
-             RGBpixel += RGBback * buf * beta / max(buf.r, buf.g, buf.b, beta);
-             RGBback *= (1 - beta) * RGBmedium;
-             RGBlight = 8 * sqrt(RGBlback);
+    - averaged inner light in transparten voxels
+	- side dependent light modifications in solid voxels
+	  - 1-red, 1-green, 1-blue, 1-high
+	  - (r | g | b | h) == 0x00: no modification
+	  - (r | g | b) == 0x00: light adjusted 50% towards (0, 0, 0)
+	  - h = 0: light adjusted 50% towards (r, g, b)
+	  - h = 1: light adjusted 75% towards (r, g, b)
+  - front light
+    - (1, 1, 1) for current emitter voxel
+	- squared average of previous voxel's light and inner light for current transparent voxel
+	- corrected previous voxel's light for current solid voxels
+  - back light (clamped)
+    - 1/3 next voxel's light
+	  - (1, 1, 1) for previous emitter voxel
+	  - squared average of previous voxel's light and inner light for current transparent voxel
+	  - corrected previous voxel's light for current emitter voxel
+	  - previous voxel's light / sqrt(2) for current solid voxel
+	- 3/3 visualisation of voxels rendered behind
 
 CPU to GPU communication
 - 24 bit indices
@@ -88,3 +97,24 @@ GPU to CPU communication
 - instructions
   - REQ [parent]*: request children loadign
   - SUG [parent]*: suggest children unloading
+
+Voxel Engine controls
+- program
+  - ESC: exit fullscreen mode, end the program
+  - F: enter and exit fullscreen mode
+- camera
+  - C: switch between trackball and free camera mode
+    - rotate the camera via mouse movement in free mode
+    - rotate the camera via mouse dragging in trackball mode
+- movement
+  - UP: move forward on the local -z-axis
+  - DOWN: move backward on the local -z-axis
+  - LEFT: move leftward on the local x-axis
+  - RIGHT: move rightward on the local x-axis
+  - HOME: move upward on the local y-axis
+  - END: move downward on the local y-axis
+- rotation
+  - W: rotate upward around the local x-axis
+  - D: rotate rightward around the local y-axis
+  - A: rotate leftward around the local y-axis
+  - S: rotate downward around the local x-axis

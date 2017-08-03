@@ -146,25 +146,20 @@ __kernel void cgProKernel(__global __read_write uint32_t* vxBuffer, __global __r
 }
 
 /*
+
 Raycasting algorithm based on CUDA implementation in "Efficient Sparse Voxel Octrees – Analysis, Extensions, and Implementation"
                                                   by Samuli Laine and Tero Karras of NVIDA Research
+
+Colour model according to "A physically Based Colour Model"
+                       by Robert J Oddy and Philip J Willis
+
 */
 
-__kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only image2d_t rbo, __global __read_only uint8_t* ldLookup, __global __read_only float* rvLookup, __constant __read_only float* rotMat, float3 norPos, float rayCoef) {
-	__local uint8_t litDir[64];
+__kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only image2d_t rbo, __global __read_only float* rvLookup, __constant __read_only float* rotMat, float3 norPos, float rayCoef) {
+	int2 size = { get_image_width(rbo), get_image_height(rbo) };
+	const int2 coors = { get_global_id(0), get_global_id(1) };
 
-	int ini = get_local_id(0) + get_local_size(0) * get_local_id(1);
-	int stp = get_local_size(0) * get_local_size(1);
-
-	for (uint8_t i = ini; i < 64; i += stp) {
-		litDir[i] = ldLookup[i];
-	}
-
-	barrier(CLK_LOCAL_MEM_FENCE);
-	
-	const int2 pixel = { get_global_id(0), get_global_id(1) };
-
-	float3 dir = vload3(pixel.y * get_image_width(rbo) + pixel.x, rvLookup);
+	float3 dir = vload3(coors.y * size.x + coors.x, rvLookup);
 
 	dir = (float3)(rotMat[0] * dir.x + rotMat[1] * dir.y + rotMat[2] * dir.z,
 		rotMat[3] * dir.x + rotMat[4] * dir.y + rotMat[5] * dir.z,
@@ -172,7 +167,7 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 
 	const float epsilon = as_float((127 - VoxelDepth) << 23);
 
-	uint2 stack[VoxelDepth];
+	uint4 stack[VoxelDepth];
 
 	if (fabs(dir.x) < epsilon) dir.x = as_float(as_uint(epsilon) ^ (as_uint(dir.x) & 0x80000000));
 	if (fabs(dir.y) < epsilon) dir.y = as_float(as_uint(epsilon) ^ (as_uint(dir.y) & 0x80000000));
@@ -203,7 +198,7 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 	__global uint32_t* parent = vxBuffer;
 	uint4 voxel = { 0x00, 0x00, 0x00, 0x00 };
 
-	uint8_t idx = 0;
+	uint8_t idx = 0x00;
 
 	float3 pos = { 1.0f, 1.0f, 1.0f };
 
@@ -216,13 +211,31 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 	
 	float tx_corner, ty_corner, tz_corner, tc_max;
 	uint8_t cidx;
-	uint8_t step_mask;
+	uint8_t step_mask = 0x00;
 
 	uint32_t difBits;
 
 	uint32_t shx, shy, shz;
 
-	float4 colour = { 0, 0, 0, 1 };
+	bool prev_active = false, prev_emitter = false;
+	bool curr_active, curr_transparent, curr_emitter;
+
+	float3 curr_light, fron_light;
+	float3* prev_light = &curr_light;
+	float3 back_light = { 0.0f, 0.0f, 0.0f };
+
+	float3 sqrt_light, corr_light;
+	uchar4 dist_light;
+
+	float3 fac = { 1.0f, 1.0f, 1.0f };
+	float3 buf;
+
+	float8 material;
+
+	float curr_depth = 0.0f;
+	uint8_t curr_side = 0x00;
+
+	float4 pixel = { 0.0f, 0.0f, 0.0f, 1.0f };
 
 	while (scale < VoxelDepth) {
 		if ((voxel.x & 0x80000000) == 0) {
@@ -232,28 +245,23 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 		tx_corner = pos.x * tx_coef - tx_bias;
 		ty_corner = pos.y * ty_coef - ty_bias;
 		tz_corner = pos.z * tz_coef - tz_bias;
+
 		tc_max = fmin(fmin(tx_corner, ty_corner), tz_corner);
-
-		if ((voxel.x & 0x00FF0000) == 0x00) {
-			break;
-		}
-
-		if (tc_max > (scaExp2 * rayCoef)) {
-			break;
-		}
 
 		cidx = idx ^ octant_mask;
 
-		if ((voxel.x & (0x00800000 >> cidx)) != 0x00 && t_min <= t_max) {
+		if ((voxel.x & (0x00800000 >> cidx)) != 0x00 && t_min <= t_max && tc_max <= (scaExp2 * rayCoef)) {
 			if (tc_max < h) {
-				stack[scale] = (uint2)((parent - vxBuffer) >> 2, as_uint(t_max));
+				stack[scale].xy = (uint2)((parent - vxBuffer) >> 2, as_uint(t_max));
 			}
 			
+			stack[scale].zw = (uint2)(as_uint((tc_max - t_min) / scaExp2), step_mask);
+
 			h = tc_max;
 
 			parent = vxBuffer + ((voxel.y + cidx) << 2);
 
-			idx = 0;
+			idx = 0x00;
 			scale--;
 			scaExp2 *= 0.5f;
 
@@ -266,8 +274,8 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 
 			continue;
 		}
-		
-		step_mask = 0;
+
+		step_mask = 0x00;
 
 		if (tx_corner <= tc_max) { step_mask ^= 1; pos.x -= scaExp2; }
 		if (ty_corner <= tc_max) { step_mask ^= 2; pos.y -= scaExp2; }
@@ -276,12 +284,73 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 		t_min = tc_max;
 		idx ^= step_mask;
 
-		if ((idx & step_mask) != 0) {
-			difBits = 0;
+		if ((voxel.x & 0x00FF0000) == 0x00 || (idx & step_mask) != 0x00) {
+			curr_active = (voxel.x & 0x80000000);
+			curr_emitter = ((voxel.w & 0x01000000) >> 24);
 
-			if ((step_mask & 0x01) != 0) difBits |= as_uint(pos.x) ^ as_int(pos.x + scaExp2);
-			if ((step_mask & 0x02) != 0) difBits |= as_uint(pos.y) ^ as_int(pos.y + scaExp2);
-			if ((step_mask & 0x04) != 0) difBits |= as_uint(pos.z) ^ as_int(pos.z + scaExp2);
+			curr_light = (float3)(((voxel.w & 0x00FC0000) >> 18) / 63.0f, ((voxel.w & 0x0003F000) >> 12) / 63.0f, ((voxel.w & 0x00000FC0) >> 6) / 63.0f);
+
+			if ((prev_active || curr_active) && ((voxel.x & 0x00FF0000) == 0x00 || (t_min > t_max && tc_max <= (scaExp2 * rayCoef)))) {
+				material = (float8)(((voxel.z & 0xFC000000) >> 26) / 63.0f, ((voxel.z & 0x03F00000) >> 20) / 63.0f, ((voxel.z & 0x000FC000) >> 14) / 63.0f,
+					((voxel.z & 0x00003F00) >> 8) / 63.0f,
+					((voxel.z & 0x000000F8) >> 3) / 31.0f, (((voxel.z & 0x00000007) << 2) | ((voxel.w & 0xC0000000) >> 30)) / 31.0f, ((voxel.w & 0x3E000000) >> 25) / 31.0f,
+					((voxel.w & 0x01000000) >> 24) / 1.0f
+				);
+
+				curr_transparent = (material.s3 < 1.0f);
+
+				sqrt_light = (float3)(native_sqrt((prev_light->x * prev_light->x + as_float(as_uint(curr_light.x * curr_light.x) & -curr_transparent)) / 2.0f),
+					native_sqrt((prev_light->y * prev_light->y + as_float(as_uint(curr_light.y * curr_light.y) & -curr_transparent)) / 2.0f),
+					native_sqrt((prev_light->z * prev_light->z + as_float(as_uint(curr_light.z * curr_light.z) & -curr_transparent)) / 2.0f)
+				);
+
+				curr_side = (stack[scale + 1].w & 0x06) + (bool)((octant_mask ^ 0x07) & stack[scale + 1].w);
+
+				dist_light = (uchar4)((bool)(voxel.w & (0x00800000 >> curr_side)), (bool)(voxel.w & (0x00020000 >> curr_side)), (bool)(voxel.w & (0x00000800 >> curr_side)), (bool)(voxel.w & (0x00000020 >> curr_side)));
+				corr_light = convert_float3(dist_light.xyz) - (convert_float3(dist_light.xyz) - (*prev_light)) * as_float(0x3E000000 | ((!dist_light.w || !(dist_light.x || dist_light.y || dist_light.z)) << 24) | ((!((dist_light.x || dist_light.y || dist_light.z) ^ dist_light.w)) << 23));
+
+				if (prev_active) {
+					back_light = (float3)(as_float((0x3F800000 & -prev_emitter) | (as_uint(sqrt_light.x) & -(!prev_emitter && (curr_transparent || !curr_emitter))) | (as_uint(corr_light.x) & -(!prev_emitter && !curr_transparent && curr_emitter))),
+						as_float((0x3F800000 & -prev_emitter) | (as_uint(sqrt_light.y) & -(!prev_emitter && (curr_transparent || !curr_emitter))) | (as_uint(corr_light.y) & -(!prev_emitter && !curr_transparent && curr_emitter))),
+						as_float((0x3F800000 & -prev_emitter) | (as_uint(sqrt_light.z) & -(!prev_emitter && (curr_transparent || !curr_emitter))) | (as_uint(corr_light.z) & -(!prev_emitter && !curr_transparent && curr_emitter)))
+					);
+				}
+
+				if (curr_active) {
+					buf = (float3)(as_float((0x3F800000 & -curr_emitter) | (as_uint(sqrt_light.x) & -(!curr_emitter && curr_transparent)) | (as_uint(corr_light.x) & -(!curr_emitter && !curr_transparent))),
+						as_float((0x3F800000 & -curr_emitter) | (as_uint(sqrt_light.y) & -(!curr_emitter && curr_transparent)) | (as_uint(corr_light.y) & -(!curr_emitter && !curr_transparent))),
+						as_float((0x3F800000 & -curr_emitter) | (as_uint(sqrt_light.z) & -(!curr_emitter && curr_transparent)) | (as_uint(corr_light.z) & -(!curr_emitter && !curr_transparent)))
+					);
+
+					buf = buf * material.s012 + back_light / 3.0f;
+
+					back_light = (float3)(0.0f, 0.0f, 0.0f);
+
+					buf /= fmax(1.0f, fmax(buf.x, fmax(buf.y, buf.z)));
+
+					pixel += (float4)(buf * fac * material.s3, 0.0f);
+
+					curr_depth = as_float(stack[scale + 1].z);
+
+					fac *= (float3)(native_powr(material.s4 + 0.00390625f, curr_depth), native_powr(material.s5 + 0.00390625f, curr_depth), native_powr(material.s6 + 0.00390625f, curr_depth)) * (1.0f - material.s3);
+
+					if (fac.x <= 0.00390625 && fac.y <= 0.00390625 && fac.z <= 0.00390625) {
+						break;
+					}
+				}
+			}
+
+			prev_active = curr_active;
+			prev_emitter = curr_emitter;
+
+			fron_light = curr_light;
+			prev_light = &fron_light;
+
+			difBits = 0x00;
+
+			if ((step_mask & 0x01) != 0x00) difBits |= as_uint(pos.x) ^ as_int(pos.x + scaExp2);
+			if ((step_mask & 0x02) != 0x00) difBits |= as_uint(pos.y) ^ as_int(pos.y + scaExp2);
+			if ((step_mask & 0x04) != 0x00) difBits |= as_uint(pos.z) ^ as_int(pos.z + scaExp2);
 
 			scale = (as_int((float)difBits) >> 23) - 127;
 			scaExp2 = as_float((127 - (VoxelDepth - scale)) << 23);
@@ -304,20 +373,19 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 		}
 	}
 
+	pixel += (float4)(back_light * fac, 1.0f);
+
 	if (scale >= VoxelDepth) {
 		t_min = 2.0f;
 	}
-	else {
-		colour.w = ((voxel.z & 0x00003F00) >> 8) / 63.0f;
 
-		colour.x = (((voxel.z & 0xFC000000) >> 26) / 63.0f) * colour.w + (((voxel.z & 0x000000F8) >> 3) / 31.0f) * (1.0f - colour.w);
-		colour.y = (((voxel.z & 0x03F00000) >> 20) / 63.0f) * colour.w + ((((voxel.z & 0x00000007) << 2) | ((voxel.w & 0xC0000000) >> 30)) / 31.0f) * (1.0f - colour.w);
-		colour.z = (((voxel.z & 0x000FC000) >> 14) / 63.0f) * colour.w + (((voxel.w & 0x3E000000) >> 25) / 31.0f) * (1.0f - colour.w);
+	size /= 2;
 
-		colour.w = 1.0f;
+	if ((coors.x >= (size.x - 5) && coors.x <= (size.x + 4) && coors.y >= (size.y - 1) && coors.y <= size.y) || (coors.y >= (size.y - 5) && coors.y <= (size.y + 4) && coors.x >= (size.x - 1) && coors.x <= size.x)) {
+		pixel = (float4)((float)(pixel.x < 0.5f), (float)(pixel.y < 0.5f), (float)(pixel.z < 0.5f), 1.0f);
 	}
 
-	write_imagef(rbo, pixel, colour);
+	write_imagef(rbo, coors, pixel);
 }
 
 
@@ -363,10 +431,10 @@ void cgAdd(__global uint32_t* vxBuffer, uint32_t parent, uint32_t ca_0, uint32_t
 
 #if OpenCLDebug
 	if (cb_0 & 0x80000000) {
-		printf("cgAdd(parent: %u, aidx: %u, bidx: %u)\n   chm: 0x%02X\n   c_0: 0x%016llX%016llX\n   c_1: 0x%016llX%016llX\n   c_2: 0x%016llX%016llX\n   c_3: 0x%016llX%016llX\n   c_4: 0x%016llX%016llX\n   c_5: 0x%016llX%016llX\n   c_6: 0x%016llX%016llX\n   c_7: 0x%016llX%016llX\n\n", parent, adx, bdx, (vxBuffer[parent << 2] & 0x00FF0000) >> 16, ((uint64_t)vxBuffer[idx + 0] << 32) | vxBuffer[idx + 1], ((uint64_t)vxBuffer[idx + 2] << 32) | vxBuffer[idx + 3], ((uint64_t)vxBuffer[idx + 4] << 32) | vxBuffer[idx + 5], ((uint64_t)vxBuffer[idx + 6] << 32) | vxBuffer[idx + 7], ((uint64_t)vxBuffer[idx + 8] << 32) | vxBuffer[idx + 9], ((uint64_t)vxBuffer[idx + 10] << 32) | vxBuffer[idx + 11], ((uint64_t)vxBuffer[idx + 12] << 32) | vxBuffer[idx + 13], ((uint64_t)vxBuffer[idx + 14] << 32) | vxBuffer[idx + 15], ((uint64_t)vxBuffer[idx + 16] << 32) | vxBuffer[idx + 17], ((uint64_t)vxBuffer[idx + 18] << 32) | vxBuffer[idx + 19], ((uint64_t)vxBuffer[idx + 20] << 32) | vxBuffer[idx + 21], ((uint64_t)vxBuffer[idx + 22] << 32) | vxBuffer[idx + 23], ((uint64_t)vxBuffer[idx + 24] << 32) | vxBuffer[idx + 25], ((uint64_t)vxBuffer[idx + 26] << 32) | vxBuffer[idx + 27], ((uint64_t)vxBuffer[idx + 28] << 32) | vxBuffer[idx + 29], ((uint64_t)vxBuffer[idx + 30] << 32) | vxBuffer[idx + 31]);
+		printf("cgAdd(parent: %u, aidx: %u, bidx: %u)\n   chm: 0x%02X\n   c_0: 0x%016llX%016llX\n   c_1: 0x%016llX%016llX\n   c_2: 0x%016llX%016llX\n   c_3: 0x%016llX%016llX\n   c_4: 0x%016llX%016llX\n   c_5: 0x%016llX%016llX\n   c_6: 0x%016llX%016llX\n   c_7: 0x%016llX%016llX\n\n", parent, adx >> 2, bdx >> 2, (vxBuffer[parent << 2] & 0x00FF0000) >> 16, ((uint64_t)vxBuffer[idx + 0] << 32) | vxBuffer[idx + 1], ((uint64_t)vxBuffer[idx + 2] << 32) | vxBuffer[idx + 3], ((uint64_t)vxBuffer[idx + 4] << 32) | vxBuffer[idx + 5], ((uint64_t)vxBuffer[idx + 6] << 32) | vxBuffer[idx + 7], ((uint64_t)vxBuffer[idx + 8] << 32) | vxBuffer[idx + 9], ((uint64_t)vxBuffer[idx + 10] << 32) | vxBuffer[idx + 11], ((uint64_t)vxBuffer[idx + 12] << 32) | vxBuffer[idx + 13], ((uint64_t)vxBuffer[idx + 14] << 32) | vxBuffer[idx + 15], ((uint64_t)vxBuffer[idx + 16] << 32) | vxBuffer[idx + 17], ((uint64_t)vxBuffer[idx + 18] << 32) | vxBuffer[idx + 19], ((uint64_t)vxBuffer[idx + 20] << 32) | vxBuffer[idx + 21], ((uint64_t)vxBuffer[idx + 22] << 32) | vxBuffer[idx + 23], ((uint64_t)vxBuffer[idx + 24] << 32) | vxBuffer[idx + 25], ((uint64_t)vxBuffer[idx + 26] << 32) | vxBuffer[idx + 27], ((uint64_t)vxBuffer[idx + 28] << 32) | vxBuffer[idx + 29], ((uint64_t)vxBuffer[idx + 30] << 32) | vxBuffer[idx + 31]);
 	}
 	else {
-		printf("cgAdd(parent: %u, aidx: %u)\n   chm: 0x%02X\n   c_0: 0x%016llX%016llX\n   c_1: 0x%016llX%016llX\n   c_2: 0x%016llX%016llX\n   c_3: 0x%016llX%016llX\n   c_4: 0x%016llX%016llX\n   c_5: 0x%016llX%016llX\n   c_6: 0x%016llX%016llX\n   c_7: 0x%016llX%016llX\n\n", parent, adx, (vxBuffer[parent << 2] & 0x00FF0000) >> 16, ((uint64_t)vxBuffer[idx + 0] << 32) | vxBuffer[idx + 1], ((uint64_t)vxBuffer[idx + 2] << 32) | vxBuffer[idx + 3], ((uint64_t)vxBuffer[idx + 4] << 32) | vxBuffer[idx + 5], ((uint64_t)vxBuffer[idx + 6] << 32) | vxBuffer[idx + 7], ((uint64_t)vxBuffer[idx + 8] << 32) | vxBuffer[idx + 9], ((uint64_t)vxBuffer[idx + 10] << 32) | vxBuffer[idx + 11], ((uint64_t)vxBuffer[idx + 12] << 32) | vxBuffer[idx + 13], ((uint64_t)vxBuffer[idx + 14] << 32) | vxBuffer[idx + 15], ((uint64_t)vxBuffer[idx + 16] << 32) | vxBuffer[idx + 17], ((uint64_t)vxBuffer[idx + 18] << 32) | vxBuffer[idx + 19], ((uint64_t)vxBuffer[idx + 20] << 32) | vxBuffer[idx + 21], ((uint64_t)vxBuffer[idx + 22] << 32) | vxBuffer[idx + 23], ((uint64_t)vxBuffer[idx + 24] << 32) | vxBuffer[idx + 25], ((uint64_t)vxBuffer[idx + 26] << 32) | vxBuffer[idx + 27], ((uint64_t)vxBuffer[idx + 28] << 32) | vxBuffer[idx + 29], ((uint64_t)vxBuffer[idx + 30] << 32) | vxBuffer[idx + 31]);
+		printf("cgAdd(parent: %u, aidx: %u)\n   chm: 0x%02X\n   c_0: 0x%016llX%016llX\n   c_1: 0x%016llX%016llX\n   c_2: 0x%016llX%016llX\n   c_3: 0x%016llX%016llX\n   c_4: 0x%016llX%016llX\n   c_5: 0x%016llX%016llX\n   c_6: 0x%016llX%016llX\n   c_7: 0x%016llX%016llX\n\n", parent, adx >> 2, (vxBuffer[parent << 2] & 0x00FF0000) >> 16, ((uint64_t)vxBuffer[idx + 0] << 32) | vxBuffer[idx + 1], ((uint64_t)vxBuffer[idx + 2] << 32) | vxBuffer[idx + 3], ((uint64_t)vxBuffer[idx + 4] << 32) | vxBuffer[idx + 5], ((uint64_t)vxBuffer[idx + 6] << 32) | vxBuffer[idx + 7], ((uint64_t)vxBuffer[idx + 8] << 32) | vxBuffer[idx + 9], ((uint64_t)vxBuffer[idx + 10] << 32) | vxBuffer[idx + 11], ((uint64_t)vxBuffer[idx + 12] << 32) | vxBuffer[idx + 13], ((uint64_t)vxBuffer[idx + 14] << 32) | vxBuffer[idx + 15], ((uint64_t)vxBuffer[idx + 16] << 32) | vxBuffer[idx + 17], ((uint64_t)vxBuffer[idx + 18] << 32) | vxBuffer[idx + 19], ((uint64_t)vxBuffer[idx + 20] << 32) | vxBuffer[idx + 21], ((uint64_t)vxBuffer[idx + 22] << 32) | vxBuffer[idx + 23], ((uint64_t)vxBuffer[idx + 24] << 32) | vxBuffer[idx + 25], ((uint64_t)vxBuffer[idx + 26] << 32) | vxBuffer[idx + 27], ((uint64_t)vxBuffer[idx + 28] << 32) | vxBuffer[idx + 29], ((uint64_t)vxBuffer[idx + 30] << 32) | vxBuffer[idx + 31]);
 	}
 #endif
 }
