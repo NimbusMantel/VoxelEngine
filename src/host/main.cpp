@@ -182,8 +182,6 @@ int main(int argc, char* argv[]) {
 	uint32_t cgInsSumAmount;
 	
 	cl_float3 norPos;
-
-	camera::rad(10.0f);
 	
 	int currentFrame, previousFrame = SDL_GetTicks(), fps;
 
@@ -485,13 +483,19 @@ void testVoxelBinaryTree() {
 }
 
 void testVoxelBufferData() {
-	mat mats[VOXEL_DEPTH + 1] = { mat() };
+	mat mats[VOXEL_DEPTH] = { mat() };
 
-	mats[VOXEL_DEPTH] = mat(col(1.0f, 0.0f, 0.0f), 0.1f, col(0.5f, 1.0f, 0.5f), true);
-	
+	mat vxs[8] = { mat(col(1.0f, 0.929f, 0.0f), 0.875f, col(1.0f, 0.929f, 0.0f), true), mat(col(1.0f, 0.0f, 0.0f), 0.75f, col(1.0f, 0.0f, 0.0f), true),
+				   mat(col(1.0f, 0.0f, 0.671f), 0.625f, col(1.0f, 0.0f, 0.671f), true), mat(col(0.0f, 0.278f, 0.671f), 0.5f, col(0.0f, 0.278f, 0.671f), true),
+				   mat(col(0.0f, 0.929f, 1.0f), 0.375f, col(0.0f, 0.929f, 1.0f), true), mat(col(0.0f, 0.710f, 0.0f), 0.25f, col(0.0f, 0.710f, 0.0f), true),
+				   mat(col(1.0f, 1.0f, 1.0f), 1.0f, col(0.0f, 0.0f, 0.0f), true), mat(col(0.0f, 0.0f, 0.0f), 0.125f, col(0.5f, 0.5f, 0.5f), true),
+	};
+
+	mats[VOXEL_DEPTH - 1] = mat::abstract(vxs);
+
 	mat abt[8] = { mat() };
 
-	for (int i = (VOXEL_DEPTH - 1); i >= 0; --i) {
+	for (int i = (VOXEL_DEPTH - 2); i >= 0; --i) {
 		abt[0] = mats[i + 1];
 
 		mats[i] = mat::abstract(abt);
@@ -560,22 +564,27 @@ void testVoxelBufferData() {
 		par = 8 * i;
 	}
 
-	tmp = mats[VOXEL_DEPTH].toBinary();
+	for (uint32_t i = 0; i < 4; ++i) {
+		tmp = vxs[i * 2].toBinary();
 
-	o[0] = 0x80000000 | ((par & 0xF0000000) >> 4);
-	o[1] = 0x00000000;
-	o[2] = tmp >> 32;
-	o[3] = tmp & 0xFFFFFFFF;
+		o[0] = 0x80000000 | (i << 29) | ((par & (0xF0000000 >> (i * 8)) >> (28 - i * 8)) << 24);
+		o[1] = 0x00000000;
+		o[2] = tmp >> 32;
+		o[3] = tmp & 0xFFFFFFFF;
 
-	tmp = mat(col(1.0f, 1.0f, 1.0f), 1.0f, col(0.0f, 0.0f, 0.0f), true).toBinary();
+		tmp = vxs[i * 2 + 1].toBinary();
 
-	o[4] = 0xA0000000 | ((par & 0x00F00000) << 4);
-	o[5] = 0x00000000;
-	o[6] = tmp >> 32;
-	o[7] = tmp & 0xFFFFFFFF;
+		o[4] = 0x90000000 | (i << 29) | ((par & (0x0F000000 >> (i * 8)) >> (24 - i * 8)) << 24);
+		o[5] = 0x00000000;
+		o[6] = tmp >> 32;
+		o[7] = tmp & 0xFFFFFFFF;
 
-	v.reset(new uint32_t[8]());
-	memcpy(v.get(), &o, 8 * 4);
-	t.reset(new INS_CTG_ADD(par, std::move(v)));
-	manCTG::eqS(std::move(t));
+		v.reset(new uint32_t[8]());
+		memcpy(v.get(), &o, 8 * 4);
+		t.reset(new INS_CTG_ADD(par, std::move(v)));
+		manCTG::eqS(std::move(t));
+	}
+
+	camera::mov(1.0f, 1.0f, -1.0f);
+	camera::rad(10.0f);
 }

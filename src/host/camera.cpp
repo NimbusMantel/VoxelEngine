@@ -4,10 +4,10 @@
 
 camera::Mode mode = camera::Mode::ARCBALL;
 
-float position[3] = { 0.5f, 0.5f, 0.5f };
+float position[3] = { 0.0f, 0.0f, 0.0f };
 float rotation[9] = { 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f };
 
-float target[3] = { 0.5f, 0.5f, 0.5f };
+float target[3] = { 0.0f, 0.0f, 0.0f };
 
 float radius = 0.0f;
 
