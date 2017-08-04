@@ -167,7 +167,7 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 
 	const float epsilon = as_float((127 - VoxelDepth) << 23);
 
-	uint4 stack[VoxelDepth];
+	uint3 stack[VoxelDepth];
 
 	if (fabs(dir.x) < epsilon) dir.x = as_float(as_uint(epsilon) ^ (as_uint(dir.x) & 0x80000000));
 	if (fabs(dir.y) < epsilon) dir.y = as_float(as_uint(epsilon) ^ (as_uint(dir.y) & 0x80000000));
@@ -255,7 +255,7 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 				stack[scale].xy = (uint2)((parent - vxBuffer) >> 2, as_uint(t_max));
 			}
 			
-			stack[scale].zw = (uint2)(as_uint((tc_max - t_min) / scaExp2), step_mask);
+			stack[scale].z = ((as_uint((tc_max - t_min) / scaExp2) & 0xFFFFFFF8) | (step_mask & 0x07));
 
 			h = tc_max;
 
@@ -304,8 +304,8 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 					native_sqrt((prev_light->z * prev_light->z + as_float(as_uint(curr_light.z * curr_light.z) & -curr_transparent)) / 2.0f)
 				);
 
-				curr_side = (stack[scale + 1].w & 0x06) + (bool)((octant_mask ^ 0x07) & stack[scale + 1].w);
-
+				curr_side = (stack[scale + 1].z & 0x06) + (bool)((octant_mask ^ 0x07) & stack[scale + 1].z);
+				
 				dist_light = (uchar4)((bool)(voxel.w & (0x00800000 >> curr_side)), (bool)(voxel.w & (0x00020000 >> curr_side)), (bool)(voxel.w & (0x00000800 >> curr_side)), (bool)(voxel.w & (0x00000020 >> curr_side)));
 				corr_light = convert_float3(dist_light.xyz) - (convert_float3(dist_light.xyz) - (*prev_light)) * as_float(0x3E000000 | ((!dist_light.w || !(dist_light.x || dist_light.y || dist_light.z)) << 24) | ((!((dist_light.x || dist_light.y || dist_light.z) ^ dist_light.w)) << 23));
 
@@ -330,7 +330,7 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 
 					pixel += (float4)(buf * fac * material.s3, 0.0f);
 
-					curr_depth = as_float(stack[scale + 1].z);
+					curr_depth = as_float(stack[scale + 1].z & 0xFFFFFFF8);
 
 					fac *= (float3)(native_powr(material.s4 + 0.00390625f, curr_depth), native_powr(material.s5 + 0.00390625f, curr_depth), native_powr(material.s6 + 0.00390625f, curr_depth)) * (1.0f - material.s3);
 
