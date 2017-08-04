@@ -1,14 +1,24 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
       <Platform>Win32</Platform>
     </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
     <ProjectConfiguration Include="Release|Win32">
       <Configuration>Release</Configuration>
       <Platform>Win32</Platform>
     </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
       <Configuration>Debug</Configuration>
       <Platform>x64</Platform>
@@ -19,34 +29,39 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{92759BAC-4B53-4502-AA6D-9C197A4CE41B}</ProjectGuid>
-    <Keyword>MakeFileProj</Keyword>
+    <ProjectGuid>{E99F5DFC-113A-4BC3-8253-90A6AC0C9A9D}</ProjectGuid>
+    <RootNamespace>Voxel Engine</RootNamespace>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
-    <ConfigurationType>Makefile</ConfigurationType>
+    <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v140</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
-    <ConfigurationType>Makefile</ConfigurationType>
+    <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v140</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v140</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v140</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
-  </ImportGroup>
-  <ImportGroup Label="Shared">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\IntelOpenCL.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
@@ -61,42 +76,136 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <NMakePreprocessorDefinitions>WIN32;_DEBUG;$(NMakePreprocessorDefinitions)</NMakePreprocessorDefinitions>
-  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <NMakePreprocessorDefinitions>WIN32;NDEBUG;$(NMakePreprocessorDefinitions)</NMakePreprocessorDefinitions>
+    <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
-  <ItemDefinitionGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Intel_OpenCL_Build_Rules>
+      <Device>0</Device>
+    </Intel_OpenCL_Build_Rules>
+    <ClCompile>
+      <AdditionalIncludeDirectories>src;ext\Common;ext\Intel;ext\NVIDIA;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>Win32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <WarningLevel>Level3</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <PrecompiledHeader />
+      <PreprocessToFile>false</PreprocessToFile>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>lib64\Common;lib64\Intel;lib64\NVIDIA</AdditionalLibraryDirectories>
+      <AdditionalDependencies>lib64\Intel\OpenCL.lib;lib64\NVIDIA\OpenCL.lib;lib64\Common\SDL2.lib;lib64\Common\SDL2main.lib;lib64\Common\glew32.lib;lib64\Common\opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <PostBuildEvent>
+      <Command>If exist "*.cl" copy "*.cl" "$(OutDir)\"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Intel_OpenCL_Build_Rules>
+      <Device>0</Device>
+    </Intel_OpenCL_Build_Rules>
+    <ClCompile>
+      <AdditionalIncludeDirectories>src;ext\Common;ext\Intel;ext\NVIDIA;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>Win32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <WarningLevel>Level3</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <PrecompiledHeader />
+      <PreprocessToFile>false</PreprocessToFile>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>lib64\Common;lib64\Intel;lib64\NVIDIA</AdditionalLibraryDirectories>
+      <AdditionalDependencies>lib64\Intel\OpenCL.lib;lib64\NVIDIA\OpenCL.lib;lib64\Common\SDL2.lib;lib64\Common\SDL2main.lib;lib64\Common\glew32.lib;lib64\Common\opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <PostBuildEvent>
+      <Command>If exist "*.cl" copy "*.cl" "$(OutDir)\"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Intel_OpenCL_Build_Rules>
+      <Device>0</Device>
+    </Intel_OpenCL_Build_Rules>
+    <ClCompile>
+      <AdditionalIncludeDirectories>src;ext\Common;ext\Intel;ext\NVIDIA;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>__x86_64;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <Optimization>MaxSpeed</Optimization>
+      <MinimalRebuild>true</MinimalRebuild>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <WarningLevel>Level3</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <PrecompiledHeader />
+      <PreprocessToFile>false</PreprocessToFile>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>lib64\Common;lib64\Intel;lib64\NVIDIA</AdditionalLibraryDirectories>
+      <AdditionalDependencies>lib64\Intel\OpenCL.lib;lib64\NVIDIA\OpenCL.lib;lib64\Common\SDL2.lib;lib64\Common\SDL2main.lib;lib64\Common\glew32.lib;lib64\Common\opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <PostBuildEvent>
+      <Command>If exist "*.cl" copy "*.cl" "$(OutDir)\"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Intel_OpenCL_Build_Rules>
+      <Device>0</Device>
+    </Intel_OpenCL_Build_Rules>
+    <ClCompile>
+      <AdditionalIncludeDirectories>src;ext\Common;ext\Intel;ext\NVIDIA;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>__x86_64;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <Optimization>Disabled</Optimization>
+      <MinimalRebuild>true</MinimalRebuild>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <WarningLevel>Level3</WarningLevel>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <PrecompiledHeader />
+      <PreprocessToFile>false</PreprocessToFile>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>lib64\Common;lib64\Intel;lib64\NVIDIA</AdditionalLibraryDirectories>
+      <AdditionalDependencies>lib64\Intel\OpenCL.lib;lib64\NVIDIA\OpenCL.lib;lib64\Common\SDL2.lib;lib64\Common\SDL2main.lib;lib64\Common\glew32.lib;lib64\Common\opengl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Console</SubSystem>
+    </Link>
+    <PostBuildEvent>
+      <Command>If exist "*.cl" copy "*.cl" "$(OutDir)\"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="src\core\camera.cpp" />
-    <ClCompile Include="src\core\colour.cpp" />
-    <ClCompile Include="src\core\game.cpp" />
-    <ClCompile Include="src\core\geo.cpp" />
-    <ClCompile Include="src\core\voxel.cpp" />
-    <ClCompile Include="src\platform\common\platform_file_utils.cpp" />
-    <ClCompile Include="src\platform\common\platform_log.cpp" />
-    <ClCompile Include="src\platform\emscripten\main.cpp" />
+    <ClCompile Include="src\host\camera.cpp" />
+    <ClCompile Include="src\host\main.cpp" />
+    <ClCompile Include="src\kernel\instruct.cpp" />
+    <ClCompile Include="src\voxel\voxel.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="src\core\camera.h" />
-    <ClInclude Include="src\core\colour.h" />
-    <ClInclude Include="src\core\config.h" />
-    <ClInclude Include="src\core\game.h" />
-    <ClInclude Include="src\core\geo.h" />
-    <ClInclude Include="src\core\json.h" />
-    <ClInclude Include="src\core\macros.h" />
-    <ClInclude Include="src\core\voxel.h" />
-    <ClInclude Include="src\platform\common\platform_file_utils.h" />
-    <ClInclude Include="src\platform\common\platform_log.h" />
-    <ClInclude Include="src\platform\common\platform_macros.h" />
+    <ClInclude Include="src\host\camera.hpp" />
+    <ClInclude Include="src\kernel\instruct.hpp" />
+    <ClInclude Include="src\voxel\material.hpp" />
+    <ClInclude Include="src\voxel\voxel.hpp" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="ext\monkey.json" />
-    <None Include="ext\teapot.json" />
+    <Text Include="Notebook.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Intel_OpenCL_Build_Rules Include="src\kernel\kernel.cl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\IntelOpenCL.targets" />
   </ImportGroup>
 </Project>
