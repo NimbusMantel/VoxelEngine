@@ -54,15 +54,17 @@ enum PLACEHOLDER {
 
 // function declarations
 
-void cgLoad(__global uint32_t* vxBuffer, uint32_t parent, uint32_t index, uint32_t c0_0, uint32_t c0_1, uint32_t c0_2, uint32_t c0_3, uint32_t c1_0, uint32_t c1_1, uint32_t c1_2, uint32_t c1_3, uint32_t c2_0, uint32_t c2_1, uint32_t c2_2, uint32_t c2_3, uint32_t c3_0, uint32_t c3_1, uint32_t c3_2, uint32_t c3_3, uint32_t c4_0, uint32_t c4_1, uint32_t c4_2, uint32_t c4_3, uint32_t c5_0, uint32_t c5_1, uint32_t c5_2, uint32_t c5_3, uint32_t c6_0, uint32_t c6_1, uint32_t c6_2, uint32_t c6_3, uint32_t c7_0, uint32_t c7_1, uint32_t c7_2, uint32_t c7_3);
-void cgUnload(__global uint32_t* vxBuffer, uint32_t parent);
+void cgLoad(__global uint32_t* vxBuffer, volatile __global uint32_t* mnTicket, volatile __global uint32_t* mnBuffer, uint32_t parent, uint32_t index, uint32_t c0_0, uint32_t c0_1, uint32_t c0_2, uint32_t c0_3, uint32_t c1_0, uint32_t c1_1, uint32_t c1_2, uint32_t c1_3, uint32_t c2_0, uint32_t c2_1, uint32_t c2_2, uint32_t c2_3, uint32_t c3_0, uint32_t c3_1, uint32_t c3_2, uint32_t c3_3, uint32_t c4_0, uint32_t c4_1, uint32_t c4_2, uint32_t c4_3, uint32_t c5_0, uint32_t c5_1, uint32_t c5_2, uint32_t c5_3, uint32_t c6_0, uint32_t c6_1, uint32_t c6_2, uint32_t c6_3, uint32_t c7_0, uint32_t c7_1, uint32_t c7_2, uint32_t c7_3);
+void cgUnload(__global uint32_t* vxBuffer, volatile __global uint32_t* mnTicket, volatile __global uint32_t* mnBuffer, uint32_t parent);
 void cgAdd(__global uint32_t* vxBuffer, uint32_t parent, uint32_t ca_0, uint32_t ca_1, uint32_t ca_2, uint32_t ca_3, uint32_t cb_0, uint32_t cb_1, uint32_t cb_2, uint32_t cb_3);
 void cgRemove(__global uint32_t* vxBuffer, uint32_t parent, uint8_t mask);
 void cgMove(__global uint32_t* vxBuffer, uint32_t fparent, uint8_t fidx, uint32_t tparent, uint8_t tidx);
-void cgExpand(__global uint32_t* vxBuffer, uint32_t parent, uint32_t index);
+void cgExpand(__global uint32_t* vxBuffer, volatile __global uint32_t* mnTicket, volatile __global uint32_t* mnBuffer, uint32_t parent, uint32_t index);
 void cgColour(__global uint32_t* vxBuffer, uint32_t index, uint32_t colour_0, uint32_t colour_1);
 void cgLight(__global uint32_t* vxBuffer, uint32_t index, uint32_t light);
 
+uint32_t getParent(__global uint32_t* vxBuffer, uint32_t index);
+uint32_t getTimestamp(__global uint32_t* vxBuffer, uint32_t index);
 
 // kernels
 
@@ -74,7 +76,7 @@ __kernel void rayInitKernel(__global __write_only float* rvLookup, float pixWidt
 	vstore3(v / length(v), pixel.y * width + pixel.x, rvLookup);
 }
 
-__kernel void cgProKernel(__global __read_write uint32_t* vxBuffer, __global __read_only uint8_t* cgBuffer, uint32_t syncInsAmount, uint32_t asyncInsAmount) {
+__kernel void cgProKernel(__global __read_write uint32_t* vxBuffer, volatile __global __read_write uint32_t* mnTicket, volatile __global __read_write uint32_t* mnBuffer, __global __read_only uint8_t* cgBuffer, uint32_t syncInsAmount, uint32_t asyncInsAmount) {
 	size_t tid = get_global_id(0);
 
 	uint8_t insCode;
@@ -130,12 +132,12 @@ __kernel void cgProKernel(__global __read_write uint32_t* vxBuffer, __global __r
 
 	while (amount > 0) {
 		switch (insCode) {
-			case INS_CTG_RLD_C: cgLoad(vxBuffer, INT_BUF(cgBuffer, pointer), INT_BUF(cgBuffer, pointer + 4), INT_BUF(cgBuffer, pointer + 8), INT_BUF(cgBuffer, pointer + 12), INT_BUF(cgBuffer, pointer + 16), INT_BUF(cgBuffer, pointer + 20), INT_BUF(cgBuffer, pointer + 24), INT_BUF(cgBuffer, pointer + 28), INT_BUF(cgBuffer, pointer + 32), INT_BUF(cgBuffer, pointer + 36), INT_BUF(cgBuffer, pointer + 40), INT_BUF(cgBuffer, pointer + 44), INT_BUF(cgBuffer, pointer + 48), INT_BUF(cgBuffer, pointer + 52), INT_BUF(cgBuffer, pointer + 56), INT_BUF(cgBuffer, pointer + 60), INT_BUF(cgBuffer, pointer + 64), INT_BUF(cgBuffer, pointer + 68), INT_BUF(cgBuffer, pointer + 72), INT_BUF(cgBuffer, pointer + 76), INT_BUF(cgBuffer, pointer + 80), INT_BUF(cgBuffer, pointer + 84), INT_BUF(cgBuffer, pointer + 88), INT_BUF(cgBuffer, pointer + 92), INT_BUF(cgBuffer, pointer + 96), INT_BUF(cgBuffer, pointer + 100), INT_BUF(cgBuffer, pointer + 104), INT_BUF(cgBuffer, pointer + 108), INT_BUF(cgBuffer, pointer + 112), INT_BUF(cgBuffer, pointer + 116), INT_BUF(cgBuffer, pointer + 120), INT_BUF(cgBuffer, pointer + 124), INT_BUF(cgBuffer, pointer + 128), INT_BUF(cgBuffer, pointer + 132)); break;
-			case INS_CTG_ULD_C: cgUnload(vxBuffer, INT_BUF(cgBuffer, pointer)); break;
+			case INS_CTG_RLD_C: cgLoad(vxBuffer, mnTicket, mnBuffer, INT_BUF(cgBuffer, pointer), INT_BUF(cgBuffer, pointer + 4), INT_BUF(cgBuffer, pointer + 8), INT_BUF(cgBuffer, pointer + 12), INT_BUF(cgBuffer, pointer + 16), INT_BUF(cgBuffer, pointer + 20), INT_BUF(cgBuffer, pointer + 24), INT_BUF(cgBuffer, pointer + 28), INT_BUF(cgBuffer, pointer + 32), INT_BUF(cgBuffer, pointer + 36), INT_BUF(cgBuffer, pointer + 40), INT_BUF(cgBuffer, pointer + 44), INT_BUF(cgBuffer, pointer + 48), INT_BUF(cgBuffer, pointer + 52), INT_BUF(cgBuffer, pointer + 56), INT_BUF(cgBuffer, pointer + 60), INT_BUF(cgBuffer, pointer + 64), INT_BUF(cgBuffer, pointer + 68), INT_BUF(cgBuffer, pointer + 72), INT_BUF(cgBuffer, pointer + 76), INT_BUF(cgBuffer, pointer + 80), INT_BUF(cgBuffer, pointer + 84), INT_BUF(cgBuffer, pointer + 88), INT_BUF(cgBuffer, pointer + 92), INT_BUF(cgBuffer, pointer + 96), INT_BUF(cgBuffer, pointer + 100), INT_BUF(cgBuffer, pointer + 104), INT_BUF(cgBuffer, pointer + 108), INT_BUF(cgBuffer, pointer + 112), INT_BUF(cgBuffer, pointer + 116), INT_BUF(cgBuffer, pointer + 120), INT_BUF(cgBuffer, pointer + 124), INT_BUF(cgBuffer, pointer + 128), INT_BUF(cgBuffer, pointer + 132)); break;
+			case INS_CTG_ULD_C: cgUnload(vxBuffer, mnTicket, mnBuffer, INT_BUF(cgBuffer, pointer)); break;
 			case INS_CTG_ADD_C: cgAdd(vxBuffer, INT_BUF(cgBuffer, pointer), INT_BUF(cgBuffer, pointer + 4), INT_BUF(cgBuffer, pointer + 8), INT_BUF(cgBuffer, pointer + 12), INT_BUF(cgBuffer, pointer + 16), INT_BUF(cgBuffer, pointer + 20), INT_BUF(cgBuffer, pointer + 24), INT_BUF(cgBuffer, pointer + 28), INT_BUF(cgBuffer, pointer + 32)); break;
 			case INS_CTG_REM_C: cgRemove(vxBuffer, INT_BUF(cgBuffer, pointer), cgBuffer[pointer + 4]); break; break;
 			case INS_CTG_MOV_C: cgMove(vxBuffer, INT_BUF(cgBuffer, pointer), ((cgBuffer[pointer + 8] & 0xE0) >> 5), INT_BUF(cgBuffer, pointer + 4), ((cgBuffer[pointer + 8] & 0x1C) >> 2)); break;
-			case INS_CTG_EXP_C: cgExpand(vxBuffer, INT_BUF(cgBuffer, pointer), INT_BUF(cgBuffer, pointer + 4)); break;
+			case INS_CTG_EXP_C: cgExpand(vxBuffer, mnTicket, mnBuffer, INT_BUF(cgBuffer, pointer), INT_BUF(cgBuffer, pointer + 4)); break;
 			case INS_CTG_COL_C: cgColour(vxBuffer, INT_BUF(cgBuffer, pointer), INT_BUF(cgBuffer, pointer + 4), ((uint32_t)cgBuffer[pointer + 8] << 24)); break;
 			case INS_CTG_LIT_C: cgLight(vxBuffer, INT_BUF(cgBuffer, pointer), (((uint32_t)cgBuffer[pointer + 4] << 16) | ((uint32_t)cgBuffer[pointer + 5] << 8) | cgBuffer[pointer + 6])); break;
 		}
@@ -155,7 +157,7 @@ Colour model according to "A physically Based Colour Model"
 
 */
 
-__kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only image2d_t rbo, __global __read_only float* rvLookup, __constant __read_only float* rotMat, float3 norPos, float rayCoef) {
+__kernel void renderKernel(volatile __global __read_write uint32_t* vxBuffer, volatile __global __read_write uint32_t* mnTicket, volatile __global __read_write uint32_t* mnBuffer, __global __read_write uint8_t* gcBuffer, __write_only image2d_t rbo, __global __read_only float* rvLookup, __constant __read_only float* rotMat, float3 norPos, float rayCoef, uint32_t timStamp) {
 	int2 size = { get_image_width(rbo), get_image_height(rbo) };
 	const int2 coors = { get_global_id(0), get_global_id(1) };
 
@@ -195,7 +197,7 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 	t_min = fmax(t_min, 0.0f);
 	t_max = fmin(t_max, 1.0f);
 
-	__global uint32_t* parent = vxBuffer;
+	volatile __global uint32_t* parent = vxBuffer;
 	uint4 voxel = { 0x00, 0x00, 0x00, 0x00 };
 
 	uint8_t idx = 0x00;
@@ -211,6 +213,14 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 	
 	float tx_corner, ty_corner, tz_corner, tc_max;
 	uint8_t cidx;
+
+	timStamp = (timStamp & 0x0000003F) << 10;
+
+	uint32_t oldTimeStamp;
+
+	uint32_t ticketIndex;
+
+	bool shouldRender = false;
 	uint8_t step_mask = 0x00;
 
 	uint32_t difBits;
@@ -250,29 +260,87 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 
 		cidx = idx ^ octant_mask;
 
-		if ((voxel.x & (0x00800000 >> cidx)) != 0x00 && t_min <= t_max && tc_max <= (scaExp2 * rayCoef)) {
-			if (tc_max < h) {
-				stack[scale].xy = (uint2)((parent - vxBuffer) >> 2, as_uint(t_max));
+		shouldRender = (!(voxel.x & 0x00FF0000) || (tc_max > (scaExp2 * rayCoef)));
+		
+		if (!shouldRender && ((voxel.x & (0x00800000 >> cidx)) != 0x00) && (t_min <= t_max)) {
+			if ((voxel.x & 0x0000FC00) != timStamp) {
+				oldTimeStamp = atomic_cmpxchg(parent, voxel.x, (voxel.x & 0xFFFF03FF) | timStamp);
+
+				if (oldTimeStamp == voxel.x) {
+					ticketIndex = atomic_inc(mnTicket);
+
+					while (mnTicket[0x01] != ticketIndex) {
+						continue;
+					}
+
+					if (voxel.y == 0x00) {
+						ticketIndex = ((gcBuffer[14] << 16) | (gcBuffer[15] << 8) | gcBuffer[16]);
+
+						gcBuffer[20 + (ticketIndex << 2) + 0] = (((parent - vxBuffer) >> 2) & 0xFF000000) >> 24;
+						gcBuffer[20 + (ticketIndex << 2) + 1] = (((parent - vxBuffer) >> 2) & 0x00FF0000) >> 16;
+						gcBuffer[20 + (ticketIndex << 2) + 2] = (((parent - vxBuffer) >> 2) & 0x0000FF00) >> 8;
+						gcBuffer[20 + (ticketIndex << 2) + 3] = (((parent - vxBuffer) >> 2) & 0x000000FF);
+
+						ticketIndex += 1;
+
+						gcBuffer[14] = (ticketIndex & 0x00FF0000) >> 16;
+						gcBuffer[15] = (ticketIndex & 0x0000FF00) >> 8;
+						gcBuffer[16] = ticketIndex & 0x000000FF;
+
+#if OpenCLDebug
+						printf("gcRequest(parent: %u)\n\n", (parent - vxBuffer) >> 2);
+#endif
+					}
+					else {
+						ticketIndex = (voxel.y >> 3);
+						
+						mnBuffer[(mnBuffer[ticketIndex << 1] << 1) | 0x01] = mnBuffer[(ticketIndex << 1) | 0x01];
+						mnBuffer[mnBuffer[(ticketIndex << 1) | 0x01] << 1] = mnBuffer[ticketIndex << 1];
+
+						mnBuffer[(ticketIndex << 1) | 0x01] = 0x00;
+						mnBuffer[ticketIndex << 1] = mnBuffer[0x00];
+						
+						mnBuffer[(mnBuffer[0x00] << 1) | 0x01] = ticketIndex;
+						mnBuffer[0x00] = ticketIndex;
+
+#if OpenCLDebug
+						printf("gcValidate(parent: %u)\n\n", (parent - vxBuffer) >> 2);
+#endif
+					}
+
+					mnTicket[0x01] += 1;
+				}
 			}
-			
-			stack[scale].z = ((as_uint((tc_max - t_min) / scaExp2) & 0xFFFFFFF8) | (step_mask & 0x07));
 
-			h = tc_max;
+			if (voxel.y == 0x00) {
+				shouldRender = true;
 
-			parent = vxBuffer + ((voxel.y + cidx) << 2);
+				voxel.x &= 0xFF00FFFF;
+			}
+			else {
+				if (tc_max < h) {
+					stack[scale].xy = (uint2)((parent - vxBuffer) >> 2, as_uint(t_max));
+				}
 
-			idx = 0x00;
-			scale--;
-			scaExp2 *= 0.5f;
+				stack[scale].z = ((as_uint((tc_max - t_min) / scaExp2) & 0xFFFFFFF8) | (step_mask & 0x07));
 
-			if ((scaExp2 * tx_coef + tx_corner) > t_min) { idx ^= 1; pos.x += scaExp2; }
-			if ((scaExp2 * ty_coef + ty_corner) > t_min) { idx ^= 2; pos.y += scaExp2; }
-			if ((scaExp2 * tz_coef + tz_corner) > t_min) { idx ^= 4; pos.z += scaExp2; }
+				h = tc_max;
 
-			t_max = fmin(t_max, tc_max);
-			voxel.x = 0x00;
+				parent = vxBuffer + ((voxel.y + cidx) << 2);
 
-			continue;
+				idx = 0x00;
+				scale--;
+				scaExp2 *= 0.5f;
+
+				if ((scaExp2 * tx_coef + tx_corner) > t_min) { idx ^= 1; pos.x += scaExp2; }
+				if ((scaExp2 * ty_coef + ty_corner) > t_min) { idx ^= 2; pos.y += scaExp2; }
+				if ((scaExp2 * tz_coef + tz_corner) > t_min) { idx ^= 4; pos.z += scaExp2; }
+
+				t_max = fmin(t_max, tc_max);
+				voxel.x = 0x00;
+
+				continue;
+			}
 		}
 
 		step_mask = 0x00;
@@ -284,7 +352,7 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 		t_min = tc_max;
 		idx ^= step_mask;
 
-		if ((voxel.x & 0x00FF0000) == 0x00 || (idx & step_mask) != 0x00) {
+		if (shouldRender || ((idx & step_mask) != 0x00)) {
 			curr_active = (voxel.x & 0x80000000);
 			curr_emitter = ((voxel.w & 0x01000000) >> 24);
 
@@ -388,10 +456,99 @@ __kernel void renderKernel(__global __read_only uint32_t* vxBuffer, __write_only
 	write_imagef(rbo, coors, pixel);
 }
 
+__kernel void gcProKernel(volatile __global __read_write uint32_t* vxBuffer, __global __read_write uint32_t* mnBuffer, __global __read_write uint8_t* gcBuffer, uint32_t timStamp, float memPressure) {
+	timStamp &= 0x0000003F;
+	memPressure = clamp(memPressure, 0.0f, 1.0f);
+	
+	uint8_t timDiff = (uint8_t)round(native_powr(63.0f, native_sqrt(memPressure)));
+	
+	bool hasSuggestions = (getTimestamp(vxBuffer, getParent(vxBuffer, mnBuffer[0x01] << 3)) == ((timStamp + timDiff) & 0x0000003F));
+	bool hasRequests = (gcBuffer[14] || gcBuffer[15] || gcBuffer[16]);
+	
+	if (!hasRequests && !hasSuggestions) {
+		gcBuffer[0] = gcBuffer[1] = gcBuffer[2] = gcBuffer[3] = gcBuffer[4] = gcBuffer[5] = 0x00;
+
+		return;
+	}
+
+	uint32_t byteSize;
+
+	if (!hasSuggestions) {
+		gcBuffer[0] = gcBuffer[7] = gcBuffer[14];
+		gcBuffer[1] = gcBuffer[8] = gcBuffer[15];
+		gcBuffer[2] = gcBuffer[9] = gcBuffer[16];
+
+		byteSize = 20 + ((gcBuffer[14] << 16) | (gcBuffer[15] << 8) | gcBuffer[16]) * INS_GTC_REQ_S;
+
+		gcBuffer[3] = (byteSize & 0x00FF0000) >> 16;
+		gcBuffer[4] = (byteSize & 0x0000FF00) >> 8;
+		gcBuffer[5] = (byteSize & 0x000000FF);
+		
+		gcBuffer[6] = INS_GTC_REQ_C;
+
+		gcBuffer[10] = gcBuffer[11] = 0x00;
+		gcBuffer[12] = 20;
+
+		return;
+	}
+
+	gcBuffer[6] = INS_GTC_SUG_C;
+
+	if (hasRequests) {
+		byteSize = 20 + ((gcBuffer[14] << 16) | (gcBuffer[15] << 8) | gcBuffer[16]) * INS_GTC_REQ_S;
+
+		gcBuffer[13] = INS_GTC_REQ_C;
+
+		gcBuffer[17] = gcBuffer[18] = 0x00;
+		gcBuffer[19] = 20;
+	}
+	else {
+		byteSize = 13;
+	}
+
+	gcBuffer[10] = (byteSize & 0x00FF0000) >> 16;
+	gcBuffer[11] = (byteSize & 0x0000FF00) >> 8;
+	gcBuffer[12] = (byteSize & 0x000000FF);
+
+	uint32_t sugIndex = mnBuffer[0x01];
+	uint32_t sugParent = getParent(vxBuffer, sugIndex << 3);
+
+	while ((sugIndex != 0x00) && (getTimestamp(vxBuffer, sugParent) == ((timStamp + timDiff) & 0x0000003F))) {
+		gcBuffer[byteSize + 0] = (sugParent & 0xFF000000) >> 24;
+		gcBuffer[byteSize + 1] = (sugParent & 0x00FF0000) >> 16;
+		gcBuffer[byteSize + 2] = (sugParent & 0x0000FF00) >> 8;
+		gcBuffer[byteSize + 3] = (sugParent & 0x000000FF);
+
+		gcBuffer[9] += 1;
+		gcBuffer[8] += (gcBuffer[9] == 0x00);
+		gcBuffer[7] += ((gcBuffer[9] == 0x00) && (gcBuffer[8] == 0x00));
+
+		byteSize += INS_GTC_SUG_S;
+
+		vxBuffer[sugParent << 2] = ((vxBuffer[sugParent << 2] & 0xFFFF03FF) | (timStamp << 10));
+
+		mnBuffer[0x01] = mnBuffer[(sugIndex << 1) | 0x01];
+		mnBuffer[mnBuffer[(sugIndex << 1) | 0x01] << 1] = 0x00;
+
+		mnBuffer[(sugIndex << 1) | 0x01] = 0x00;
+		mnBuffer[sugIndex << 1] = mnBuffer[0x00];
+
+		mnBuffer[(mnBuffer[0x00] << 1) | 0x01] = sugIndex;
+		mnBuffer[0x00] = sugIndex;
+
+		sugIndex = mnBuffer[0x01];
+		sugParent = getParent(vxBuffer, sugIndex << 3);
+	}
+
+	gcBuffer[3] = (byteSize & 0x00FF0000) >> 16;
+	gcBuffer[4] = (byteSize & 0x0000FF00) >> 8;
+	gcBuffer[5] = (byteSize & 0x000000FF);
+}
+
 
 // functions
 
-void cgLoad(__global uint32_t* vxBuffer, uint32_t parent, uint32_t index, uint32_t c0_0, uint32_t c0_1, uint32_t c0_2, uint32_t c0_3, uint32_t c1_0, uint32_t c1_1, uint32_t c1_2, uint32_t c1_3, uint32_t c2_0, uint32_t c2_1, uint32_t c2_2, uint32_t c2_3, uint32_t c3_0, uint32_t c3_1, uint32_t c3_2, uint32_t c3_3, uint32_t c4_0, uint32_t c4_1, uint32_t c4_2, uint32_t c4_3, uint32_t c5_0, uint32_t c5_1, uint32_t c5_2, uint32_t c5_3, uint32_t c6_0, uint32_t c6_1, uint32_t c6_2, uint32_t c6_3, uint32_t c7_0, uint32_t c7_1, uint32_t c7_2, uint32_t c7_3) {
+void cgLoad(__global uint32_t* vxBuffer, volatile __global uint32_t* mnTicket, volatile __global uint32_t* mnBuffer, uint32_t parent, uint32_t index, uint32_t c0_0, uint32_t c0_1, uint32_t c0_2, uint32_t c0_3, uint32_t c1_0, uint32_t c1_1, uint32_t c1_2, uint32_t c1_3, uint32_t c2_0, uint32_t c2_1, uint32_t c2_2, uint32_t c2_3, uint32_t c3_0, uint32_t c3_1, uint32_t c3_2, uint32_t c3_3, uint32_t c4_0, uint32_t c4_1, uint32_t c4_2, uint32_t c4_3, uint32_t c5_0, uint32_t c5_1, uint32_t c5_2, uint32_t c5_3, uint32_t c6_0, uint32_t c6_1, uint32_t c6_2, uint32_t c6_3, uint32_t c7_0, uint32_t c7_1, uint32_t c7_2, uint32_t c7_3) {
 	uint32_t idx = index << 2;
 
 	vxBuffer[idx + 0] = c0_0; vxBuffer[idx + 1] = c0_1; vxBuffer[idx + 2] = c0_2; vxBuffer[idx + 3] = c0_3;
@@ -405,13 +562,44 @@ void cgLoad(__global uint32_t* vxBuffer, uint32_t parent, uint32_t index, uint32
 
 	vxBuffer[(parent << 2) + 1] = index;
 
+	uint32_t ticketIndex = atomic_inc(mnTicket);
+
+	while (mnTicket[0x01] != ticketIndex) {
+		continue;
+	}
+
+	ticketIndex = (index >> 3);
+
+	mnBuffer[(ticketIndex << 1) | 0x01] = 0x00;
+	mnBuffer[ticketIndex << 1] = mnBuffer[0x00];
+
+	mnBuffer[(mnBuffer[0x00] << 1) | 0x01] = ticketIndex;
+	mnBuffer[0x00] = ticketIndex;
+
+	mnTicket[0x01] += 1;
+	
 #if OpenCLDebug
 	printf("cgLoad(parent: %u, index: %u)\n   ptr: %u\n   c_0: 0x%016llX%016llX\n   c_1: 0x%016llX%016llX\n   c_2: 0x%016llX%016llX\n   c_3: 0x%016llX%016llX\n   c_4: 0x%016llX%016llX\n   c_5: 0x%016llX%016llX\n   c_6: 0x%016llX%016llX\n   c_7: 0x%016llX%016llX\n\n", parent, index, vxBuffer[(parent << 2) + 1], ((uint64_t)vxBuffer[idx + 0] << 32) | vxBuffer[idx + 1], ((uint64_t)vxBuffer[idx + 2] << 32) | vxBuffer[idx + 3], ((uint64_t)vxBuffer[idx + 4] << 32) | vxBuffer[idx + 5], ((uint64_t)vxBuffer[idx + 6] << 32) | vxBuffer[idx + 7], ((uint64_t)vxBuffer[idx + 8] << 32) | vxBuffer[idx + 9], ((uint64_t)vxBuffer[idx + 10] << 32) | vxBuffer[idx + 11], ((uint64_t)vxBuffer[idx + 12] << 32) | vxBuffer[idx + 13], ((uint64_t)vxBuffer[idx + 14] << 32) | vxBuffer[idx + 15], ((uint64_t)vxBuffer[idx + 16] << 32) | vxBuffer[idx + 17], ((uint64_t)vxBuffer[idx + 18] << 32) | vxBuffer[idx + 19], ((uint64_t)vxBuffer[idx + 20] << 32) | vxBuffer[idx + 21], ((uint64_t)vxBuffer[idx + 22] << 32) | vxBuffer[idx + 23], ((uint64_t)vxBuffer[idx + 24] << 32) | vxBuffer[idx + 25], ((uint64_t)vxBuffer[idx + 26] << 32) | vxBuffer[idx + 27], ((uint64_t)vxBuffer[idx + 28] << 32) | vxBuffer[idx + 29], ((uint64_t)vxBuffer[idx + 30] << 32) | vxBuffer[idx + 31]);
 #endif
 }
 
-void cgUnload(__global uint32_t* vxBuffer, uint32_t parent) {
+void cgUnload(__global uint32_t* vxBuffer, volatile __global uint32_t* mnTicket, volatile __global uint32_t* mnBuffer, uint32_t parent) {
+	uint32_t children = vxBuffer[(parent << 2) + 1];
+	
 	vxBuffer[(parent << 2) + 1] = 0x00;
+
+	uint32_t ticketIndex = atomic_inc(mnTicket);
+
+	while (mnTicket[0x01] != ticketIndex) {
+		continue;
+	}
+
+	ticketIndex = (children >> 3);
+
+	mnBuffer[(mnBuffer[ticketIndex << 1] << 1) | 0x01] = mnBuffer[(ticketIndex << 1) | 0x01];
+	mnBuffer[mnBuffer[(ticketIndex << 1) | 0x01] << 1] = mnBuffer[ticketIndex << 1];
+
+	mnTicket[0x01] += 1;
 
 #if OpenCLDebug
 	printf("cgUnload(parent: %u)\n\n", parent);
@@ -494,10 +682,10 @@ void cgMove(__global uint32_t* vxBuffer, uint32_t fparent, uint8_t fidx, uint32_
 #endif
 }
 
-void cgExpand(__global uint32_t* vxBuffer, uint32_t parent, uint32_t index) {
+void cgExpand(__global uint32_t* vxBuffer, volatile __global uint32_t* mnTicket, volatile __global uint32_t* mnBuffer, uint32_t parent, uint32_t index) {
 	uint32_t idx = index << 2;
 	
-	vxBuffer[idx + 0] = (0x00000000 | ((parent & 0xF0000000) >> 4)); vxBuffer[idx + 1] = 0x00; vxBuffer[idx + 2] = 0x00; vxBuffer[idx + 3] = 0x00;
+	vxBuffer[idx + 0] = (0x00000000 | (((vxBuffer[(parent - ((vxBuffer[parent << 2] & 0x70000000) >> 28)) << 2] & 0x0F000000) + 0x01000000) & -(parent != 0x00))); vxBuffer[idx + 1] = 0x00; vxBuffer[idx + 2] = 0x00; vxBuffer[idx + 3] = 0x00;
 	vxBuffer[idx + 4] = (0x10000000 | (parent & 0x0F000000)); vxBuffer[idx + 5] = 0x00; vxBuffer[idx + 6] = 0x00; vxBuffer[idx + 7] = 0x00;
 	vxBuffer[idx + 8] = (0x20000000 | ((parent & 0x00F00000) << 4)); vxBuffer[idx + 9] = 0x00; vxBuffer[idx + 10] = 0x00; vxBuffer[idx + 11] = 0x00;
 	vxBuffer[idx + 12] = (0x30000000 | ((parent & 0x000F0000) << 8)); vxBuffer[idx + 13] = 0x00; vxBuffer[idx + 14] = 0x00; vxBuffer[idx + 15] = 0x00;
@@ -508,6 +696,22 @@ void cgExpand(__global uint32_t* vxBuffer, uint32_t parent, uint32_t index) {
 
 	vxBuffer[(parent << 2) + 1] = index;
 
+	uint32_t ticketIndex = atomic_inc(mnTicket);
+
+	while (mnTicket[0x01] != ticketIndex) {
+		continue;
+	}
+
+	ticketIndex = (index >> 3);
+
+	mnBuffer[(ticketIndex << 1) | 0x01] = 0x00;
+	mnBuffer[ticketIndex << 1] = mnBuffer[0x00];
+
+	mnBuffer[(mnBuffer[0x00] << 1) | 0x01] = ticketIndex;
+	mnBuffer[0x00] = ticketIndex;
+
+	mnTicket[0x01] += 1;
+	
 #if OpenCLDebug
 	printf("cgExpand(parent: %u, index: %u)\n   ptr: %u\n\n", parent, index, vxBuffer[(parent << 2) + 1]);
 #endif
@@ -532,4 +736,16 @@ void cgLight(__global uint32_t* vxBuffer, uint32_t index, uint32_t light) {
 #if OpenCLDebug
 	printf("cgLight(index: %u)\n   lit: 0x%06X\n\n", index, vxBuffer[idx + 3] & 0x00FFFFFF);
 #endif
+}
+
+
+uint32_t getParent(__global uint32_t* vxBuffer, uint32_t index) {
+	index <<= 2;
+	
+	return ((vxBuffer[index + 4] & 0x0F000000) | ((vxBuffer[index + 8] & 0x0F000000) >> 4) | ((vxBuffer[index + 12] & 0x0F000000) >> 8) | ((vxBuffer[index + 16] & 0x0F000000) >> 12) |
+		    ((vxBuffer[index + 20] & 0x0F000000) >> 16) | ((vxBuffer[index + 24] & 0x0F000000) >> 20) | ((vxBuffer[index + 28] & 0x0F000000) >> 24));
+}
+
+uint32_t getTimestamp(__global uint32_t* vxBuffer, uint32_t index) {
+	return ((vxBuffer[index << 2] & 0x0000FC00) >> 10);
 }

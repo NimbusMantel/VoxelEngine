@@ -14,7 +14,9 @@ Voxel buffer management on the CPU
 Voxel buffer on CPU and GPU are synchronized
 
 Voxel strucuture on the GPU
-- 32-bit structure: 1-active, 3-index, 4-parent, 8-children, 1-search, 7-activity, (8-unused)
+- 32-bit structure: 1-active, 3-index,
+                    4-depth (child 0) / 4-parent (children 1-7),
+					8-children, 6-time, (10-unused)
 - 32-bit children: 32-pointer (absolute, refer to the block of voxel data (4*4=16 bytes))
 - 40-bit colour: 6-pred, 6-pgreen, 6-pblue, 6-beta,
                  5-mred, 5-mgreen, 5-mblue, 1-emitter
@@ -22,7 +24,9 @@ Voxel strucuture on the GPU
 - 06-bit modifier: 6-shigh | (6-unused)
 
 Voxel structure on the CPU
-- 32-bit structure: 1-active, 3-index, 4-parent, 8-children, (16-unused)
+- 32-bit structure: 1-active, 3-index,
+                    4-depth (child 0) / 4-parent (children 1-7),
+					8-children, 6-position, (10-unused)
 - 32-bit children: 32-pointer (absolute, refer to the block of voxel data (4*4=16 bytes))
 - 32 bit unused: (32-unused)
 - 32 bit unused: (32-unused)
@@ -89,10 +93,11 @@ CPU to GPU communication
   - LIT [index, light]*: update light -> light(v)
 
 GPU to CPU communication
-- 16 bit indices
+- 24 bit indices
 - header
-  - [a] [o, n, ap]*
+  - [a] [s] [o, n, ap]*
   - amount of asynchronous instructions
+  - buffer size in bytes
   - instruction codes and numbers of subcalls of, pointers to asynchronous instructions
 - instructions
   - REQ [parent]*: request children loadign

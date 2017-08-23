@@ -34,6 +34,8 @@ uint32_t tmp = (127 - VOXEL_DEPTH) << 23;
 
 const float scale = *((float*)(&tmp));
 
+uint32_t timeStamp = 0x00;
+
 float pos[3], rot[9];
 float vel[3] = { 0.0f, 0.0f, 0.0f };
 
@@ -122,8 +124,12 @@ int main(int argc, char* argv[]) {
 
 	cl::Buffer vxBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, 0x80 << BUFFER_DEPTH);
 
-	cl::Buffer cgBuffer = cl::Buffer(clContext, CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY, 0x01 << 24);
-	cl::Buffer gcBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_READ_ONLY, 0x01 << 16);
+	uint8_t* cgBuf = manCTG::buf();
+
+	cl::Buffer cgBuffer = cl::Buffer(clContext, (cl_mem_flags)(CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR), 0x01 << 24, (void*)cgBuf);
+
+	cl::Buffer mnTicket = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, 0x04 << 1);
+	cl::Buffer mnBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_WRITE_ONLY, 0x08 << BUFFER_DEPTH);
 
 	cl::Buffer rvLookup = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, sizeof(cl_float) * 3 * width * height);
 	cl::Buffer rtMatrix = cl::Buffer(clContext, CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY, sizeof(cl_float) * 9);
@@ -151,30 +157,42 @@ int main(int argc, char* argv[]) {
 	
 	cl::Kernel cgProKernel = cl::Kernel(clProgram, "cgProKernel");
 	cgProKernel.setArg(0, vxBuffer);
-	cgProKernel.setArg(1, cgBuffer);
+	cgProKernel.setArg(1, mnTicket);
+	cgProKernel.setArg(2, mnBuffer);
+	cgProKernel.setArg(3, cgBuffer);
 
 	cl::Kernel renderKernel = cl::Kernel(clProgram, "renderKernel");
 	renderKernel.setArg(0, vxBuffer);
-	renderKernel.setArg(1, glBuffer);
-	renderKernel.setArg(2, rvLookup);
-	renderKernel.setArg(3, rtMatrix);
-	renderKernel.setArg(5, rayCoef);
+	renderKernel.setArg(1, mnTicket);
+	renderKernel.setArg(2, mnBuffer);
+	renderKernel.setArg(3, cgBuffer);
+	renderKernel.setArg(4, glBuffer);
+	renderKernel.setArg(5, rvLookup);
+	renderKernel.setArg(6, rtMatrix);
+	renderKernel.setArg(8, rayCoef);
+
+	cl::Kernel gcProKernel = cl::Kernel(clProgram, "gcProKernel");
+	gcProKernel.setArg(0, vxBuffer);
+	gcProKernel.setArg(1, mnBuffer);
+	gcProKernel.setArg(2, cgBuffer);
 	
 	cl::CommandQueue clQueue = cl::CommandQueue(clContext, device);
 
-	uint8_t* cgBuf = manCTG::buf();
 	uint32_t cgBufSize;
 
-	uint8_t* gcMap;
-
+	cl::Event mnIniEvent;
 	cl::Event cgWriEvent;
 	cl::Event cgProEvent;
 	cl::Event glAquEvent;
 	cl::Event rtMatEvent;
 	cl::Event glRenEvent;
+	cl::Event gcProEvent;
+	cl::Event glRelEvent;
 
 	std::vector<cl::Event> cgProPrevents;
+	std::vector<cl::Event> cgFilPrevents;
 	std::vector<cl::Event> glRenPrevents;
+	std::vector<cl::Event> gcProPrevents;
 	std::vector<cl::Event> glRelPrevents;
 
 	uint32_t cgInsSyncAmount = 0;
@@ -217,6 +235,10 @@ int main(int argc, char* argv[]) {
 	// Init voxel buffer by inserting the root
 
 	{
+		clQueue.enqueueFillBuffer(mnBuffer, 0x00, 0, 8, 0, &mnIniEvent);
+		
+		manBuf::set(0, true);
+
 		manVox::init();
 
 		cgBufSize = manCTG::wri(cgInsSyncAmount, cgInsAsyncAmount);
@@ -224,9 +246,9 @@ int main(int argc, char* argv[]) {
 
 		clQueue.enqueueWriteBuffer(cgBuffer, true, 0, cgBufSize, (void*)cgBuf, 0, &cgWriEvent);
 
-		cgProKernel.setArg(2, cgInsSyncAmount);
-		cgProKernel.setArg(3, cgInsAsyncAmount);
-		cgProPrevents = { cgWriEvent };
+		cgProKernel.setArg(4, cgInsSyncAmount);
+		cgProKernel.setArg(5, cgInsAsyncAmount);
+		cgProPrevents = { mnIniEvent, cgWriEvent };
 
 		for (uint32_t i = 0; i < cgInsSumAmount; i += min(1024, cgInsSumAmount - i)) {
 			clQueue.enqueueNDRangeKernel(cgProKernel, cl::NDRange(i), cl::NDRange(min(1024, cgInsSumAmount - i)), cl::NullRange, &cgProPrevents, &cgProEvent);
@@ -243,17 +265,23 @@ int main(int argc, char* argv[]) {
 		cgBufSize = manCTG::wri(cgInsSyncAmount, cgInsAsyncAmount);
 		cgInsSumAmount = cgInsSyncAmount + cgInsAsyncAmount;
 		
+		cgFilPrevents = {};
+
 		if (cgBufSize > 0) {
 			clQueue.enqueueWriteBuffer(cgBuffer, true, 0, cgBufSize, (void*)cgBuf, 0, &cgWriEvent);
 
-			cgProKernel.setArg(2, cgInsSyncAmount);
-			cgProKernel.setArg(3, cgInsAsyncAmount);
-			cgProPrevents = {cgWriEvent};
+			cgProKernel.setArg(4, cgInsSyncAmount);
+			cgProKernel.setArg(5, cgInsAsyncAmount);
+			cgProPrevents = { cgWriEvent };
 
 			for (uint32_t i = 0; i < cgInsSumAmount; i += min(1024, cgInsSumAmount - i)) {
 				clQueue.enqueueNDRangeKernel(cgProKernel, cl::NDRange(i), cl::NDRange(min(1024, cgInsSumAmount - i)), cl::NullRange, &cgProPrevents, &cgProEvent);
+
+				cgFilPrevents.push_back(std::move(cgProEvent));
 			}
 		}
+
+		clQueue.enqueueFillBuffer(cgBuffer, 0x00, 0, 20, &cgFilPrevents);
 
 		clQueue.finish();
 
@@ -275,23 +303,44 @@ int main(int argc, char* argv[]) {
 		norPos.y = pos[1] * scale + 1.5f;
 		norPos.z = pos[2] * scale + 1.5f;
 
-		renderKernel.setArg(4, norPos);
+		renderKernel.setArg(7, norPos);
+
+		timeStamp = (timeStamp + 1) & 0x0000003F;
+
+		renderKernel.setArg(9, timeStamp);
+
+		cgProPrevents = {};
 		
 		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
 			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
 				clQueue.enqueueNDRangeKernel(renderKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange, &glRenPrevents, &glRenEvent);
 
-				glRenPrevents.push_back(std::move(glRenEvent));
+				cgProPrevents.push_back(std::move(glRenEvent));
 			}
 		}
 		
-		clQueue.enqueueReleaseGLObjects(&glMemory, &glRelPrevents);
+		gcProKernel.setArg(3, timeStamp);
+		gcProKernel.setArg(4, manBuf::per());
 
-		gcMap = (uint8_t*)clQueue.enqueueMapBuffer(gcBuffer, CL_TRUE, CL_MAP_READ, 0, 0x01 << 16);
+		clQueue.enqueueTask(gcProKernel, &cgProPrevents, &gcProEvent);
 
-		// TO DO: Read GPU to CPU communication
+		glRelPrevents = { gcProEvent };
 
-		clQueue.enqueueUnmapMemObject(gcBuffer, gcMap);
+		clQueue.enqueueReleaseGLObjects(&glMemory, &glRelPrevents, &glRelEvent);
+
+		clQueue.finish();
+
+		clQueue.enqueueReadBuffer(cgBuffer, true, 0, 6, (void*)cgBuf);
+
+		cgBufSize = ((cgBuf[3] << 16) | (cgBuf[4] << 8) | cgBuf[5]);
+
+		if (cgBufSize > 0) {
+			clQueue.enqueueMapBuffer(cgBuffer, true, CL_MAP_READ, 0, cgBufSize);
+
+			// TO DO: Evaluate GPU to CPU communication
+
+			clQueue.enqueueUnmapMemObject(cgBuffer, (void*)cgBuf);
+		}
 
 		clQueue.finish();
 
@@ -483,6 +532,8 @@ void testVoxelBinaryTree() {
 }
 
 void testVoxelBufferData() {
+	manBuf::set(1, true, 16);
+
 	mat mats[VOXEL_DEPTH] = { mat() };
 
 	mat vxs[8] = { mat(col(1.0f, 0.929f, 0.0f), 0.875f, col(1.0f, 0.929f, 0.0f), true), mat(col(1.0f, 0.0f, 0.0f), 0.75f, col(1.0f, 0.0f, 0.0f), true),
@@ -517,22 +568,27 @@ void testVoxelBufferData() {
 	t.reset(new INS_CTG_LIT(0, std::move(l)));
 	manCTG::eqA(std::move(t));
 
-	uint32_t par = 0x00;
-	uint32_t idx = 0x08;
+	uint32_t par = 0;
+	uint32_t idx = 8;
 
-	for (int i = 1; i <= VOXEL_DEPTH; ++i) {
+	t.reset(new INS_CTG_EXP(par, idx));
+	manCTG::eqS(std::move(t));
+
+	par = 15;
+
+	for (int i = 2; i <= VOXEL_DEPTH; ++i) {
 		idx = 8 * i;
 		
 		t.reset(new INS_CTG_EXP(par, idx));
 		manCTG::eqS(std::move(t));
 
-		par = idx + 7;
+		par = 8 * i;
 	}
 
 	uint32_t o[8] = { 0x00 };
 	std::unique_ptr<uint32_t[]> v(new uint32_t[8]());
 
-	par = 0x00;
+	par = 0;
 
 	tmp = mats[1].toBinary();
 
@@ -551,7 +607,7 @@ void testVoxelBufferData() {
 	for (int i = 2; i <= (VOXEL_DEPTH - 1); ++i) {
 		tmp = mats[i].toBinary();
 
-		o[0] = 0x80000000 | ((par & 0xF0000000) >> 4);
+		o[0] = 0x80000000 | ((i - 1) << 24);
 		o[1] = 8 * (i + 1);
 		o[2] = tmp >> 32;
 		o[3] = tmp & 0xFFFFFFFF;
@@ -567,14 +623,14 @@ void testVoxelBufferData() {
 	for (uint32_t i = 0; i < 4; ++i) {
 		tmp = vxs[i * 2].toBinary();
 
-		o[0] = 0x80000000 | (i << 29) | ((par & (0xF0000000 >> (i * 8)) >> (28 - i * 8)) << 24);
+		o[0] = 0x80000000 | (i << 29) | ((i != 0) ? (((par & (0xF0000000 >> (i * 8))) >> (28 - i * 8)) << 24) : (15 << 24));
 		o[1] = 0x00000000;
 		o[2] = tmp >> 32;
 		o[3] = tmp & 0xFFFFFFFF;
 
 		tmp = vxs[i * 2 + 1].toBinary();
 
-		o[4] = 0x90000000 | (i << 29) | ((par & (0x0F000000 >> (i * 8)) >> (24 - i * 8)) << 24);
+		o[4] = 0x90000000 | (i << 29) | (((par & (0x0F000000 >> (i * 8))) >> (24 - i * 8)) << 24);
 		o[5] = 0x00000000;
 		o[6] = tmp >> 32;
 		o[7] = tmp & 0xFFFFFFFF;

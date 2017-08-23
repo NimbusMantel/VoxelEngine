@@ -316,6 +316,10 @@ namespace manBuf {
 		return mspace;
 	}
 
+	float per() {
+		return ((mpow - mspace) / (float)(mpow));
+	}
+
 	bool get(uint32_t pos) {
 		scheck(pos);
 
@@ -335,7 +339,7 @@ namespace manBuf {
 		mses((pos | mpow) - 1, tog);
 	}
 
-	void set(uint32_t pos, uint32_t siz, bool tog) {
+	void set(uint32_t pos, bool tog, uint32_t siz) {
 		scheck(pos);
 		scheck(pos + siz - 1);
 		zcheck(siz);
@@ -568,6 +572,12 @@ namespace manCTG {
 
 	uint32_t wri(uint32_t& syn, uint32_t& asy) {
 		return cWri(syn, asy);
+	}
+}
+
+namespace manGTC {
+	uint8_t* buf() {
+		return cBuf;
 	}
 }
 
