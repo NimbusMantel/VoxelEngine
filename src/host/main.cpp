@@ -124,9 +124,7 @@ int main(int argc, char* argv[]) {
 
 	cl::Buffer vxBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, 0x80 << BUFFER_DEPTH);
 
-	uint8_t* cgBuf = manCTG::buf();
-
-	cl::Buffer cgBuffer = cl::Buffer(clContext, (cl_mem_flags)(CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR), 0x01 << 24, (void*)cgBuf);
+	cl::Buffer cgBuffer = cl::Buffer(clContext, (cl_mem_flags)(CL_MEM_READ_WRITE), 0x01 << 24);
 
 	cl::Buffer mnTicket = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, 0x04 << 1);
 	cl::Buffer mnBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_WRITE_ONLY, 0x08 << BUFFER_DEPTH);
@@ -171,13 +169,21 @@ int main(int argc, char* argv[]) {
 	renderKernel.setArg(6, rtMatrix);
 	renderKernel.setArg(8, rayCoef);
 
-	cl::Kernel gcProKernel = cl::Kernel(clProgram, "gcProKernel");
-	gcProKernel.setArg(0, vxBuffer);
-	gcProKernel.setArg(1, mnBuffer);
-	gcProKernel.setArg(2, cgBuffer);
+	cl::Kernel gcReqKernel = cl::Kernel(clProgram, "gcReqKernel");
+	gcReqKernel.setArg(0, vxBuffer);
+	gcReqKernel.setArg(1, mnTicket);
+	gcReqKernel.setArg(2, mnBuffer);
+	gcReqKernel.setArg(3, cgBuffer);
+
+	cl::Kernel gcSugKernel = cl::Kernel(clProgram, "gcSugKernel");
+	gcSugKernel.setArg(0, vxBuffer);
+	gcSugKernel.setArg(1, mnTicket);
+	gcSugKernel.setArg(2, mnBuffer);
+	gcSugKernel.setArg(3, cgBuffer);
 	
 	cl::CommandQueue clQueue = cl::CommandQueue(clContext, device);
 
+	uint8_t* cgBuf = manCTG::buf();
 	uint32_t cgBufSize;
 
 	cl::Event mnIniEvent;
@@ -186,14 +192,15 @@ int main(int argc, char* argv[]) {
 	cl::Event glAquEvent;
 	cl::Event rtMatEvent;
 	cl::Event glRenEvent;
-	cl::Event gcProEvent;
 	cl::Event glRelEvent;
+	cl::Event gcReqEvent;
+	cl::Event gcSugEvent;
 
 	std::vector<cl::Event> cgProPrevents;
 	std::vector<cl::Event> cgFilPrevents;
 	std::vector<cl::Event> glRenPrevents;
-	std::vector<cl::Event> gcProPrevents;
 	std::vector<cl::Event> glRelPrevents;
+	std::vector<cl::Event> gcFinPrevents;
 
 	uint32_t cgInsSyncAmount = 0;
 	uint32_t cgInsAsyncAmount = 0;
@@ -281,8 +288,7 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		clQueue.enqueueFillBuffer(cgBuffer, 0x00, 0, 20, &cgFilPrevents);
-
+		clQueue.enqueueFillBuffer(cgBuffer, 0x00, 0, 21, &cgFilPrevents);
 		clQueue.finish();
 
 		glClear(GL_COLOR_BUFFER_BIT);
@@ -309,39 +315,17 @@ int main(int argc, char* argv[]) {
 
 		renderKernel.setArg(9, timeStamp);
 
-		cgProPrevents = {};
+		glRelPrevents = {};
 		
 		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
 			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
 				clQueue.enqueueNDRangeKernel(renderKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange, &glRenPrevents, &glRenEvent);
 
-				cgProPrevents.push_back(std::move(glRenEvent));
+				glRelPrevents.push_back(std::move(glRenEvent));
 			}
 		}
-		
-		gcProKernel.setArg(3, timeStamp);
-		gcProKernel.setArg(4, manBuf::per());
-
-		clQueue.enqueueTask(gcProKernel, &cgProPrevents, &gcProEvent);
-
-		glRelPrevents = { gcProEvent };
 
 		clQueue.enqueueReleaseGLObjects(&glMemory, &glRelPrevents, &glRelEvent);
-
-		clQueue.finish();
-
-		clQueue.enqueueReadBuffer(cgBuffer, true, 0, 6, (void*)cgBuf);
-
-		cgBufSize = ((cgBuf[3] << 16) | (cgBuf[4] << 8) | cgBuf[5]);
-
-		if (cgBufSize > 0) {
-			clQueue.enqueueMapBuffer(cgBuffer, true, CL_MAP_READ, 0, cgBufSize);
-
-			// TO DO: Evaluate GPU to CPU communication
-
-			clQueue.enqueueUnmapMemObject(cgBuffer, (void*)cgBuf);
-		}
-
 		clQueue.finish();
 
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -351,6 +335,36 @@ int main(int argc, char* argv[]) {
 		glReadBuffer(GL_COLOR_ATTACHMENT0);
 
 		glBlitFramebuffer(0, 0, width, height, 0, 0, isFullscreen ? fullWidth : width, isFullscreen ? fullHeight : height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		
+		gcReqKernel.setArg(4, timeStamp);
+		gcReqKernel.setArg(5, manBuf::per());
+
+		gcSugKernel.setArg(4, timeStamp);
+		gcSugKernel.setArg(5, manBuf::per());
+
+		clQueue.enqueueTask(gcReqKernel, 0, &gcReqEvent);
+		
+		gcFinPrevents = { gcReqEvent };
+
+		clQueue.enqueueReadBuffer(cgBuffer, true, 0, 1, (void*)cgBuf, &gcFinPrevents);
+
+		while (cgBuf[0] != 0xFF) {
+			clQueue.enqueueNDRangeKernel(gcSugKernel, cl::NullRange, cl::NDRange(16), cl::NDRange(16), 0, &gcSugEvent);
+
+			gcFinPrevents = { gcReqEvent };
+
+			clQueue.enqueueReadBuffer(cgBuffer, true, 0, 1, (void*)cgBuf, &gcFinPrevents);
+		}
+		
+		clQueue.enqueueReadBuffer(cgBuffer, true, 1, 3, (void*)cgBuf);
+
+		cgBufSize = ((cgBuf[0] << 16) | (cgBuf[1] << 8) | cgBuf[2]);
+
+		if (cgBufSize > 0) {
+			clQueue.enqueueReadBuffer(cgBuffer, true, 4, cgBufSize, (void*)cgBuf);
+
+			// TO DO: Evaluate GPU to CPU communication
+		}
 
 		SDL_GL_SwapWindow(window);
 
@@ -634,7 +648,7 @@ void testVoxelBufferData() {
 		o[5] = 0x00000000;
 		o[6] = tmp >> 32;
 		o[7] = tmp & 0xFFFFFFFF;
-
+		
 		v.reset(new uint32_t[8]());
 		memcpy(v.get(), &o, 8 * 4);
 		t.reset(new INS_CTG_ADD(par, std::move(v)));

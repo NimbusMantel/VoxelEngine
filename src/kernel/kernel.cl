@@ -45,6 +45,10 @@ enum PLACEHOLDER {
 
 #define OpenCLDebug 1
 
+// intel codebuilder macro
+
+#define IntelCodeBuilder 1
+
 /*KERNEL_INCLUDE_END*/
 
 // voxel depth constant
@@ -221,6 +225,7 @@ __kernel void renderKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 	uint32_t ticketIndex;
 
 	bool shouldRender = false;
+	bool hasRequested = false;
 	uint8_t step_mask = 0x00;
 
 	uint32_t difBits;
@@ -263,7 +268,7 @@ __kernel void renderKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 		shouldRender = (!(voxel.x & 0x00FF0000) || (tc_max > (scaExp2 * rayCoef)));
 		
 		if (!shouldRender && ((voxel.x & (0x00800000 >> cidx)) != 0x00) && (t_min <= t_max)) {
-			if ((voxel.x & 0x0000FC00) != timStamp) {
+			if (((voxel.x & 0x0000FC00) != timStamp) && (!hasRequested || (voxel.y != 0x00))) {
 				oldTimeStamp = atomic_cmpxchg(parent, voxel.x, (voxel.x & 0xFFFF03FF) | timStamp);
 
 				if (oldTimeStamp == voxel.x) {
@@ -274,18 +279,18 @@ __kernel void renderKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 					}
 
 					if (voxel.y == 0x00) {
-						ticketIndex = ((gcBuffer[14] << 16) | (gcBuffer[15] << 8) | gcBuffer[16]);
+						ticketIndex = ((gcBuffer[15] << 16) | (gcBuffer[16] << 8) | gcBuffer[17]);
 
-						gcBuffer[20 + (ticketIndex << 2) + 0] = (((parent - vxBuffer) >> 2) & 0xFF000000) >> 24;
-						gcBuffer[20 + (ticketIndex << 2) + 1] = (((parent - vxBuffer) >> 2) & 0x00FF0000) >> 16;
-						gcBuffer[20 + (ticketIndex << 2) + 2] = (((parent - vxBuffer) >> 2) & 0x0000FF00) >> 8;
-						gcBuffer[20 + (ticketIndex << 2) + 3] = (((parent - vxBuffer) >> 2) & 0x000000FF);
+						gcBuffer[21 + (ticketIndex << 2) + 0] = (((parent - vxBuffer) >> 2) & 0xFF000000) >> 24;
+						gcBuffer[21 + (ticketIndex << 2) + 1] = (((parent - vxBuffer) >> 2) & 0x00FF0000) >> 16;
+						gcBuffer[21 + (ticketIndex << 2) + 2] = (((parent - vxBuffer) >> 2) & 0x0000FF00) >> 8;
+						gcBuffer[21 + (ticketIndex << 2) + 3] = (((parent - vxBuffer) >> 2) & 0x000000FF);
 
 						ticketIndex += 1;
 
-						gcBuffer[14] = (ticketIndex & 0x00FF0000) >> 16;
-						gcBuffer[15] = (ticketIndex & 0x0000FF00) >> 8;
-						gcBuffer[16] = ticketIndex & 0x000000FF;
+						gcBuffer[15] = (ticketIndex & 0x00FF0000) >> 16;
+						gcBuffer[16] = (ticketIndex & 0x0000FF00) >> 8;
+						gcBuffer[17] = ticketIndex & 0x000000FF;
 
 #if OpenCLDebug
 						printf("gcRequest(parent: %u)\n\n", (parent - vxBuffer) >> 2);
@@ -456,17 +461,18 @@ __kernel void renderKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 	write_imagef(rbo, coors, pixel);
 }
 
-__kernel void gcProKernel(volatile __global __read_write uint32_t* vxBuffer, __global __read_write uint32_t* mnBuffer, __global __read_write uint8_t* gcBuffer, uint32_t timStamp, float memPressure) {
-	timStamp &= 0x0000003F;
-	memPressure = clamp(memPressure, 0.0f, 1.0f);
-	
-	uint8_t timDiff = (uint8_t)round(native_powr(63.0f, native_sqrt(memPressure)));
-	
-	bool hasSuggestions = (getTimestamp(vxBuffer, getParent(vxBuffer, mnBuffer[0x01] << 3)) == ((timStamp + timDiff) & 0x0000003F));
-	bool hasRequests = (gcBuffer[14] || gcBuffer[15] || gcBuffer[16]);
-	
+__kernel void gcReqKernel(volatile __global __read_write uint32_t* vxBuffer, __global __read_write uint32_t* mnTicket, __global __read_write uint32_t* mnBuffer, __global __read_write uint8_t* gcBuffer, uint32_t timStamp, float memPressure) {
+	mnTicket[0x00] = mnTicket[0x01] = 0x00;
+
+	uint32_t timeDiff = ((getTimestamp(vxBuffer, getParent(vxBuffer, mnBuffer[0x01] << 3)) - (timStamp &= 0x0000003F)) & 0x0000003F);
+
+	bool hasSuggestions = ((timeDiff != 0) && (timeDiff <= (uint8_t)round(native_powr(63.0f, native_sqrt(clamp(memPressure, 0.0f, 1.0f))))));
+	bool hasRequests = (gcBuffer[15] || gcBuffer[16] || gcBuffer[17]);
+
 	if (!hasRequests && !hasSuggestions) {
-		gcBuffer[0] = gcBuffer[1] = gcBuffer[2] = gcBuffer[3] = gcBuffer[4] = gcBuffer[5] = 0x00;
+		gcBuffer[0] = 0xFF;
+
+		gcBuffer[1] = gcBuffer[2] = gcBuffer[3] = gcBuffer[4] = gcBuffer[5] = gcBuffer[6] = 0x00;
 
 		return;
 	}
@@ -474,75 +480,128 @@ __kernel void gcProKernel(volatile __global __read_write uint32_t* vxBuffer, __g
 	uint32_t byteSize;
 
 	if (!hasSuggestions) {
-		gcBuffer[0] = gcBuffer[7] = gcBuffer[14];
-		gcBuffer[1] = gcBuffer[8] = gcBuffer[15];
-		gcBuffer[2] = gcBuffer[9] = gcBuffer[16];
+		gcBuffer[0] = 0xFF;
 
-		byteSize = 20 + ((gcBuffer[14] << 16) | (gcBuffer[15] << 8) | gcBuffer[16]) * INS_GTC_REQ_S;
-
-		gcBuffer[3] = (byteSize & 0x00FF0000) >> 16;
-		gcBuffer[4] = (byteSize & 0x0000FF00) >> 8;
-		gcBuffer[5] = (byteSize & 0x000000FF);
+		byteSize = 17 + ((gcBuffer[15] << 16) | (gcBuffer[16] << 8) | gcBuffer[17]) * INS_GTC_REQ_S;
 		
-		gcBuffer[6] = INS_GTC_REQ_C;
+		gcBuffer[1] = (byteSize & 0x00FF0000) >> 16;
+		gcBuffer[2] = (byteSize & 0x0000FF00) >> 8;
+		gcBuffer[3] = (byteSize & 0x000000FF);
 
-		gcBuffer[10] = gcBuffer[11] = 0x00;
-		gcBuffer[12] = 20;
+		gcBuffer[4] = gcBuffer[8] = gcBuffer[15];
+		gcBuffer[5] = gcBuffer[9] = gcBuffer[16];
+		gcBuffer[6] = gcBuffer[10] = gcBuffer[17];
+
+		gcBuffer[7] = INS_GTC_REQ_C;
+
+		gcBuffer[11] = gcBuffer[12] = 0x00;
+		gcBuffer[13] = 17;
 
 		return;
 	}
 
-	gcBuffer[6] = INS_GTC_SUG_C;
+	gcBuffer[0] = 0x00;
+
+	gcBuffer[7] = INS_GTC_SUG_C;
 
 	if (hasRequests) {
-		byteSize = 20 + ((gcBuffer[14] << 16) | (gcBuffer[15] << 8) | gcBuffer[16]) * INS_GTC_REQ_S;
+		byteSize = 17 + ((gcBuffer[15] << 16) | (gcBuffer[16] << 8) | gcBuffer[17]) * INS_GTC_REQ_S;
 
-		gcBuffer[13] = INS_GTC_REQ_C;
+		gcBuffer[4] = gcBuffer[15];
+		gcBuffer[5] = gcBuffer[16];
+		gcBuffer[6] = gcBuffer[17];
 
-		gcBuffer[17] = gcBuffer[18] = 0x00;
-		gcBuffer[19] = 20;
+		gcBuffer[14] = INS_GTC_REQ_C;
+
+		gcBuffer[18] = gcBuffer[19] = 0x00;
+		gcBuffer[20] = 17;
 	}
 	else {
-		byteSize = 13;
+		byteSize = 10;
+
+		gcBuffer[4] = gcBuffer[5] = gcBuffer[6] = 0x00;
 	}
 
-	gcBuffer[10] = (byteSize & 0x00FF0000) >> 16;
-	gcBuffer[11] = (byteSize & 0x0000FF00) >> 8;
-	gcBuffer[12] = (byteSize & 0x000000FF);
+	gcBuffer[1] = gcBuffer[11] = (byteSize & 0x00FF0000) >> 16;
+	gcBuffer[2] = gcBuffer[12] = (byteSize & 0x0000FF00) >> 8;
+	gcBuffer[3] = gcBuffer[13] = (byteSize & 0x000000FF);
+}
 
-	uint32_t sugIndex = mnBuffer[0x01];
-	uint32_t sugParent = getParent(vxBuffer, sugIndex << 3);
+__kernel void gcSugKernel(volatile __global __read_write uint32_t* vxBuffer, volatile __global __read_write uint32_t* mnTicket, volatile __global __read_write uint32_t* mnBuffer, volatile __global __read_write uint8_t* gcBuffer, uint32_t timStamp, float memPressure) {
+	uint32_t ticketIndex = 0;
 
-	while ((sugIndex != 0x00) && (getTimestamp(vxBuffer, sugParent) == ((timStamp + timDiff) & 0x0000003F))) {
-		gcBuffer[byteSize + 0] = (sugParent & 0xFF000000) >> 24;
-		gcBuffer[byteSize + 1] = (sugParent & 0x00FF0000) >> 16;
-		gcBuffer[byteSize + 2] = (sugParent & 0x0000FF00) >> 8;
-		gcBuffer[byteSize + 3] = (sugParent & 0x000000FF);
+	uint32_t preIndex, sugIndex;
 
-		gcBuffer[9] += 1;
-		gcBuffer[8] += (gcBuffer[9] == 0x00);
-		gcBuffer[7] += ((gcBuffer[9] == 0x00) && (gcBuffer[8] == 0x00));
+	do {
+		preIndex = mnTicket[0x00];
+		sugIndex = mnBuffer[(preIndex << 1) | 0x01];
 
-		byteSize += INS_GTC_SUG_S;
+		ticketIndex += 1;
+	} while (atomic_cmpxchg(mnTicket, preIndex, sugIndex) != preIndex);
 
-		vxBuffer[sugParent << 2] = ((vxBuffer[sugParent << 2] & 0xFFFF03FF) | (timStamp << 10));
+	ticketIndex -= 1;
+
+	preIndex = getParent(vxBuffer, sugIndex << 3);
+	uint32_t timeDiff = ((getTimestamp(vxBuffer, preIndex) - (timStamp &= 0x0000003F)) & 0x0000003F);
+
+	uint32_t memIndex = ((gcBuffer[11] << 16) | (gcBuffer[12] << 8) | gcBuffer[13]) + 4 + (((gcBuffer[8] << 16) | (gcBuffer[9] << 8) | gcBuffer[10]) + ticketIndex) * INS_GTC_SUG_S;
+	
+#ifndef IntelCodeBuilder
+	bool suited = ((sugIndex != 0x00) && (timeDiff != 0) && ((memIndex + INS_GTC_SUG_S) <= (0x01 << 24)) && (timeDiff <= (uint8_t)round(native_powr(63.0f, native_sqrt(clamp(memPressure, 0.0f, 1.0f))))));
+
+	atomic_max((__global uint32_t*)(mnTicket + 1), ticketIndex & -suited);
+
+	atomic_add((__global uint32_t*)(mnTicket + 1), ((ticketIndex == 0x00) && suited));
+#endif
+
+	barrier(CLK_GLOBAL_MEM_FENCE);
+
+	if (ticketIndex < mnTicket[1]) {
+		gcBuffer[memIndex + 0] = (preIndex & 0xFF000000) >> 24;
+		gcBuffer[memIndex + 1] = (preIndex & 0x00FF0000) >> 16;
+		gcBuffer[memIndex + 2] = (preIndex & 0x0000FF00) >> 8;
+		gcBuffer[memIndex + 3] = (preIndex & 0x000000FF);
+
+		vxBuffer[preIndex << 2] = ((vxBuffer[preIndex << 2] & 0xFFFF03FF) | (timStamp << 10));
+	}
+	else {
+		gcBuffer[0] = 0xFF;
+	}
+
+	if (ticketIndex == (mnTicket[0x01] - 1)) {
+		preIndex = mnBuffer[0x01];
 
 		mnBuffer[0x01] = mnBuffer[(sugIndex << 1) | 0x01];
 		mnBuffer[mnBuffer[(sugIndex << 1) | 0x01] << 1] = 0x00;
 
 		mnBuffer[(sugIndex << 1) | 0x01] = 0x00;
-		mnBuffer[sugIndex << 1] = mnBuffer[0x00];
+		mnBuffer[preIndex << 1] = mnBuffer[0x00];
 
-		mnBuffer[(mnBuffer[0x00] << 1) | 0x01] = sugIndex;
+		mnBuffer[(mnBuffer[0x00] << 1) | 0x01] = preIndex;
 		mnBuffer[0x00] = sugIndex;
 
-		sugIndex = mnBuffer[0x01];
-		sugParent = getParent(vxBuffer, sugIndex << 3);
+		sugIndex = ((gcBuffer[1] << 16) | (gcBuffer[2] << 8) | gcBuffer[3]) + (ticketIndex + 1) * INS_GTC_SUG_S;
+		
+		gcBuffer[1] = (sugIndex & 0x00FF0000) >> 16;
+		gcBuffer[2] = (sugIndex & 0x0000FF00) >> 8;
+		gcBuffer[3] = (sugIndex & 0x000000FF);
+
+		sugIndex = ((gcBuffer[4] << 16) | (gcBuffer[5] << 8) | gcBuffer[6]) + ticketIndex + 1;
+
+		gcBuffer[4] = (sugIndex & 0x00FF0000) >> 16;
+		gcBuffer[5] = (sugIndex & 0x0000FF00) >> 8;
+		gcBuffer[6] = (sugIndex & 0x000000FF);
+
+		sugIndex = ((gcBuffer[8] << 16) | (gcBuffer[9] << 8) | gcBuffer[10]) + ticketIndex + 1;
+
+		gcBuffer[8] = (sugIndex & 0x00FF0000) >> 16;
+		gcBuffer[9] = (sugIndex & 0x0000FF00) >> 8;
+		gcBuffer[10] = (sugIndex & 0x000000FF);
 	}
 
-	gcBuffer[3] = (byteSize & 0x00FF0000) >> 16;
-	gcBuffer[4] = (byteSize & 0x0000FF00) >> 8;
-	gcBuffer[5] = (byteSize & 0x000000FF);
+	barrier(CLK_GLOBAL_MEM_FENCE);
+
+	mnTicket[0x00] = mnTicket[0x01] = 0x00;
 }
 
 

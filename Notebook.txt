@@ -79,9 +79,9 @@ CPU to GPU communication
 - 24 bit indices
 - header
   - [s] [a] [o, n, sp]* [o, n, ap]*
-  - amounts of synchronous and asynchronous instructions
-  - instruction codes and numbers of calls of, pointers to synchronous instructions
-  - instruction codes and numbers of subcalls of, pointers to asynchronous instructions
+    - amounts of synchronous and asynchronous instructions
+    - instruction codes and numbers of calls of, pointers to synchronous instructions
+    - instruction codes and numbers of subcalls of, pointers to asynchronous instructions
 - instructions
   - RLD [parent, index, children]*: load children -> pointer(p)
   - ULD [parent]*: unload children -> pointer(p)
@@ -95,10 +95,12 @@ CPU to GPU communication
 GPU to CPU communication
 - 24 bit indices
 - header
-  - [a] [s] [o, n, ap]*
-  - amount of asynchronous instructions
-  - buffer size in bytes
-  - instruction codes and numbers of subcalls of, pointers to asynchronous instructions
+  - [f] [s] [a] [o, n, ap]* (structure inside the kernel)
+    - buffer finished flag
+    - buffer size in bytes
+  - [a] [o, n, ap]* (structure arriving at the host)
+    - amount of asynchronous instructions
+    - instruction codes and numbers of subcalls of, pointers to asynchronous instructions
 - instructions
   - REQ [parent]*: request children loadign
   - SUG [parent]*: suggest children unloading
