@@ -18,10 +18,11 @@ Voxel strucuture on the GPU
                     4-depth (child 0) / 4-parent (children 1-7),
 					8-children, 6-time, (10-unused)
 - 32-bit children: 32-pointer (absolute, refer to the block of voxel data (4*4=16 bytes))
-- 40-bit colour: 6-pred, 6-pgreen, 6-pblue, 6-beta,
-                 5-mred, 5-mgreen, 5-mblue, 1-emitter
-- 18-bit light: 6-sred, 6-sgreen, 6-sblue
-- 06-bit modifier: 6-shigh | (6-unused)
+- 32-bit material: 8-red, 8-green, 8-blue, 8-beta
+- 32-bit lighting: 1-mode,
+     mono-lit (0): 6-red, 6-green, 6-blue, 13-luminosity (5-exponent, 8-fraction)
+ 	   bi-lit (1): 3-dir, 3-redA, 3-greenA, 3-blueA, 5-luminosityA,
+		                  3-redB, 3-greenB, 3-blueB, 5-luminosityB
 
 Voxel structure on the CPU
 - 32-bit structure: 1-active, 3-index,
@@ -50,30 +51,30 @@ CPU unloading checks
 - calculation of the current memory pressure via the amount of memory needs to be inserted and how much space is left
 - only unloading of voxel data which isn't in very close proximity to the player (but not in full detail) or needed for physics
 
-Voxel material on the GPU
+Voxel visuals on the GPU
 - Voxel material colour system
   - "A physically Based Colour Model" by Robert J Oddy, Philip J Willis
   - ratio of particle and medium colour defined by beta value
+  - channel values of particle and medium colour compressed into shared bits
+    - bit usage determined by beta value (i_par + i_med = 8)
+	  0: [0;7]  , 5: [160;207]
+	  1: [8;15] , 6: [208;239]
+	  2: [16;47], 7: [240;247]
+	  3: [48;95], 8: [248;255]
+	  4: [96;159]
+	- compression: c = (v * beta / i[1]) ^ i/8
+	- decompression: v = (c ^ 8/i) * i[1] / beta
 - Voxel baked lighting system
-  - light memory stores
-    - averaged inner light in transparten voxels
-	- side dependent light modifications in solid voxels
-	  - 1-red, 1-green, 1-blue, 1-high
-	  - (r | g | b | h) == 0x00: no modification
-	  - (r | g | b) == 0x00: light adjusted 50% towards (0, 0, 0)
-	  - h = 0: light adjusted 50% towards (r, g, b)
-	  - h = 1: light adjusted 75% towards (r, g, b)
-  - front light
-    - (1, 1, 1) for current emitter voxel
-	- squared average of previous voxel's light and inner light for current transparent voxel
-	- corrected previous voxel's light for current solid voxels
-  - back light (clamped)
-    - 1/3 next voxel's light
-	  - (1, 1, 1) for previous emitter voxel
-	  - squared average of previous voxel's light and inner light for current transparent voxel
-	  - corrected previous voxel's light for current emitter voxel
-	  - previous voxel's light / sqrt(2) for current solid voxel
-	- 3/3 visualisation of voxels rendered behind
+  - light colour stores channel ratios (adjusted to range)
+  - mono-lit voxels only contain one uniform light source
+    - luminosity stores the light strength in 2^EV (exponent decreased by six)
+  - bi-lit voxels contain two uniform lights sources
+    - dir defines whether the negative (0) or positive (1) axis side is lit by lightA
+	- luminosity stores the light strength in EV + 9
+  - brightness is calculated as (0.299*r + 0.587*g + 0.114 * b)
+  - light is calculated as rgb * 2^EV * 0.125 / brightness(rgb)
+  - front and back light is the average of the adjacent light sources
+  - back light is weighted with a factor of 1/4
 
 CPU to GPU communication
 - 24 bit indices
@@ -89,7 +90,7 @@ CPU to GPU communication
   - REM [parent, mask]*: remove children -> children(p) (only called for the topmost parent)
   - MOV [fparent, fidx, tparent, tidx]*: move voxel -> children(op), index(v), parent(v), children(np), parent(c)
   - EXP [parent, index]*: expand parent -> pointer(p)
-  - COL [index, colour]*: update colour -> colour(v)
+  - MAT [index, material]*: update material -> material(v)
   - LIT [index, light]*: update light -> light(v)
 
 GPU to CPU communication

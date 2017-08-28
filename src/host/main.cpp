@@ -89,7 +89,7 @@ int main(int argc, char* argv[]) {
 
 	glGenRenderbuffers(1, &rbo);
 	glBindRenderbuffer(GL_RENDERBUFFER, rbo);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, width, height);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_RGB8, width, height);
 	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rbo);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -118,29 +118,45 @@ int main(int argc, char* argv[]) {
 
 	cl::Context clContext = cl::Context(device, props);
 	
-	cl::BufferRenderGL glBuffer = cl::BufferRenderGL(clContext, CL_MEM_WRITE_ONLY, rbo);
+	cl::BufferRenderGL glRender = cl::BufferRenderGL(clContext, CL_MEM_WRITE_ONLY, rbo);
 	glFinish();
-	std::vector<cl::Memory> glMemory = { glBuffer };
+	std::vector<cl::Memory> glMemory = { glRender };
 
 	cl::Buffer vxBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, 0x80 << BUFFER_DEPTH);
+
+	cl::Image2D hdrImage = cl::Image2D(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, { CL_RGBA, CL_HALF_FLOAT }, width, height);
 
 	cl::Buffer cgBuffer = cl::Buffer(clContext, (cl_mem_flags)(CL_MEM_READ_WRITE), 0x01 << 24);
 
 	cl::Buffer mnTicket = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, 0x04 << 1);
 	cl::Buffer mnBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_WRITE_ONLY, 0x08 << BUFFER_DEPTH);
 
+	cl::Buffer lmBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_READ_ONLY, 4 * 3);
+
 	cl::Buffer rvLookup = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, sizeof(cl_float) * 3 * width * height);
 	cl::Buffer rtMatrix = cl::Buffer(clContext, CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY, sizeof(cl_float) * 9);
 
-	std::ifstream istrm("src/kernel/instruct.cpp");
-	std::string isrc(std::istreambuf_iterator<char>(istrm), (std::istreambuf_iterator<char>()));
-	isrc = isrc.substr(isrc.find("/*KERNEL_INCLUDE_BEG*/") + 22, isrc.find("/*KERNEL_INCLUDE_END*/") - isrc.find("/*KERNEL_INCLUDE_BEG*/") - 22);
-
 	std::ifstream strm("src/kernel/kernel.cl");
-	std::string src(std::istreambuf_iterator<char>(strm), (std::istreambuf_iterator<char>()));
-	src.replace(src.find("/*KERNEL_INCLUDE_BEG*/"), src.find("/*KERNEL_INCLUDE_END*/") - src.find("/*KERNEL_INCLUDE_BEG*/") + 22, isrc);
+
+	std::string kstr(std::istreambuf_iterator<char>(strm), (std::istreambuf_iterator<char>()));
 	
-	cl::Program::Sources sources = cl::Program::Sources(1, std::make_pair(src.c_str(), src.length() + 1));
+	std::string rstr = "";
+
+	while (kstr.find("/*KERNEL_EXCLUDE_BEG*/") != -1) {
+		kstr.replace(kstr.find("/*KERNEL_EXCLUDE_BEG*/"), kstr.find("/*KERNEL_EXCLUDE_END*/") - kstr.find("/*KERNEL_EXCLUDE_BEG*/") + 22, rstr);
+	}
+
+	strm = std::ifstream("src/kernel/instruct.cpp");
+	rstr = std::string(std::istreambuf_iterator<char>(strm), (std::istreambuf_iterator<char>()));
+	rstr = rstr.substr(rstr.find("/*KERNEL_INSTRUCT_BEG*/") + 23, rstr.find("/*KERNEL_INSTRUCT_END*/") - rstr.find("/*KERNEL_INSTRUCT_BEG*/") - 23);
+	kstr.replace(kstr.find("/*KERNEL_INSTRUCT_BEG*/"), kstr.find("/*KERNEL_INSTRUCT_END*/") - kstr.find("/*KERNEL_INSTRUCT_BEG*/") + 23, rstr);
+
+	strm = std::ifstream("src/voxel/material.hpp");
+	rstr = std::string(std::istreambuf_iterator<char>(strm), (std::istreambuf_iterator<char>()));
+	rstr = rstr.substr(rstr.find("/*KERNEL_BETSTOPS_BEG*/") + 23, rstr.find("/*KERNEL_BETSTOPS_END*/") - rstr.find("/*KERNEL_BETSTOPS_BEG*/") - 23);
+	kstr.replace(kstr.find("/*KERNEL_BETSTOPS_BEG*/"), kstr.find("/*KERNEL_BETSTOPS_END*/") - kstr.find("/*KERNEL_BETSTOPS_BEG*/") + 23, rstr);
+
+	cl::Program::Sources sources = cl::Program::Sources(1, std::make_pair(kstr.c_str(), kstr.length() + 1));
 
 	cl::Program clProgram(clContext, sources);
 
@@ -164,10 +180,15 @@ int main(int argc, char* argv[]) {
 	renderKernel.setArg(1, mnTicket);
 	renderKernel.setArg(2, mnBuffer);
 	renderKernel.setArg(3, cgBuffer);
-	renderKernel.setArg(4, glBuffer);
-	renderKernel.setArg(5, rvLookup);
-	renderKernel.setArg(6, rtMatrix);
-	renderKernel.setArg(8, rayCoef);
+	renderKernel.setArg(4, hdrImage);
+	renderKernel.setArg(5, lmBuffer);
+	renderKernel.setArg(6, rvLookup);
+	renderKernel.setArg(7, rtMatrix);
+	renderKernel.setArg(9, rayCoef);
+
+	cl::Kernel exposureKernel = cl::Kernel(clProgram, "exposureKernel");
+	exposureKernel.setArg(0, hdrImage);
+	exposureKernel.setArg(1, glRender);
 
 	cl::Kernel gcReqKernel = cl::Kernel(clProgram, "gcReqKernel");
 	gcReqKernel.setArg(0, vxBuffer);
@@ -192,6 +213,7 @@ int main(int argc, char* argv[]) {
 	cl::Event glAquEvent;
 	cl::Event rtMatEvent;
 	cl::Event glRenEvent;
+	cl::Event glExpEvent;
 	cl::Event glRelEvent;
 	cl::Event gcReqEvent;
 	cl::Event gcSugEvent;
@@ -199,6 +221,7 @@ int main(int argc, char* argv[]) {
 	std::vector<cl::Event> cgProPrevents;
 	std::vector<cl::Event> cgFilPrevents;
 	std::vector<cl::Event> glRenPrevents;
+	std::vector<cl::Event> glExpPrevents;
 	std::vector<cl::Event> glRelPrevents;
 	std::vector<cl::Event> gcFinPrevents;
 
@@ -309,19 +332,29 @@ int main(int argc, char* argv[]) {
 		norPos.y = pos[1] * scale + 1.5f;
 		norPos.z = pos[2] * scale + 1.5f;
 
-		renderKernel.setArg(7, norPos);
+		renderKernel.setArg(8, norPos);
 
 		timeStamp = (timeStamp + 1) & 0x0000003F;
 
-		renderKernel.setArg(9, timeStamp);
+		renderKernel.setArg(10, timeStamp);
 
-		glRelPrevents = {};
+		glExpPrevents = {};
 		
 		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
 			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
 				clQueue.enqueueNDRangeKernel(renderKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange, &glRenPrevents, &glRenEvent);
 
-				glRelPrevents.push_back(std::move(glRenEvent));
+				glExpPrevents.push_back(std::move(glRenEvent));
+			}
+		}
+
+		glRelPrevents = {};
+
+		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
+			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
+				clQueue.enqueueNDRangeKernel(exposureKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange, &glExpPrevents, &glExpEvent);
+
+				glRelPrevents.push_back(std::move(glExpEvent));
 			}
 		}
 
@@ -547,39 +580,34 @@ void testVoxelBinaryTree() {
 
 void testVoxelBufferData() {
 	manBuf::set(1, true, 16);
+	
+	vis viss[VOXEL_DEPTH] = { vis() };
 
-	mat mats[VOXEL_DEPTH] = { mat() };
-
-	mat vxs[8] = { mat(col(1.0f, 0.929f, 0.0f), 0.875f, col(1.0f, 0.929f, 0.0f), true), mat(col(1.0f, 0.0f, 0.0f), 0.75f, col(1.0f, 0.0f, 0.0f), true),
-				   mat(col(1.0f, 0.0f, 0.671f), 0.625f, col(1.0f, 0.0f, 0.671f), true), mat(col(0.0f, 0.278f, 0.671f), 0.5f, col(0.0f, 0.278f, 0.671f), true),
-				   mat(col(0.0f, 0.929f, 1.0f), 0.375f, col(0.0f, 0.929f, 1.0f), true), mat(col(0.0f, 0.710f, 0.0f), 0.25f, col(0.0f, 0.710f, 0.0f), true),
-				   mat(col(1.0f, 1.0f, 1.0f), 1.0f, col(0.0f, 0.0f, 0.0f), true), mat(col(0.0f, 0.0f, 0.0f), 0.125f, col(0.5f, 0.5f, 0.5f), true),
+	mat vxs[8] = { mat(col(1.0f, 0.929f, 0.0f), 0.875f, col(1.0f, 0.929f, 0.0f)), mat(col(1.0f, 0.0f, 0.0f), 0.75f, col(1.0f, 0.0f, 0.0f)),
+				   mat(col(1.0f, 0.0f, 0.671f), 0.625f, col(1.0f, 0.0f, 0.671f)), mat(col(0.0f, 0.278f, 0.671f), 0.5f, col(0.0f, 0.278f, 0.671f)),
+				   mat(col(0.0f, 0.929f, 1.0f), 0.375f, col(0.0f, 0.929f, 1.0f)), mat(col(0.0f, 0.710f, 0.0f), 0.25f, col(0.0f, 0.710f, 0.0f)),
+				   mat(col(1.0f, 1.0f, 1.0f), 1.0f, col(0.0f, 0.0f, 0.0f)), mat(col(0.0f, 0.0f, 0.0f), 0.125f, col(0.25f, 0.25f, 0.25f))
 	};
 
-	mats[VOXEL_DEPTH - 1] = mat::abstract(vxs);
+	viss[VOXEL_DEPTH - 1] = vis(mat::abstract(vxs), new mLit(col(1.0f, 1.0f, 1.0f), 1.0f));
 
 	mat abt[8] = { mat() };
 
 	for (int i = (VOXEL_DEPTH - 2); i >= 0; --i) {
-		abt[0] = mats[i + 1];
+		abt[0] = viss[i + 1].mal;
 
-		mats[i] = mat::abstract(abt);
+		viss[i].mal = mat::abstract(abt);
+		viss[i].lig.reset(new mLit(col(1.0f, 1.0f, 1.0f), 0.0f));
 	}
 
 	std::unique_ptr<INS_CTG> t;
 
-	uint64_t tmp = mats[0].toBinary();
+	uint64_t tmp = viss[0].toBinary();
 
-	uint8_t d[5] = { (tmp >> 56) & 0xFF, (tmp >> 48) & 0xFF, (tmp >> 40) & 0xFF, (tmp >> 32) & 0xFF, (tmp >> 24) & 0xFF };
-	std::unique_ptr<uint8_t[]> c(new uint8_t[5]());
-	memcpy(c.get(), &d, 5 * 4);
-	t.reset(new INS_CTG_COL(0, std::move(c)));
+	t.reset(new INS_CTG_MAT(0, tmp >> 32));
 	manCTG::eqA(std::move(t));
 
-	d[0] = (tmp >> 16) & 0xFF; d[1] = (tmp >> 8) & 0xFF; d[2] = tmp & 0xFF;
-	std::unique_ptr<uint8_t[]> l(new uint8_t[3]());
-	memcpy(l.get(), &d, 3 * 4);
-	t.reset(new INS_CTG_LIT(0, std::move(l)));
+	t.reset(new INS_CTG_LIT(0, tmp & 0xFFFFFFFF));
 	manCTG::eqA(std::move(t));
 
 	uint32_t par = 0;
@@ -604,7 +632,7 @@ void testVoxelBufferData() {
 
 	par = 0;
 
-	tmp = mats[1].toBinary();
+	tmp = viss[1].toBinary();
 
 	o[0] = 0xF0000000;
 	o[1] = 16;
@@ -619,7 +647,7 @@ void testVoxelBufferData() {
 	par = 15;
 
 	for (int i = 2; i <= (VOXEL_DEPTH - 1); ++i) {
-		tmp = mats[i].toBinary();
+		tmp = viss[i].toBinary();
 
 		o[0] = 0x80000000 | ((i - 1) << 24);
 		o[1] = 8 * (i + 1);
@@ -635,14 +663,14 @@ void testVoxelBufferData() {
 	}
 
 	for (uint32_t i = 0; i < 4; ++i) {
-		tmp = vxs[i * 2].toBinary();
+		tmp = vis(vxs[i * 2], new mLit(col(1.0f, 1.0f, 1.0f), 1.0f)).toBinary();
 
 		o[0] = 0x80000000 | (i << 29) | ((i != 0) ? (((par & (0xF0000000 >> (i * 8))) >> (28 - i * 8)) << 24) : (15 << 24));
 		o[1] = 0x00000000;
 		o[2] = tmp >> 32;
 		o[3] = tmp & 0xFFFFFFFF;
 
-		tmp = vxs[i * 2 + 1].toBinary();
+		tmp = vis(vxs[i * 2 + 1], new mLit(col(1.0f, 1.0f, 1.0f), 1.0f)).toBinary();
 
 		o[4] = 0x90000000 | (i << 29) | (((par & (0x0F000000 >> (i * 8))) >> (24 - i * 8)) << 24);
 		o[5] = 0x00000000;
