@@ -75,6 +75,10 @@ Voxel visuals on the GPU
   - light is calculated as rgb * 2^EV * 0.125 / brightness(rgb)
   - front and back light is the average of the adjacent light sources
   - back light is weighted with a factor of 1/4
+- Bloom rendering
+  - seperated calculation of Gaussian blurs using moving weighted averages
+  - successive downsampling, blurring and upsampling for bloom
+  - weighted average of 90% hdr and 10% bloom
 
 CPU to GPU communication
 - 24 bit indices

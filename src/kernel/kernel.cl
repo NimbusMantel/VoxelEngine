@@ -165,7 +165,7 @@ Colour model according to "A physically Based Colour Model"
 
 */
 
-__kernel void renderKernel(volatile __global __read_write uint32_t* vxBuffer, volatile __global __read_write uint32_t* mnTicket, volatile __global __read_write uint32_t* mnBuffer, __global __read_write uint8_t* gcBuffer, __write_only image2d_t hdr, __global __read_write int32_t* lmBuffer, __global __read_only float* rvLookup, __constant __read_only float* rotMat, float3 norPos, float rayCoef, uint32_t timStamp) {
+__kernel void renderKernel(volatile __global __read_write uint32_t* vxBuffer, volatile __global __read_write uint32_t* mnTicket, volatile __global __read_write uint32_t* mnBuffer, __global __read_write uint8_t* gcBuffer, __write_only image2d_t hdr, __global __read_only float* rvLookup, __constant __read_only float* rotMat, float3 norPos, float rayCoef, uint32_t timStamp) {
 	const int2 size = { get_image_width(hdr), get_image_height(hdr) };
 	const int2 coors = { get_global_id(0), get_global_id(1) };
 
@@ -510,23 +510,69 @@ __kernel void renderKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 		t_min = 2.0f;
 	}
 
-	float brightness = getBrightness(pixel);
-
-	write_imagef(hdr, coors, (float4)(pixel, brightness));
-
-	brightness = round(native_log2(brightness) + 3.0f);
-
-	atomic_min(lmBuffer, (int32_t)brightness);
-	atomic_add((__global int32_t*)(lmBuffer + 1), (int32_t)brightness);
-	atomic_max((__global int32_t*)(lmBuffer + 2), (int32_t)brightness);
+	write_imagef(hdr, coors, (float4)(pixel, 0.0f));
 }
 
-const sampler_t expSampler = (CLK_FILTER_NEAREST | CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE);
+const sampler_t nearSampler = (CLK_FILTER_NEAREST | CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE);
+
+__kernel void linBlurKernel(__read_only image2d_t inp, __write_only image2d_t oup, int2 are, int2 stp, uint16_t siz) {
+	const float wei[7] = { 0.421528f, 0.241491f, 0.045058f, 0.002687f, 0.002687f, 0.045058f, 0.241491f };
+	
+	const int2 gid = { get_global_id(1), get_global_id(0) };
+	
+	int2 coors = are + (((int2)(1, 1)) - stp) * (uint16_t)((gid.x << 5) + gid.y);
+	const int2 end = coors + stp * (siz - 1);
+	const int2 ltp = stp * 3;
+	
+	float3 buf[7];
+	
+	buf[0] = buf[1] = buf[2] = buf[3] = read_imagef(inp, nearSampler, min(end, coors)).xyz;
+	buf[4] = read_imagef(inp, nearSampler, min(end, coors + stp * 1)).xyz;
+	buf[5] = read_imagef(inp, nearSampler, min(end, coors + stp * 2)).xyz;
+	
+	uint8_t cen = 3;
+
+	for (uint16_t i = 0; i < siz; ++i) {
+		buf[(cen + 3) - (0x07 & -(cen > 3))] = read_imagef(inp, nearSampler, min(end, coors + ltp)).xyz;
+
+		write_imagef(oup, coors, (float4)(buf[0] * wei[(cen & 0x07) - (0 > cen)] +
+			buf[1] * wei[((cen - 1) & 0x07) - (1 > cen)] +
+			buf[2] * wei[((cen - 2) & 0x07) - (2 > cen)] +
+			buf[3] * wei[((cen - 3) & 0x07) - (3 > cen)] +
+			buf[4] * wei[((cen - 4) & 0x07) - (4 > cen)] +
+			buf[5] * wei[((cen - 5) & 0x07) - (5 > cen)] +
+			buf[6] * wei[((cen - 6) & 0x07) - (6 > cen)],
+		0.0f));
+
+		coors += stp;
+
+		cen = ((cen + 1) & -(cen != 6));
+	}
+}
+
+__kernel void dwSampKernel(__read_only image2d_t inp, __write_only image2d_t oup, int2 arI, int2 arO) {
+	const int2 coors = { get_global_id(0), get_global_id(1) };
+	
+	write_imagef(oup, arO + coors, (read_imagef(inp, nearSampler, arI + coors * 2) + read_imagef(inp, nearSampler, arI + coors * 2 + (int2)(1, 0)) + read_imagef(inp, nearSampler, arI + coors * 2 + (int2)(0, 1)) + read_imagef(inp, nearSampler, arI + coors * 2 + (int2)(1, 1))) * 0.25f);
+}
+
+__kernel void upSampKernel(__read_only image2d_t inp, __write_only image2d_t oup, int2 arI, int2 arO, int2 enI) {
+	const int2 coors = { get_global_id(0), get_global_id(1) };
+
+	write_imagef(oup, arO + coors, read_imagef(inp, nearSampler, arO + coors) + read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2))) * 0.5625f + (read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2 + (int2)(-((coors.x & 0x01) ^ 0x01) | 0x01, 0)))) + read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2 + (int2)(0, -((coors.y & 0x01) ^ 0x01) | 0x01))))) * 0.1875f + read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2 + (int2)(-((coors.x & 0x01) ^ 0x01) | 0x01, -((coors.y & 0x01) ^ 0x01) | 0x01)))) * 0.0625f);
+}
+
+__kernel void bloomKernel(__read_only image2d_t hdr, __read_only image2d_t blo, __write_only image2d_t hdb) {
+	const int2 coors = { get_global_id(0), get_global_id(1) };
+
+	write_imagef(hdb, coors, read_imagef(hdr, nearSampler, coors) * 0.9f + read_imagef(blo, nearSampler, coors) * 0.016666667f);
+}
 
 __kernel void exposureKernel(__read_only image2d_t hdr, __write_only image2d_t rbo) {
 	const int2 coors = { get_global_id(0), get_global_id(1) };
 	
-	float4 pixel = read_imagef(hdr, expSampler, coors);
+	float4 pixel = read_imagef(hdr, nearSampler, coors);
+	pixel.w = getBrightness(pixel.xyz);
 	
 	float adjLum = pixel.w / (1.0f + pixel.w);
 	

@@ -39,6 +39,32 @@ uint32_t timeStamp = 0x00;
 float pos[3], rot[9];
 float vel[3] = { 0.0f, 0.0f, 0.0f };
 
+#define blArFw_0 width
+#define blArFh_0 height
+
+#define blArFw_1 (cl_int)ceilf(blArFw_0 * 0.5f)
+#define blArFh_1 (cl_int)ceilf(blArFh_0 * 0.5f)
+
+#define blArFw_2 (cl_int)ceilf(blArFw_1 * 0.5f)
+#define blArFh_2 (cl_int)ceilf(blArFh_1 * 0.5f)
+
+#define blArFw_3 (cl_int)ceilf(blArFw_2 * 0.5f)
+#define blArFh_3 (cl_int)ceilf(blArFh_2 * 0.5f)
+
+#define blArFw_4 (cl_int)ceilf(blArFw_3 * 0.5f)
+#define blArFh_4 (cl_int)ceilf(blArFh_3 * 0.5f)
+
+#define blArFw_5 (cl_int)ceilf(blArFw_4 * 0.5f)
+#define blArFh_5 (cl_int)ceilf(blArFh_4 * 0.5f)
+
+const cl_int4 bloomAreas[6] = {	{ 0, 0, blArFw_0 - 1, blArFh_0 - 1 },
+								{ 0, blArFh_0, blArFw_1 - 1, blArFh_0 + blArFh_1 - 1 },
+								{ blArFw_1, blArFh_0, blArFw_1 + blArFw_2 - 1, blArFh_0 + blArFh_2 - 1 },
+								{ blArFw_1 + blArFw_2, blArFh_0, blArFw_1 + blArFw_2 + blArFw_3 - 1, blArFh_0 + blArFh_3 - 1 },
+								{ blArFw_1 + blArFw_2 + blArFw_3, blArFh_0, blArFw_1 + blArFw_2 + blArFw_3 + blArFw_4 - 1, blArFh_0 + blArFh_4 - 1 },
+								{ blArFw_1 + blArFw_2 + blArFw_3 + blArFw_4, blArFh_0, blArFw_1 + blArFw_2 + blArFw_3 + blArFw_4 + blArFw_5 - 1, blArFh_0 + blArFh_5 - 1 }
+};
+
 uint16_t mousePosX = 0;
 uint32_t mousePosY = 0;
 
@@ -118,20 +144,19 @@ int main(int argc, char* argv[]) {
 
 	cl::Context clContext = cl::Context(device, props);
 	
-	cl::BufferRenderGL glRender = cl::BufferRenderGL(clContext, CL_MEM_WRITE_ONLY, rbo);
+	cl::BufferRenderGL glRender = cl::BufferRenderGL(clContext, CL_MEM_READ_WRITE, rbo);
 	glFinish();
 	std::vector<cl::Memory> glMemory = { glRender };
 
 	cl::Buffer vxBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, 0x80 << BUFFER_DEPTH);
 
 	cl::Image2D hdrImage = cl::Image2D(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, { CL_RGBA, CL_HALF_FLOAT }, width, height);
+	cl::Image2D blmImage = cl::Image2D(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, { CL_RGBA, CL_HALF_FLOAT }, width, height * 1.5f);
 
 	cl::Buffer cgBuffer = cl::Buffer(clContext, (cl_mem_flags)(CL_MEM_READ_WRITE), 0x01 << 24);
 
 	cl::Buffer mnTicket = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, 0x04 << 1);
 	cl::Buffer mnBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_WRITE_ONLY, 0x08 << BUFFER_DEPTH);
-
-	cl::Buffer lmBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_READ_ONLY, 4 * 3);
 
 	cl::Buffer rvLookup = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, sizeof(cl_float) * 3 * width * height);
 	cl::Buffer rtMatrix = cl::Buffer(clContext, CL_MEM_READ_ONLY | CL_MEM_HOST_WRITE_ONLY, sizeof(cl_float) * 9);
@@ -181,10 +206,25 @@ int main(int argc, char* argv[]) {
 	renderKernel.setArg(2, mnBuffer);
 	renderKernel.setArg(3, cgBuffer);
 	renderKernel.setArg(4, hdrImage);
-	renderKernel.setArg(5, lmBuffer);
-	renderKernel.setArg(6, rvLookup);
-	renderKernel.setArg(7, rtMatrix);
-	renderKernel.setArg(9, rayCoef);
+	renderKernel.setArg(5, rvLookup);
+	renderKernel.setArg(6, rtMatrix);
+	renderKernel.setArg(8, rayCoef);
+
+	cl::Kernel linBlurKernel = cl::Kernel(clProgram, "linBlurKernel");
+	linBlurKernel.setArg(1, blmImage);
+
+	cl::Kernel dwSampKernel = cl::Kernel(clProgram, "dwSampKernel");
+	dwSampKernel.setArg(0, blmImage);
+	dwSampKernel.setArg(1, blmImage);
+
+	cl::Kernel upSampKernel = cl::Kernel(clProgram, "upSampKernel");
+	upSampKernel.setArg(0, blmImage);
+	upSampKernel.setArg(1, blmImage);
+
+	cl::Kernel bloomKernel = cl::Kernel(clProgram, "bloomKernel");
+	bloomKernel.setArg(0, hdrImage);
+	bloomKernel.setArg(1, blmImage);
+	bloomKernel.setArg(2, hdrImage);
 
 	cl::Kernel exposureKernel = cl::Kernel(clProgram, "exposureKernel");
 	exposureKernel.setArg(0, hdrImage);
@@ -207,30 +247,16 @@ int main(int argc, char* argv[]) {
 	uint8_t* cgBuf = manCTG::buf();
 	uint32_t cgBufSize;
 
-	cl::Event mnIniEvent;
-	cl::Event cgWriEvent;
-	cl::Event cgProEvent;
-	cl::Event glAquEvent;
-	cl::Event rtMatEvent;
-	cl::Event glRenEvent;
-	cl::Event glExpEvent;
-	cl::Event glRelEvent;
-	cl::Event gcReqEvent;
-	cl::Event gcSugEvent;
-
-	std::vector<cl::Event> cgProPrevents;
-	std::vector<cl::Event> cgFilPrevents;
-	std::vector<cl::Event> glRenPrevents;
-	std::vector<cl::Event> glExpPrevents;
-	std::vector<cl::Event> glRelPrevents;
-	std::vector<cl::Event> gcFinPrevents;
-
 	uint32_t cgInsSyncAmount = 0;
 	uint32_t cgInsAsyncAmount = 0;
 	uint32_t cgInsSumAmount;
 	
 	cl_float3 norPos;
+
+	cl_int2 step;
 	
+	uint8_t div;
+
 	int currentFrame, previousFrame = SDL_GetTicks(), fps;
 
 	bool quit = false;
@@ -265,7 +291,7 @@ int main(int argc, char* argv[]) {
 	// Init voxel buffer by inserting the root
 
 	{
-		clQueue.enqueueFillBuffer(mnBuffer, 0x00, 0, 8, 0, &mnIniEvent);
+		clQueue.enqueueFillBuffer(mnBuffer, 0x00, 0, 8);
 		
 		manBuf::set(0, true);
 
@@ -274,14 +300,15 @@ int main(int argc, char* argv[]) {
 		cgBufSize = manCTG::wri(cgInsSyncAmount, cgInsAsyncAmount);
 		cgInsSumAmount = cgInsSyncAmount + cgInsAsyncAmount;
 
-		clQueue.enqueueWriteBuffer(cgBuffer, true, 0, cgBufSize, (void*)cgBuf, 0, &cgWriEvent);
+		clQueue.enqueueWriteBuffer(cgBuffer, true, 0, cgBufSize, (void*)cgBuf);
+
+		clQueue.enqueueBarrierWithWaitList();
 
 		cgProKernel.setArg(4, cgInsSyncAmount);
 		cgProKernel.setArg(5, cgInsAsyncAmount);
-		cgProPrevents = { mnIniEvent, cgWriEvent };
 
 		for (uint32_t i = 0; i < cgInsSumAmount; i += min(1024, cgInsSumAmount - i)) {
-			clQueue.enqueueNDRangeKernel(cgProKernel, cl::NDRange(i), cl::NDRange(min(1024, cgInsSumAmount - i)), cl::NullRange, &cgProPrevents, &cgProEvent);
+			clQueue.enqueueNDRangeKernel(cgProKernel, cl::NDRange(i), cl::NDRange(min(1024, cgInsSumAmount - i)), cl::NullRange);
 		}
 
 		clQueue.finish();
@@ -294,37 +321,35 @@ int main(int argc, char* argv[]) {
 		
 		cgBufSize = manCTG::wri(cgInsSyncAmount, cgInsAsyncAmount);
 		cgInsSumAmount = cgInsSyncAmount + cgInsAsyncAmount;
-		
-		cgFilPrevents = {};
 
 		if (cgBufSize > 0) {
-			clQueue.enqueueWriteBuffer(cgBuffer, true, 0, cgBufSize, (void*)cgBuf, 0, &cgWriEvent);
+			clQueue.enqueueWriteBuffer(cgBuffer, true, 0, cgBufSize, (void*)cgBuf);
+
+			clQueue.enqueueBarrierWithWaitList();
 
 			cgProKernel.setArg(4, cgInsSyncAmount);
 			cgProKernel.setArg(5, cgInsAsyncAmount);
-			cgProPrevents = { cgWriEvent };
 
 			for (uint32_t i = 0; i < cgInsSumAmount; i += min(1024, cgInsSumAmount - i)) {
-				clQueue.enqueueNDRangeKernel(cgProKernel, cl::NDRange(i), cl::NDRange(min(1024, cgInsSumAmount - i)), cl::NullRange, &cgProPrevents, &cgProEvent);
-
-				cgFilPrevents.push_back(std::move(cgProEvent));
+				clQueue.enqueueNDRangeKernel(cgProKernel, cl::NDRange(i), cl::NDRange(min(1024, cgInsSumAmount - i)), cl::NullRange);
 			}
 		}
 
-		clQueue.enqueueFillBuffer(cgBuffer, 0x00, 0, 21, &cgFilPrevents);
+		clQueue.enqueueBarrierWithWaitList();
+
+		clQueue.enqueueFillBuffer(cgBuffer, 0x00, 0, 21);
 		clQueue.finish();
 
 		glClear(GL_COLOR_BUFFER_BIT);
 		glFinish();
 
-		clQueue.enqueueAcquireGLObjects(&glMemory, 0, &glAquEvent);
+		clQueue.enqueueAcquireGLObjects(&glMemory);
 
 		camera::mat(rot);
 
-		clQueue.enqueueWriteBuffer(rtMatrix, true, 0, sizeof(cl_float) * 9, (void*)rot, 0, &rtMatEvent);
+		clQueue.enqueueWriteBuffer(rtMatrix, true, 0, sizeof(cl_float) * 9, (void*)rot);
 
-		glRenPrevents = { glAquEvent, rtMatEvent };
-		glRenPrevents.clear();
+		clQueue.enqueueBarrierWithWaitList();
 
 		camera::pos(pos[0], pos[1], pos[2]);
 
@@ -332,33 +357,120 @@ int main(int argc, char* argv[]) {
 		norPos.y = pos[1] * scale + 1.5f;
 		norPos.z = pos[2] * scale + 1.5f;
 
-		renderKernel.setArg(8, norPos);
+		renderKernel.setArg(7, norPos);
 
 		timeStamp = (timeStamp + 1) & 0x0000003F;
 
-		renderKernel.setArg(10, timeStamp);
-
-		glExpPrevents = {};
+		renderKernel.setArg(9, timeStamp);
 		
 		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
 			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
-				clQueue.enqueueNDRangeKernel(renderKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange, &glRenPrevents, &glRenEvent);
-
-				glExpPrevents.push_back(std::move(glRenEvent));
+				clQueue.enqueueNDRangeKernel(renderKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange);
 			}
 		}
 
-		glRelPrevents = {};
+		clQueue.enqueueBarrierWithWaitList();
+
+		step = { 1, 0 };
+
+		linBlurKernel.setArg(0, hdrImage);
+		linBlurKernel.setArg(2, bloomAreas[0].lo);
+		linBlurKernel.setArg(3, step);
+		linBlurKernel.setArg(4, width);
+
+		for (uint16_t h = 0; h < height; h += (((height - h) > 32) ? (min(32, (height - h) / 32) * 32) : (height - h))) {
+			clQueue.enqueueNDRangeKernel(linBlurKernel, cl::NDRange(0, h / 32), cl::NDRange(min(32, height - h), ((height - h) > 32) ? min(32, (height - h) / 32) : 1), cl::NullRange);
+		}
+
+		clQueue.enqueueBarrierWithWaitList();
+
+		clQueue.finish();
+
+		step = { 0, 1 };
+
+		linBlurKernel.setArg(0, blmImage);
+		linBlurKernel.setArg(3, step);
+		linBlurKernel.setArg(4, height);
+
+		for (uint16_t w = 0; w < width; w += (((width - w) > 32) ? (min(32, (width - w) / 32) * 32) : (width - w))) {
+			clQueue.enqueueNDRangeKernel(linBlurKernel, cl::NDRange(0, w / 32), cl::NDRange(min(32, width - w), ((width - w) > 32) ? min(32, (width - w) / 32) : 1), cl::NullRange);
+		}
+
+		clQueue.enqueueBarrierWithWaitList();
+
+		div = 1;
+
+		for (uint8_t i = 0; i < 5; ++i) {
+			div <<= 1;
+
+			dwSampKernel.setArg(2, bloomAreas[i].lo);
+			dwSampKernel.setArg(3, bloomAreas[i + 1].lo);
+
+			for (uint16_t h = 0; h < (height / div); h += min(32, (height / div) - h)) {
+				for (uint16_t w = 0; w < (width / div); w += min(32, (width / div) - w)) {
+					clQueue.enqueueNDRangeKernel(dwSampKernel, cl::NDRange(w, h), cl::NDRange(min(32, (width / div) - w), min(32, (height / div) - h)), cl::NullRange);
+				}
+			}
+
+			clQueue.enqueueBarrierWithWaitList();
+
+			step = { 1, 0 };
+
+			linBlurKernel.setArg(2, bloomAreas[i + 1].lo);
+			linBlurKernel.setArg(3, step);
+			linBlurKernel.setArg(4, (uint16_t)(width / div));
+
+			for (uint16_t h = 0; h < (height / div); h += ((((height / div) - h) > 32) ? (min(32, ((height / div) - h) / 32) * 32) : ((height / div) - h))) {
+				clQueue.enqueueNDRangeKernel(linBlurKernel, cl::NDRange(0, h / 32), cl::NDRange(min(32, (height / div) - h), (((height / div) - h) > 32) ? min(32, ((height / div) - h) / 32) : 1), cl::NullRange);
+			}
+
+			clQueue.enqueueBarrierWithWaitList();
+
+			step = { 0, 1 };
+
+			linBlurKernel.setArg(3, step);
+			linBlurKernel.setArg(4, (uint16_t)(height / div));
+
+			for (uint16_t w = 0; w < (width / div); w += ((((width / div) - w) > 32) ? (min(32, ((width / div) - w) / 32) * 32) : ((width / div) - w))) {
+				clQueue.enqueueNDRangeKernel(linBlurKernel, cl::NDRange(0, w / 32), cl::NDRange(min(32, (width / div) - w), (((width / div) - w) > 32) ? min(32, ((width / div) - w) / 32) : 1), cl::NullRange);
+			}
+
+			clQueue.enqueueBarrierWithWaitList();
+		}
+
+		for (uint8_t i = 0; i < 5; ++i) {
+			div >>= 1;
+			
+			upSampKernel.setArg(2, bloomAreas[5 - i].lo);
+			upSampKernel.setArg(3, bloomAreas[4 - i].lo);
+			upSampKernel.setArg(4, bloomAreas[5 - i].hi);
+
+			for (uint16_t h = 0; h < (height / div); h += min(32, (height / div) - h)) {
+				for (uint16_t w = 0; w < (width / div); w += min(32, (width / div) - w)) {
+					clQueue.enqueueNDRangeKernel(upSampKernel, cl::NDRange(w, h), cl::NDRange(min(32, (width / div) - w), min(32, (height / div) - h)), cl::NullRange);
+				}
+			}
+
+			clQueue.enqueueBarrierWithWaitList();
+		}
 
 		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
 			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
-				clQueue.enqueueNDRangeKernel(exposureKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange, &glExpPrevents, &glExpEvent);
-
-				glRelPrevents.push_back(std::move(glExpEvent));
+				clQueue.enqueueNDRangeKernel(bloomKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange);
 			}
 		}
 
-		clQueue.enqueueReleaseGLObjects(&glMemory, &glRelPrevents, &glRelEvent);
+		clQueue.enqueueBarrierWithWaitList();
+
+		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
+			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
+				clQueue.enqueueNDRangeKernel(exposureKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange);
+			}
+		}
+
+		clQueue.enqueueBarrierWithWaitList();
+
+		clQueue.enqueueReleaseGLObjects(&glMemory);
 		clQueue.finish();
 
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
@@ -375,18 +487,18 @@ int main(int argc, char* argv[]) {
 		gcSugKernel.setArg(4, timeStamp);
 		gcSugKernel.setArg(5, manBuf::per());
 
-		clQueue.enqueueTask(gcReqKernel, 0, &gcReqEvent);
+		clQueue.enqueueTask(gcReqKernel);
 		
-		gcFinPrevents = { gcReqEvent };
+		clQueue.enqueueBarrierWithWaitList();
 
-		clQueue.enqueueReadBuffer(cgBuffer, true, 0, 1, (void*)cgBuf, &gcFinPrevents);
+		clQueue.enqueueReadBuffer(cgBuffer, true, 0, 1, (void*)cgBuf);
 
 		while (cgBuf[0] != 0xFF) {
-			clQueue.enqueueNDRangeKernel(gcSugKernel, cl::NullRange, cl::NDRange(16), cl::NDRange(16), 0, &gcSugEvent);
+			clQueue.enqueueNDRangeKernel(gcSugKernel, cl::NullRange, cl::NDRange(16), cl::NDRange(16));
 
-			gcFinPrevents = { gcReqEvent };
+			clQueue.enqueueBarrierWithWaitList();
 
-			clQueue.enqueueReadBuffer(cgBuffer, true, 0, 1, (void*)cgBuf, &gcFinPrevents);
+			clQueue.enqueueReadBuffer(cgBuffer, true, 0, 1, (void*)cgBuf);
 		}
 		
 		clQueue.enqueueReadBuffer(cgBuffer, true, 1, 3, (void*)cgBuf);
@@ -663,7 +775,7 @@ void testVoxelBufferData() {
 	}
 
 	for (uint32_t i = 0; i < 4; ++i) {
-		tmp = vis(vxs[i * 2], new mLit(col(1.0f, 1.0f, 1.0f), 1.0f)).toBinary();
+		tmp = vis(vxs[i * 2], new mLit(col(1.0f, 1.0f, 1.0f), (i == 0) ? 10.0f : 1.0f)).toBinary();
 
 		o[0] = 0x80000000 | (i << 29) | ((i != 0) ? (((par & (0xF0000000 >> (i * 8))) >> (28 - i * 8)) << 24) : (15 << 24));
 		o[1] = 0x00000000;
