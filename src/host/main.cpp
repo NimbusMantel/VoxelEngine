@@ -65,6 +65,8 @@ const cl_int4 bloomAreas[6] = {	{ 0, 0, blArFw_0 - 1, blArFh_0 - 1 },
 								{ blArFw_1 + blArFw_2 + blArFw_3 + blArFw_4, blArFh_0, blArFw_1 + blArFw_2 + blArFw_3 + blArFw_4 + blArFw_5 - 1, blArFh_0 + blArFh_5 - 1 }
 };
 
+const cl_uint4 zonPattern = { 0x7f800000, 0xff800000, 0x00000000, 0x00000000 };
+
 uint16_t mousePosX = 0;
 uint32_t mousePosY = 0;
 
@@ -144,14 +146,17 @@ int main(int argc, char* argv[]) {
 
 	cl::Context clContext = cl::Context(device, props);
 	
-	cl::BufferRenderGL glRender = cl::BufferRenderGL(clContext, CL_MEM_READ_WRITE, rbo);
+	cl::BufferRenderGL ldrImage = cl::BufferRenderGL(clContext, CL_MEM_READ_WRITE, rbo);
 	glFinish();
-	std::vector<cl::Memory> glMemory = { glRender };
+	std::vector<cl::Memory> glMemory = { ldrImage };
 
 	cl::Buffer vxBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, 0x80 << BUFFER_DEPTH);
 
 	cl::Image2D hdrImage = cl::Image2D(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, { CL_RGBA, CL_HALF_FLOAT }, width, height);
 	cl::Image2D blmImage = cl::Image2D(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, { CL_RGBA, CL_HALF_FLOAT }, width, height * 1.5f);
+
+	cl::Buffer zonBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, sizeof(cl_float) * 4 * 34);
+	cl::Image2D difImage = cl::Image2D(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, { CL_RG, CL_HALF_FLOAT }, width, height);
 
 	cl::Buffer cgBuffer = cl::Buffer(clContext, (cl_mem_flags)(CL_MEM_READ_WRITE), 0x01 << 24);
 
@@ -200,15 +205,15 @@ int main(int argc, char* argv[]) {
 	cgProKernel.setArg(2, mnBuffer);
 	cgProKernel.setArg(3, cgBuffer);
 
-	cl::Kernel renderKernel = cl::Kernel(clProgram, "renderKernel");
-	renderKernel.setArg(0, vxBuffer);
-	renderKernel.setArg(1, mnTicket);
-	renderKernel.setArg(2, mnBuffer);
-	renderKernel.setArg(3, cgBuffer);
-	renderKernel.setArg(4, hdrImage);
-	renderKernel.setArg(5, rvLookup);
-	renderKernel.setArg(6, rtMatrix);
-	renderKernel.setArg(8, rayCoef);
+	cl::Kernel hdrRenKernel = cl::Kernel(clProgram, "hdrRenKernel");
+	hdrRenKernel.setArg(0, vxBuffer);
+	hdrRenKernel.setArg(1, mnTicket);
+	hdrRenKernel.setArg(2, mnBuffer);
+	hdrRenKernel.setArg(3, cgBuffer);
+	hdrRenKernel.setArg(4, hdrImage);
+	hdrRenKernel.setArg(5, rvLookup);
+	hdrRenKernel.setArg(6, rtMatrix);
+	hdrRenKernel.setArg(8, rayCoef);
 
 	cl::Kernel linBlurKernel = cl::Kernel(clProgram, "linBlurKernel");
 	linBlurKernel.setArg(1, blmImage);
@@ -225,10 +230,20 @@ int main(int argc, char* argv[]) {
 	bloomKernel.setArg(0, hdrImage);
 	bloomKernel.setArg(1, blmImage);
 	bloomKernel.setArg(2, hdrImage);
+	bloomKernel.setArg(3, zonBuffer);
 
-	cl::Kernel exposureKernel = cl::Kernel(clProgram, "exposureKernel");
-	exposureKernel.setArg(0, hdrImage);
-	exposureKernel.setArg(1, glRender);
+	cl::Kernel zonExpKernel = cl::Kernel(clProgram, "zonExpKernel");
+	zonExpKernel.setArg(0, zonBuffer);
+
+	cl::Kernel lumDifKernel = cl::Kernel(clProgram, "lumDifKernel");
+	lumDifKernel.setArg(0, hdrImage);
+	lumDifKernel.setArg(1, difImage);
+
+	cl::Kernel hdrExpKernel = cl::Kernel(clProgram, "hdrExpKernel");
+	hdrExpKernel.setArg(0, hdrImage);
+	hdrExpKernel.setArg(1, ldrImage);
+	hdrExpKernel.setArg(2, zonBuffer);
+	hdrExpKernel.setArg(3, difImage);
 
 	cl::Kernel gcReqKernel = cl::Kernel(clProgram, "gcReqKernel");
 	gcReqKernel.setArg(0, vxBuffer);
@@ -357,15 +372,15 @@ int main(int argc, char* argv[]) {
 		norPos.y = pos[1] * scale + 1.5f;
 		norPos.z = pos[2] * scale + 1.5f;
 
-		renderKernel.setArg(7, norPos);
+		hdrRenKernel.setArg(7, norPos);
 
 		timeStamp = (timeStamp + 1) & 0x0000003F;
 
-		renderKernel.setArg(9, timeStamp);
+		hdrRenKernel.setArg(9, timeStamp);
 		
 		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
 			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
-				clQueue.enqueueNDRangeKernel(renderKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange);
+				clQueue.enqueueNDRangeKernel(hdrRenKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange);
 			}
 		}
 
@@ -383,8 +398,6 @@ int main(int argc, char* argv[]) {
 		}
 
 		clQueue.enqueueBarrierWithWaitList();
-
-		clQueue.finish();
 
 		step = { 0, 1 };
 
@@ -454,6 +467,10 @@ int main(int argc, char* argv[]) {
 			clQueue.enqueueBarrierWithWaitList();
 		}
 
+		clQueue.enqueueFillBuffer(zonBuffer, zonPattern, 0, sizeof(cl_uint4) * 34);
+
+		clQueue.enqueueBarrierWithWaitList();
+
 		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
 			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
 				clQueue.enqueueNDRangeKernel(bloomKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange);
@@ -462,9 +479,21 @@ int main(int argc, char* argv[]) {
 
 		clQueue.enqueueBarrierWithWaitList();
 
+		clQueue.enqueueNDRangeKernel(zonExpKernel, cl::NullRange, cl::NDRange(1, 34), cl::NullRange);
+
+		clQueue.enqueueBarrierWithWaitList();
+
 		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
 			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
-				clQueue.enqueueNDRangeKernel(exposureKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange);
+				clQueue.enqueueNDRangeKernel(lumDifKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange);
+			}
+		}
+
+		clQueue.enqueueBarrierWithWaitList();
+
+		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
+			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
+				clQueue.enqueueNDRangeKernel(hdrExpKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange);
 			}
 		}
 
@@ -692,7 +721,7 @@ void testVoxelBinaryTree() {
 
 void testVoxelBufferData() {
 	manBuf::set(1, true, 16);
-	
+
 	vis viss[VOXEL_DEPTH] = { vis() };
 
 	mat vxs[8] = { mat(col(1.0f, 0.929f, 0.0f), 0.875f, col(1.0f, 0.929f, 0.0f)), mat(col(1.0f, 0.0f, 0.0f), 0.75f, col(1.0f, 0.0f, 0.0f)),

@@ -56,6 +56,7 @@ enum PLACEHOLDER {
 #define VoxelDepth 23
 
 #define GammaInv 0.454545f
+#define Sigma2Inv 1.234567f
 
 
 // function declarations
@@ -73,6 +74,13 @@ uint32_t getParent(__global uint32_t* vxBuffer, uint32_t index);
 uint32_t getTimestamp(__global uint32_t* vxBuffer, uint32_t index);
 
 float getBrightness(float3 rgb);
+
+void atomic_fgadd(volatile __global float* p, const float val);
+void atomic_fladd(volatile __local float* p, const float val);
+void atomic_fgmin(volatile __global float* p, const float val);
+void atomic_flmin(volatile __local float* p, const float val);
+void atomic_fgmax(volatile __global float* p, const float val);
+void atomic_flmax(volatile __local float* p, const float val);
 
 // kernels
 
@@ -165,7 +173,7 @@ Colour model according to "A physically Based Colour Model"
 
 */
 
-__kernel void renderKernel(volatile __global __read_write uint32_t* vxBuffer, volatile __global __read_write uint32_t* mnTicket, volatile __global __read_write uint32_t* mnBuffer, __global __read_write uint8_t* gcBuffer, __write_only image2d_t hdr, __global __read_only float* rvLookup, __constant __read_only float* rotMat, float3 norPos, float rayCoef, uint32_t timStamp) {
+__kernel void hdrRenKernel(volatile __global __read_write uint32_t* vxBuffer, volatile __global __read_write uint32_t* mnTicket, volatile __global __read_write uint32_t* mnBuffer, __global __read_write uint8_t* gcBuffer, __write_only image2d_t hdr, __global __read_only float* rvLookup, __constant __read_only float* rotMat, float3 norPos, float rayCoef, uint32_t timStamp) {
 	const int2 size = { get_image_width(hdr), get_image_height(hdr) };
 	const int2 coors = { get_global_id(0), get_global_id(1) };
 
@@ -562,23 +570,103 @@ __kernel void upSampKernel(__read_only image2d_t inp, __write_only image2d_t oup
 	write_imagef(oup, arO + coors, read_imagef(inp, nearSampler, arO + coors) + read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2))) * 0.5625f + (read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2 + (int2)(-((coors.x & 0x01) ^ 0x01) | 0x01, 0)))) + read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2 + (int2)(0, -((coors.y & 0x01) ^ 0x01) | 0x01))))) * 0.1875f + read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2 + (int2)(-((coors.x & 0x01) ^ 0x01) | 0x01, -((coors.y & 0x01) ^ 0x01) | 0x01)))) * 0.0625f);
 }
 
-__kernel void bloomKernel(__read_only image2d_t hdr, __read_only image2d_t blo, __write_only image2d_t hdb) {
+__kernel void bloomKernel(__read_only image2d_t hdr, __read_only image2d_t blo, __write_only image2d_t hdb, volatile __global __read_write float* zonBuffer) {
+	volatile __local float lZon[0x10 * 34];
+	
 	const int2 coors = { get_global_id(0), get_global_id(1) };
 
-	write_imagef(hdb, coors, read_imagef(hdr, nearSampler, coors) * 0.9f + read_imagef(blo, nearSampler, coors) * 0.016666667f);
+	float4 pixel = (read_imagef(hdr, nearSampler, coors) * 0.9f + read_imagef(blo, nearSampler, coors) * 0.016666667f);
+
+	float lum = clamp(getBrightness(pixel.xyz), 0.00048828125f, 4194303.75f);
+	pixel.w = native_log2(lum);
+
+	uint32_t zon = (uint32_t)(round(pixel.w) + 11);
+
+	for (uint8_t i = get_local_id(0); i < 34; i += get_local_size(0)) {
+		lZon[(i << 2) + 0] = INFINITY;
+		lZon[(i << 2) + 1] = -INFINITY;
+		lZon[(i << 2) + 2] = 0.0f;
+		lZon[(i << 2) + 3] = 0.0f;
+	}
+
+	/*
+
+	TO DO: decrease amount of atomic calls
+
+	*/
+
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	atomic_flmin((volatile __local float*)(lZon + (zon << 2)), lum);
+	atomic_flmax((volatile __local float*)(lZon + ((zon << 2) + 1)), lum);
+	atomic_fladd((volatile __local float*)(lZon + ((zon << 2) + 2)), lum);
+	atomic_inc((volatile __local uint32_t*)(lZon + ((zon << 2) + 3)));
+
+	write_imagef(hdb, coors, pixel);
+
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	for (uint8_t i = get_local_id(0); i < 34; i += get_local_size(0)) {
+		if (as_uint(lZon[(i << 2) + 3]) > 0) {
+			atomic_fgmin((volatile __global float*)(zonBuffer + (i << 2)), lZon[i << 2]);
+			atomic_fgmax((volatile __global float*)(zonBuffer + ((i << 2) + 1)), lZon[(i << 2) + 1]);
+			atomic_fgadd((volatile __global float*)(zonBuffer + ((i << 2) + 2)), lZon[(i << 2) + 2]);
+			atomic_add((volatile __global uint32_t*)(zonBuffer + ((i << 2) + 3)), as_uint(lZon[(i << 2) + 3]));
+		}
+	}
 }
 
-__kernel void exposureKernel(__read_only image2d_t hdr, __write_only image2d_t rbo) {
+__kernel void zonExpKernel(__global __read_write float* zonBuffer) {
+	const uint32_t zon = get_global_id(1);
+
+	const float zMin = zonBuffer[zon << 2];
+	const float zMax = zonBuffer[(zon << 2) + 1];
+	const float zNum = (float)as_uint(zonBuffer[(zon << 2) + 3]);
+	const float zAvg = zonBuffer[(zon << 2) + 2] / zNum;
+	const float zMed = (4.0f * zNum * zAvg - (zNum + 1.0f) * (zMin + zMax)) / (2.0f * (zNum - 1.0f));
+
+	zonBuffer[(zon << 2) + 2] = zAvg;
+	zonBuffer[(zon << 2) + 3] = 1.0f / (1.0f + zMed);
+}
+
+__kernel void lumDifKernel(__read_only image2d_t hdr, __write_only image2d_t dif) {
+	const int2 coors = { get_global_id(0), get_global_id(1) };
+
+	float cen = read_imagef(hdr, nearSampler, coors).w;
+
+	write_imagef(dif, coors, (float4)(1.0f / (fabs(cen - read_imagef(hdr, nearSampler, coors + (int2)(1, 0)).w) + 0.001f), 1.0f / (fabs(cen - read_imagef(hdr, nearSampler, coors + (int2)(0, 1)).w) + 0.001f), 0.0f, 0.0f));
+}
+
+__kernel void hdrExpKernel(__read_only image2d_t hdr, __write_only image2d_t ldr, __global __read_only float* zonBuffer, __read_only image2d_t dif) {
 	const int2 coors = { get_global_id(0), get_global_id(1) };
 	
 	float4 pixel = read_imagef(hdr, nearSampler, coors);
-	pixel.w = getBrightness(pixel.xyz);
-	
-	float adjLum = pixel.w / (1.0f + pixel.w);
-	
-	pixel.xyz *= (adjLum / as_float(as_uint(pixel.w) | (0x3f800000 & -(pixel.w == 0.0f))));
 
-	pixel = (float4)(native_powr(pixel.x, GammaInv), native_powr(pixel.y, GammaInv), native_powr(pixel.z, GammaInv), 1.0f);
+	/*
+
+	TO DO: Fix exposure zone blending
+
+	E_i: input exposure zones
+	E_o: output exposure zones
+	c_a: adaption constant
+
+	E_i = blur(B_i)
+	r_a = e^-(c_a / abs(E_i - B_i))
+	E_o = E_i * r_a + B_i * (1 - r_a)
+
+	*/
+
+	uint32_t zon = (uint32_t)(round(pixel.w) + 11);
+	float zAvg = zonBuffer[(zon << 2) + 2];
+	float zExp = zonBuffer[(zon << 2) + 3];
+
+	float lum = native_powr(2.0f, pixel.w);
+	float wei = native_exp(-(lum - zAvg) * (lum - zAvg) * Sigma2Inv);
+	float4 sum = (float4)(read_imagef(dif, nearSampler, coors - (int2)(1, 0)).x, read_imagef(dif, nearSampler, coors - (int2)(0, 1)).y, read_imagef(dif, nearSampler, coors).xy);
+
+	pixel *= zExp;//((wei * zExp) / (wei + 0.2f * (sum.x + sum.y + sum.z + sum.w)));
+
+	pixel = (float4)(native_powr(clamp(pixel.x, 0.0f, 1.0f), GammaInv), native_powr(clamp(pixel.y, 0.0f, 1.0f), GammaInv), native_powr(clamp(pixel.z, 0.0f, 1.0f), GammaInv), 1.0f);
 
 	const uint2 center = { get_image_width(hdr) / 2, get_image_height(hdr) / 2 };
 
@@ -586,7 +674,7 @@ __kernel void exposureKernel(__read_only image2d_t hdr, __write_only image2d_t r
 		pixel = (float4)((float)(pixel.x < 0.5f), (float)(pixel.y < 0.5f), (float)(pixel.z < 0.5f), 1.0f);
 	}
 
-	write_imagef(rbo, coors, pixel);
+	write_imagef(ldr, coors, pixel);
 }
 
 __kernel void gcReqKernel(volatile __global __read_write uint32_t* vxBuffer, __global __read_write uint32_t* mnTicket, __global __read_write uint32_t* mnBuffer, __global __read_write uint8_t* gcBuffer, uint32_t timStamp, float memPressure) {
@@ -934,6 +1022,32 @@ uint32_t getTimestamp(__global uint32_t* vxBuffer, uint32_t index) {
 	return ((vxBuffer[index << 2] & 0x0000FC00) >> 10);
 }
 
-float getBrightness(float3 rgb) {
+inline float getBrightness(float3 rgb) {
 	return (0.299 * rgb.x + 0.587 * rgb.y + 0.114 * rgb.z);
+}
+
+#define atomic_func(spa, op) union { uint32_t intVal; float floatVal; } newVal; union { uint32_t intVal; float floatVal; } oldVal; do { oldVal.floatVal = *p; newVal.floatVal = op; } while (atomic_cmpxchg((volatile spa uint32_t*)p, oldVal.intVal, newVal.intVal) != oldVal.intVal);
+
+inline void atomic_fgadd(volatile __global float* p, const float val) {
+	atomic_func(__global, oldVal.floatVal + val)
+}
+
+inline void atomic_fladd(volatile __local float* p, const float val) {
+	atomic_func(__local, oldVal.floatVal + val)
+}
+
+inline void atomic_fgmin(volatile __global float* p, const float val) {
+	atomic_func(__global, fmin(oldVal.floatVal, val))
+}
+
+inline void atomic_flmin(volatile __local float* p, const float val) {
+	atomic_func(__local, fmin(oldVal.floatVal, val))
+}
+
+inline void atomic_fgmax(volatile __global float* p, const float val) {
+	atomic_func(__global, fmax(oldVal.floatVal, val))
+}
+
+inline void atomic_flmax(volatile __local float* p, const float val) {
+	atomic_func(__local, fmax(oldVal.floatVal, val))
 }
