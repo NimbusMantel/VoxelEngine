@@ -56,8 +56,6 @@ enum PLACEHOLDER {
 #define VoxelDepth 23
 
 #define GammaInv 0.454545f
-#define Sigma2Inv 1.234567f
-
 
 // function declarations
 
@@ -73,14 +71,10 @@ void cgLight(__global uint32_t* vxBuffer, uint32_t index, uint32_t light);
 uint32_t getParent(__global uint32_t* vxBuffer, uint32_t index);
 uint32_t getTimestamp(__global uint32_t* vxBuffer, uint32_t index);
 
-float getBrightness(float3 rgb);
+float getBrightness(const float3 rgb);
 
-void atomic_fgadd(volatile __global float* p, const float val);
-void atomic_fladd(volatile __local float* p, const float val);
-void atomic_fgmin(volatile __global float* p, const float val);
-void atomic_flmin(volatile __local float* p, const float val);
-void atomic_fgmax(volatile __global float* p, const float val);
-void atomic_flmax(volatile __local float* p, const float val);
+float2 float32Tofloat16(const float val);
+float float16Tofloat32(const float2 val);
 
 // kernels
 
@@ -570,101 +564,100 @@ __kernel void upSampKernel(__read_only image2d_t inp, __write_only image2d_t oup
 	write_imagef(oup, arO + coors, read_imagef(inp, nearSampler, arO + coors) + read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2))) * 0.5625f + (read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2 + (int2)(-((coors.x & 0x01) ^ 0x01) | 0x01, 0)))) + read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2 + (int2)(0, -((coors.y & 0x01) ^ 0x01) | 0x01))))) * 0.1875f + read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2 + (int2)(-((coors.x & 0x01) ^ 0x01) | 0x01, -((coors.y & 0x01) ^ 0x01) | 0x01)))) * 0.0625f);
 }
 
-__kernel void bloomKernel(__read_only image2d_t hdr, __read_only image2d_t blo, __write_only image2d_t hdb, volatile __global __read_write float* zonBuffer) {
-	volatile __local float lZon[0x10 * 34];
-	
+__kernel void bloomKernel(__read_only image2d_t hdr, __read_only image2d_t blo, __write_only image2d_t hdb, __write_only image2d_t pixExp) {
 	const int2 coors = { get_global_id(0), get_global_id(1) };
 
 	float4 pixel = (read_imagef(hdr, nearSampler, coors) * 0.9f + read_imagef(blo, nearSampler, coors) * 0.016666667f);
-
-	float lum = clamp(getBrightness(pixel.xyz), 0.00048828125f, 4194303.75f);
-	pixel.w = native_log2(lum);
-
-	uint32_t zon = (uint32_t)(round(pixel.w) + 11);
-
-	for (uint8_t i = get_local_id(0); i < 34; i += get_local_size(0)) {
-		lZon[(i << 2) + 0] = INFINITY;
-		lZon[(i << 2) + 1] = -INFINITY;
-		lZon[(i << 2) + 2] = 0.0f;
-		lZon[(i << 2) + 3] = 0.0f;
-	}
-
-	/*
-
-	TO DO: decrease amount of atomic calls
-
-	*/
-
-	barrier(CLK_LOCAL_MEM_FENCE);
-
-	atomic_flmin((volatile __local float*)(lZon + (zon << 2)), lum);
-	atomic_flmax((volatile __local float*)(lZon + ((zon << 2) + 1)), lum);
-	atomic_fladd((volatile __local float*)(lZon + ((zon << 2) + 2)), lum);
-	atomic_inc((volatile __local uint32_t*)(lZon + ((zon << 2) + 3)));
+	pixel.w = clamp(getBrightness(pixel.xyz), 0.00048828125f, 4194303.75f);
 
 	write_imagef(hdb, coors, pixel);
 
-	barrier(CLK_LOCAL_MEM_FENCE);
+	float2 eSum = float32Tofloat16(pixel.w);
 
-	for (uint8_t i = get_local_id(0); i < 34; i += get_local_size(0)) {
-		if (as_uint(lZon[(i << 2) + 3]) > 0) {
-			atomic_fgmin((volatile __global float*)(zonBuffer + (i << 2)), lZon[i << 2]);
-			atomic_fgmax((volatile __global float*)(zonBuffer + ((i << 2) + 1)), lZon[(i << 2) + 1]);
-			atomic_fgadd((volatile __global float*)(zonBuffer + ((i << 2) + 2)), lZon[(i << 2) + 2]);
-			atomic_add((volatile __global uint32_t*)(zonBuffer + ((i << 2) + 3)), as_uint(lZon[(i << 2) + 3]));
-		}
+	write_imagef(pixExp, coors, (float4)(pixel.w, pixel.w, eSum.x, eSum.y));
+}
+
+/*
+
+TO DO: deal with edge overamplification because of median square
+
+*/
+
+__kernel void linMedKernel(__read_only image2d_t inp, __write_only image2d_t oup, int2 stp, uint16_t siz) {
+	const int2 gid = { get_global_id(1), get_global_id(0) };
+
+	int2 coors = (((int2)(1, 1)) - stp) * (uint16_t)((gid.x << 5) + gid.y);
+	const int2 end = coors + stp * (siz - 1);
+	const int2 ltp = stp * 3;
+
+	float4 buf[7];
+
+	buf[0] = buf[1] = buf[2] = buf[3] = read_imagef(inp, nearSampler, min(end, coors));
+	buf[4] = read_imagef(inp, nearSampler, min(end, coors + stp * 1));
+	buf[5] = read_imagef(inp, nearSampler, min(end, coors + stp * 2));
+	buf[6] = (float4)(0.0f, 0.0f, 0.0f, 0.0f);
+
+	buf[0].z = buf[1].z = buf[2].z = buf[3].z = float16Tofloat32(buf[0].zw);
+	buf[4].z = float16Tofloat32(buf[4].zw);
+	buf[5].z = float16Tofloat32(buf[5].zw);
+
+	float gMin, gMax;
+	uint32_t lMsk;
+	float gSum = 4.0f * buf[0].z + buf[4].z + buf[5].z;
+
+	float2 eSum;
+
+	uint8_t cen = 3;
+
+	for (uint16_t i = 0; i < siz; ++i) {
+		gSum -= buf[(cen + 3) - (0x07 & -(cen > 3))].z;
+
+		buf[(cen + 3) - (0x07 & -(cen > 3))] = read_imagef(inp, nearSampler, min(end, coors + ltp));
+		buf[(cen + 3) - (0x07 & -(cen > 3))].z = float16Tofloat32(buf[(cen + 3) - (0x07 & -(cen > 3))].zw);
+
+		gSum += buf[(cen + 3) - (0x07 & -(cen > 3))].z;
+
+		gMin = buf[0].x;
+		gMax = buf[0].y;
+
+		lMsk = -(buf[1].x < buf[2].x);
+		gMin = fmin(gMin, as_float((as_uint(buf[1].x) & lMsk) | (as_uint(buf[2].x) & ~lMsk)));
+		lMsk = -(buf[1].y > buf[2].y);
+		gMax = fmax(gMax, as_float((as_uint(buf[1].y) & lMsk) | (as_uint(buf[2].y) & ~lMsk)));
+
+		lMsk = -(buf[3].x < buf[4].x);
+		gMin = fmin(gMin, as_float((as_uint(buf[3].x) & lMsk) | (as_uint(buf[4].x) & ~lMsk)));
+		lMsk = -(buf[3].y > buf[4].y);
+		gMax = fmax(gMax, as_float((as_uint(buf[3].y) & lMsk) | (as_uint(buf[4].y) & ~lMsk)));
+
+		lMsk = -(buf[5].x < buf[6].x);
+		gMin = fmin(gMin, as_float((as_uint(buf[5].x) & lMsk) | (as_uint(buf[6].x) & ~lMsk)));
+		lMsk = -(buf[5].y > buf[6].y);
+		gMax = fmax(gMax, as_float((as_uint(buf[5].y) & lMsk) | (as_uint(buf[6].y) & ~lMsk)));
+
+		eSum = float32Tofloat16(gSum);
+
+		write_imagef(oup, coors, (float4)(gMin, gMax, eSum.x, eSum.y));
+
+		coors += stp;
+
+		cen = ((cen + 1) & -(cen != 6));
 	}
 }
 
-__kernel void zonExpKernel(__global __read_write float* zonBuffer) {
-	const uint32_t zon = get_global_id(1);
-
-	const float zMin = zonBuffer[zon << 2];
-	const float zMax = zonBuffer[(zon << 2) + 1];
-	const float zNum = (float)as_uint(zonBuffer[(zon << 2) + 3]);
-	const float zAvg = zonBuffer[(zon << 2) + 2] / zNum;
-	const float zMed = (4.0f * zNum * zAvg - (zNum + 1.0f) * (zMin + zMax)) / (2.0f * (zNum - 1.0f));
-
-	zonBuffer[(zon << 2) + 2] = zAvg;
-	zonBuffer[(zon << 2) + 3] = 1.0f / (1.0f + zMed);
-}
-
-__kernel void lumDifKernel(__read_only image2d_t hdr, __write_only image2d_t dif) {
+__kernel void hdrExpKernel(__read_only image2d_t hdr, __read_only image2d_t pixExp, __write_only image2d_t ldr) {
 	const int2 coors = { get_global_id(0), get_global_id(1) };
 
-	float cen = read_imagef(hdr, nearSampler, coors).w;
-
-	write_imagef(dif, coors, (float4)(1.0f / (fabs(cen - read_imagef(hdr, nearSampler, coors + (int2)(1, 0)).w) + 0.001f), 1.0f / (fabs(cen - read_imagef(hdr, nearSampler, coors + (int2)(0, 1)).w) + 0.001f), 0.0f, 0.0f));
-}
-
-__kernel void hdrExpKernel(__read_only image2d_t hdr, __write_only image2d_t ldr, __global __read_only float* zonBuffer, __read_only image2d_t dif) {
-	const int2 coors = { get_global_id(0), get_global_id(1) };
-	
 	float4 pixel = read_imagef(hdr, nearSampler, coors);
 
-	/*
+	float4 median = read_imagef(pixExp, nearSampler, coors);
+	median.z = float16Tofloat32(median.zw);
+	median.w = 49.0f;
 
-	TO DO: Fix exposure zone blending
+	float adjLum = (4.0f * median.z - (median.w + 1.0f) * (median.x + median.y)) / (2.0f * (median.w - 1.0f));
+	adjLum = adjLum / (1.0f + adjLum);
 
-	E_i: input exposure zones
-	E_o: output exposure zones
-	c_a: adaption constant
-
-	E_i = blur(B_i)
-	r_a = e^-(c_a / abs(E_i - B_i))
-	E_o = E_i * r_a + B_i * (1 - r_a)
-
-	*/
-
-	uint32_t zon = (uint32_t)(round(pixel.w) + 11);
-	float zAvg = zonBuffer[(zon << 2) + 2];
-	float zExp = zonBuffer[(zon << 2) + 3];
-
-	float lum = native_powr(2.0f, pixel.w);
-	float wei = native_exp(-(lum - zAvg) * (lum - zAvg) * Sigma2Inv);
-	float4 sum = (float4)(read_imagef(dif, nearSampler, coors - (int2)(1, 0)).x, read_imagef(dif, nearSampler, coors - (int2)(0, 1)).y, read_imagef(dif, nearSampler, coors).xy);
-
-	pixel *= zExp;//((wei * zExp) / (wei + 0.2f * (sum.x + sum.y + sum.z + sum.w)));
+	pixel.xyz *= (adjLum / pixel.w);
 
 	pixel = (float4)(native_powr(clamp(pixel.x, 0.0f, 1.0f), GammaInv), native_powr(clamp(pixel.y, 0.0f, 1.0f), GammaInv), native_powr(clamp(pixel.z, 0.0f, 1.0f), GammaInv), 1.0f);
 
@@ -1022,32 +1015,18 @@ uint32_t getTimestamp(__global uint32_t* vxBuffer, uint32_t index) {
 	return ((vxBuffer[index << 2] & 0x0000FC00) >> 10);
 }
 
-inline float getBrightness(float3 rgb) {
+inline float getBrightness(const float3 rgb) {
 	return (0.299 * rgb.x + 0.587 * rgb.y + 0.114 * rgb.z);
 }
 
-#define atomic_func(spa, op) union { uint32_t intVal; float floatVal; } newVal; union { uint32_t intVal; float floatVal; } oldVal; do { oldVal.floatVal = *p; newVal.floatVal = op; } while (atomic_cmpxchg((volatile spa uint32_t*)p, oldVal.intVal, newVal.intVal) != oldVal.intVal);
+inline float2 float32Tofloat16(const float v) {
+	uint32_t val = as_uint(v);
 
-inline void atomic_fgadd(volatile __global float* p, const float val) {
-	atomic_func(__global, oldVal.floatVal + val)
+	return (float2)(as_float((val & 0x80000000) | (((val & 0x7C000000) >> 3) + 0x38000000) | ((val & 0x03FF0000) >> 3)), as_float(((val & 0x00008000) << 16) | (((val & 0x00007C00) << 13) + 0x38000000) | ((val & 0x000003FF) << 13)));
 }
 
-inline void atomic_fladd(volatile __local float* p, const float val) {
-	atomic_func(__local, oldVal.floatVal + val)
-}
+inline float float16Tofloat32(const float2 v) {
+	uint2 val = as_uint2(v);
 
-inline void atomic_fgmin(volatile __global float* p, const float val) {
-	atomic_func(__global, fmin(oldVal.floatVal, val))
-}
-
-inline void atomic_flmin(volatile __local float* p, const float val) {
-	atomic_func(__local, fmin(oldVal.floatVal, val))
-}
-
-inline void atomic_fgmax(volatile __global float* p, const float val) {
-	atomic_func(__global, fmax(oldVal.floatVal, val))
-}
-
-inline void atomic_flmax(volatile __local float* p, const float val) {
-	atomic_func(__local, fmax(oldVal.floatVal, val))
+	return as_float((val.x & 0x80000000) | (((val.x & 0x7F800000) - 0x38000000) << 3) | ((val.x & 0x007FE000) << 3) | ((val.y & 0x80000000) >> 16) | (((val.y & 0x7F800000) - 0x38000000) >> 13) | ((val.y & 0x007FE000) >> 13));
 }

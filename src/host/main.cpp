@@ -65,8 +65,6 @@ const cl_int4 bloomAreas[6] = {	{ 0, 0, blArFw_0 - 1, blArFh_0 - 1 },
 								{ blArFw_1 + blArFw_2 + blArFw_3 + blArFw_4, blArFh_0, blArFw_1 + blArFw_2 + blArFw_3 + blArFw_4 + blArFw_5 - 1, blArFh_0 + blArFh_5 - 1 }
 };
 
-const cl_uint4 zonPattern = { 0x7f800000, 0xff800000, 0x00000000, 0x00000000 };
-
 uint16_t mousePosX = 0;
 uint32_t mousePosY = 0;
 
@@ -155,9 +153,6 @@ int main(int argc, char* argv[]) {
 	cl::Image2D hdrImage = cl::Image2D(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, { CL_RGBA, CL_HALF_FLOAT }, width, height);
 	cl::Image2D blmImage = cl::Image2D(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, { CL_RGBA, CL_HALF_FLOAT }, width, height * 1.5f);
 
-	cl::Buffer zonBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, sizeof(cl_float) * 4 * 34);
-	cl::Image2D difImage = cl::Image2D(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, { CL_RG, CL_HALF_FLOAT }, width, height);
-
 	cl::Buffer cgBuffer = cl::Buffer(clContext, (cl_mem_flags)(CL_MEM_READ_WRITE), 0x01 << 24);
 
 	cl::Buffer mnTicket = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, 0x04 << 1);
@@ -230,20 +225,16 @@ int main(int argc, char* argv[]) {
 	bloomKernel.setArg(0, hdrImage);
 	bloomKernel.setArg(1, blmImage);
 	bloomKernel.setArg(2, hdrImage);
-	bloomKernel.setArg(3, zonBuffer);
+	bloomKernel.setArg(3, blmImage);
 
-	cl::Kernel zonExpKernel = cl::Kernel(clProgram, "zonExpKernel");
-	zonExpKernel.setArg(0, zonBuffer);
-
-	cl::Kernel lumDifKernel = cl::Kernel(clProgram, "lumDifKernel");
-	lumDifKernel.setArg(0, hdrImage);
-	lumDifKernel.setArg(1, difImage);
+	cl::Kernel linMedKernel = cl::Kernel(clProgram, "linMedKernel");
+	linMedKernel.setArg(0, blmImage);
+	linMedKernel.setArg(1, blmImage);
 
 	cl::Kernel hdrExpKernel = cl::Kernel(clProgram, "hdrExpKernel");
 	hdrExpKernel.setArg(0, hdrImage);
-	hdrExpKernel.setArg(1, ldrImage);
-	hdrExpKernel.setArg(2, zonBuffer);
-	hdrExpKernel.setArg(3, difImage);
+	hdrExpKernel.setArg(1, blmImage);
+	hdrExpKernel.setArg(2, ldrImage);
 
 	cl::Kernel gcReqKernel = cl::Kernel(clProgram, "gcReqKernel");
 	gcReqKernel.setArg(0, vxBuffer);
@@ -467,10 +458,6 @@ int main(int argc, char* argv[]) {
 			clQueue.enqueueBarrierWithWaitList();
 		}
 
-		clQueue.enqueueFillBuffer(zonBuffer, zonPattern, 0, sizeof(cl_uint4) * 34);
-
-		clQueue.enqueueBarrierWithWaitList();
-
 		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
 			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
 				clQueue.enqueueNDRangeKernel(bloomKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange);
@@ -479,14 +466,24 @@ int main(int argc, char* argv[]) {
 
 		clQueue.enqueueBarrierWithWaitList();
 
-		clQueue.enqueueNDRangeKernel(zonExpKernel, cl::NullRange, cl::NDRange(1, 34), cl::NullRange);
+		step = { 1, 0 };
+
+		linMedKernel.setArg(2, step);
+		linMedKernel.setArg(3, width);
+
+		for (uint16_t h = 0; h < height; h += (((height - h) > 32) ? (min(32, (height - h) / 32) * 32) : (height - h))) {
+			clQueue.enqueueNDRangeKernel(linMedKernel, cl::NDRange(0, h / 32), cl::NDRange(min(32, height - h), ((height - h) > 32) ? min(32, (height - h) / 32) : 1), cl::NullRange);
+		}
 
 		clQueue.enqueueBarrierWithWaitList();
 
-		for (uint16_t h = 0; h < height; h += min(32, height - h)) {
-			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
-				clQueue.enqueueNDRangeKernel(lumDifKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange);
-			}
+		step = { 0, 1 };
+
+		linMedKernel.setArg(2, step);
+		linMedKernel.setArg(3, height);
+
+		for (uint16_t w = 0; w < width; w += (((width - w) > 32) ? (min(32, (width - w) / 32) * 32) : (width - w))) {
+			clQueue.enqueueNDRangeKernel(linMedKernel, cl::NDRange(0, w / 32), cl::NDRange(min(32, width - w), ((width - w) > 32) ? min(32, (width - w) / 32) : 1), cl::NullRange);
 		}
 
 		clQueue.enqueueBarrierWithWaitList();
@@ -804,7 +801,7 @@ void testVoxelBufferData() {
 	}
 
 	for (uint32_t i = 0; i < 4; ++i) {
-		tmp = vis(vxs[i * 2], new mLit(col(1.0f, 1.0f, 1.0f), (i == 0) ? 10.0f : 1.0f)).toBinary();
+		tmp = vis(vxs[i * 2], new mLit(col(1.0f, 1.0f, 1.0f), (i == 0) ? 100.0f : 1.0f)).toBinary();
 
 		o[0] = 0x80000000 | (i << 29) | ((i != 0) ? (((par & (0xF0000000 >> (i * 8))) >> (28 - i * 8)) << 24) : (15 << 24));
 		o[1] = 0x00000000;
