@@ -225,16 +225,10 @@ int main(int argc, char* argv[]) {
 	bloomKernel.setArg(0, hdrImage);
 	bloomKernel.setArg(1, blmImage);
 	bloomKernel.setArg(2, hdrImage);
-	bloomKernel.setArg(3, blmImage);
-
-	cl::Kernel linMedKernel = cl::Kernel(clProgram, "linMedKernel");
-	linMedKernel.setArg(0, blmImage);
-	linMedKernel.setArg(1, blmImage);
 
 	cl::Kernel hdrExpKernel = cl::Kernel(clProgram, "hdrExpKernel");
 	hdrExpKernel.setArg(0, hdrImage);
-	hdrExpKernel.setArg(1, blmImage);
-	hdrExpKernel.setArg(2, ldrImage);
+	hdrExpKernel.setArg(1, ldrImage);
 
 	cl::Kernel gcReqKernel = cl::Kernel(clProgram, "gcReqKernel");
 	gcReqKernel.setArg(0, vxBuffer);
@@ -462,28 +456,6 @@ int main(int argc, char* argv[]) {
 			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
 				clQueue.enqueueNDRangeKernel(bloomKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange);
 			}
-		}
-
-		clQueue.enqueueBarrierWithWaitList();
-
-		step = { 1, 0 };
-
-		linMedKernel.setArg(2, step);
-		linMedKernel.setArg(3, width);
-
-		for (uint16_t h = 0; h < height; h += (((height - h) > 32) ? (min(32, (height - h) / 32) * 32) : (height - h))) {
-			clQueue.enqueueNDRangeKernel(linMedKernel, cl::NDRange(0, h / 32), cl::NDRange(min(32, height - h), ((height - h) > 32) ? min(32, (height - h) / 32) : 1), cl::NullRange);
-		}
-
-		clQueue.enqueueBarrierWithWaitList();
-
-		step = { 0, 1 };
-
-		linMedKernel.setArg(2, step);
-		linMedKernel.setArg(3, height);
-
-		for (uint16_t w = 0; w < width; w += (((width - w) > 32) ? (min(32, (width - w) / 32) * 32) : (width - w))) {
-			clQueue.enqueueNDRangeKernel(linMedKernel, cl::NDRange(0, w / 32), cl::NDRange(min(32, width - w), ((width - w) > 32) ? min(32, (width - w) / 32) : 1), cl::NullRange);
 		}
 
 		clQueue.enqueueBarrierWithWaitList();
@@ -801,14 +773,14 @@ void testVoxelBufferData() {
 	}
 
 	for (uint32_t i = 0; i < 4; ++i) {
-		tmp = vis(vxs[i * 2], new mLit(col(1.0f, 1.0f, 1.0f), (i == 0) ? 100.0f : 1.0f)).toBinary();
+		tmp = vis(vxs[i * 2], new mLit(col(1.0f, 1.0f, 1.0f), (i == 0) ? 100.0f : 0.5f)).toBinary();
 
 		o[0] = 0x80000000 | (i << 29) | ((i != 0) ? (((par & (0xF0000000 >> (i * 8))) >> (28 - i * 8)) << 24) : (15 << 24));
 		o[1] = 0x00000000;
 		o[2] = tmp >> 32;
 		o[3] = tmp & 0xFFFFFFFF;
 
-		tmp = vis(vxs[i * 2 + 1], new mLit(col(1.0f, 1.0f, 1.0f), 1.0f)).toBinary();
+		tmp = vis(vxs[i * 2 + 1], new mLit(col(1.0f, 1.0f, 1.0f), 0.5f)).toBinary();
 
 		o[4] = 0x90000000 | (i << 29) | (((par & (0x0F000000 >> (i * 8))) >> (24 - i * 8)) << 24);
 		o[5] = 0x00000000;

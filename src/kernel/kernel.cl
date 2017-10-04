@@ -564,100 +564,62 @@ __kernel void upSampKernel(__read_only image2d_t inp, __write_only image2d_t oup
 	write_imagef(oup, arO + coors, read_imagef(inp, nearSampler, arO + coors) + read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2))) * 0.5625f + (read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2 + (int2)(-((coors.x & 0x01) ^ 0x01) | 0x01, 0)))) + read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2 + (int2)(0, -((coors.y & 0x01) ^ 0x01) | 0x01))))) * 0.1875f + read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2 + (int2)(-((coors.x & 0x01) ^ 0x01) | 0x01, -((coors.y & 0x01) ^ 0x01) | 0x01)))) * 0.0625f);
 }
 
-__kernel void bloomKernel(__read_only image2d_t hdr, __read_only image2d_t blo, __write_only image2d_t hdb, __write_only image2d_t pixExp) {
+__kernel void bloomKernel(__read_only image2d_t hdr, __read_only image2d_t blo, __write_only image2d_t hdb) {
 	const int2 coors = { get_global_id(0), get_global_id(1) };
 
 	float4 pixel = (read_imagef(hdr, nearSampler, coors) * 0.9f + read_imagef(blo, nearSampler, coors) * 0.016666667f);
 	pixel.w = clamp(getBrightness(pixel.xyz), 0.00048828125f, 4194303.75f);
 
 	write_imagef(hdb, coors, pixel);
-
-	float2 eSum = float32Tofloat16(pixel.w);
-
-	write_imagef(pixExp, coors, (float4)(pixel.w, pixel.w, eSum.x, eSum.y));
 }
 
 /*
 
-TO DO: deal with edge overamplification because of median square
+TO DO: optimize texture reads per pixel
 
 */
 
-__kernel void linMedKernel(__read_only image2d_t inp, __write_only image2d_t oup, int2 stp, uint16_t siz) {
-	const int2 gid = { get_global_id(1), get_global_id(0) };
-
-	int2 coors = (((int2)(1, 1)) - stp) * (uint16_t)((gid.x << 5) + gid.y);
-	const int2 end = coors + stp * (siz - 1);
-	const int2 ltp = stp * 3;
-
-	float4 buf[7];
-
-	buf[0] = buf[1] = buf[2] = buf[3] = read_imagef(inp, nearSampler, min(end, coors));
-	buf[4] = read_imagef(inp, nearSampler, min(end, coors + stp * 1));
-	buf[5] = read_imagef(inp, nearSampler, min(end, coors + stp * 2));
-	buf[6] = (float4)(0.0f, 0.0f, 0.0f, 0.0f);
-
-	buf[0].z = buf[1].z = buf[2].z = buf[3].z = float16Tofloat32(buf[0].zw);
-	buf[4].z = float16Tofloat32(buf[4].zw);
-	buf[5].z = float16Tofloat32(buf[5].zw);
-
-	float gMin, gMax;
-	uint32_t lMsk;
-	float gSum = 4.0f * buf[0].z + buf[4].z + buf[5].z;
-
-	float2 eSum;
-
-	uint8_t cen = 3;
-
-	for (uint16_t i = 0; i < siz; ++i) {
-		gSum -= buf[(cen + 3) - (0x07 & -(cen > 3))].z;
-
-		buf[(cen + 3) - (0x07 & -(cen > 3))] = read_imagef(inp, nearSampler, min(end, coors + ltp));
-		buf[(cen + 3) - (0x07 & -(cen > 3))].z = float16Tofloat32(buf[(cen + 3) - (0x07 & -(cen > 3))].zw);
-
-		gSum += buf[(cen + 3) - (0x07 & -(cen > 3))].z;
-
-		gMin = buf[0].x;
-		gMax = buf[0].y;
-
-		lMsk = -(buf[1].x < buf[2].x);
-		gMin = fmin(gMin, as_float((as_uint(buf[1].x) & lMsk) | (as_uint(buf[2].x) & ~lMsk)));
-		lMsk = -(buf[1].y > buf[2].y);
-		gMax = fmax(gMax, as_float((as_uint(buf[1].y) & lMsk) | (as_uint(buf[2].y) & ~lMsk)));
-
-		lMsk = -(buf[3].x < buf[4].x);
-		gMin = fmin(gMin, as_float((as_uint(buf[3].x) & lMsk) | (as_uint(buf[4].x) & ~lMsk)));
-		lMsk = -(buf[3].y > buf[4].y);
-		gMax = fmax(gMax, as_float((as_uint(buf[3].y) & lMsk) | (as_uint(buf[4].y) & ~lMsk)));
-
-		lMsk = -(buf[5].x < buf[6].x);
-		gMin = fmin(gMin, as_float((as_uint(buf[5].x) & lMsk) | (as_uint(buf[6].x) & ~lMsk)));
-		lMsk = -(buf[5].y > buf[6].y);
-		gMax = fmax(gMax, as_float((as_uint(buf[5].y) & lMsk) | (as_uint(buf[6].y) & ~lMsk)));
-
-		eSum = float32Tofloat16(gSum);
-
-		write_imagef(oup, coors, (float4)(gMin, gMax, eSum.x, eSum.y));
-
-		coors += stp;
-
-		cen = ((cen + 1) & -(cen != 6));
-	}
-}
-
-__kernel void hdrExpKernel(__read_only image2d_t hdr, __read_only image2d_t pixExp, __write_only image2d_t ldr) {
+__kernel void hdrExpKernel(__read_only image2d_t hdr, __write_only image2d_t ldr) {
 	const int2 coors = { get_global_id(0), get_global_id(1) };
 
 	float4 pixel = read_imagef(hdr, nearSampler, coors);
 
-	float4 median = read_imagef(pixExp, nearSampler, coors);
-	median.z = float16Tofloat32(median.zw);
-	median.w = 49.0f;
+	uint32_t median[5] = { as_uint(read_imagef(hdr, nearSampler, coors - (int2)(1, 0)).w),
+		as_uint(read_imagef(hdr, nearSampler, coors + (int2)(1, 0)).w),
+		as_uint(pixel.w),
+		as_uint(read_imagef(hdr, nearSampler, coors - (int2)(0, 1)).w),
+		as_uint(read_imagef(hdr, nearSampler, coors + (int2)(0, 1)).w)
+	};
 
-	float adjLum = (4.0f * median.z - (median.w + 1.0f) * (median.x + median.y)) / (2.0f * (median.w - 1.0f));
-	adjLum = adjLum / (1.0f + adjLum);
+	uint32_t msk = (as_float(median[0]) < as_float(median[1]));
 
-	pixel.xyz *= (adjLum / pixel.w);
+	median[0] ^= median[1];
+	median[1] ^= (median[0] & -msk);
+	median[0] ^= median[1];
+
+	msk = (as_float(median[2]) < as_float(median[3]));
+
+	median[2] ^= median[3];
+	median[3] ^= (median[2] & -msk);
+	median[2] ^= median[3];
+
+	uint8_t idx = (as_float(median[0]) < as_float(median[2])) << 1;
+
+	median[idx] = median[4];
+
+	msk = (as_float(median[idx]) < as_float(median[idx | 0x01]));
+
+	median[idx] ^= median[idx | 0x01];
+	median[idx | 0x01] ^= (median[idx] & -msk);
+	median[idx] ^= median[idx | 0x01];
+
+	idx = (as_float(median[0]) < as_float(median[2])) << 1;
+
+	median[idx] = median[idx | 0x01];
+
+	idx = (as_float(median[0]) < as_float(median[2])) << 1;
+
+	pixel.xyz *= (as_float(median[idx]) / ((1.0f + as_float(median[idx])) * pixel.w));
 
 	pixel = (float4)(native_powr(clamp(pixel.x, 0.0f, 1.0f), GammaInv), native_powr(clamp(pixel.y, 0.0f, 1.0f), GammaInv), native_powr(clamp(pixel.z, 0.0f, 1.0f), GammaInv), 1.0f);
 
