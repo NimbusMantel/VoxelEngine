@@ -79,6 +79,9 @@ Voxel visuals on the GPU
   - seperated calculation of Gaussian blurs using moving weighted averages
   - successive downsampling, blurring and upsampling for bloom
   - weighted average of 90% hdr and 10% bloom
+- HDR per-pixel exposure tonemapping
+  - median luminance of (x-1|y), (x+1|y), (x|y), (x|y-1), (x|y+1) for each pixel
+  - pixel exposure calculated with Reinhard's global operator
 
 CPU to GPU communication
 - 24 bit indices

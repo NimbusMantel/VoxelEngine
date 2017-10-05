@@ -564,32 +564,47 @@ __kernel void upSampKernel(__read_only image2d_t inp, __write_only image2d_t oup
 	write_imagef(oup, arO + coors, read_imagef(inp, nearSampler, arO + coors) + read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2))) * 0.5625f + (read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2 + (int2)(-((coors.x & 0x01) ^ 0x01) | 0x01, 0)))) + read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2 + (int2)(0, -((coors.y & 0x01) ^ 0x01) | 0x01))))) * 0.1875f + read_imagef(inp, nearSampler, max(arI, min(enI, arI + coors / 2 + (int2)(-((coors.x & 0x01) ^ 0x01) | 0x01, -((coors.y & 0x01) ^ 0x01) | 0x01)))) * 0.0625f);
 }
 
-__kernel void bloomKernel(__read_only image2d_t hdr, __read_only image2d_t blo, __write_only image2d_t hdb) {
+__kernel void bloomKernel(__read_only image2d_t hdr, __read_only image2d_t blo, __write_only image2d_t hdb, __write_only image2d_t lum) {
 	const int2 coors = { get_global_id(0), get_global_id(1) };
 
 	float4 pixel = (read_imagef(hdr, nearSampler, coors) * 0.9f + read_imagef(blo, nearSampler, coors) * 0.016666667f);
 	pixel.w = clamp(getBrightness(pixel.xyz), 0.00048828125f, 4194303.75f);
 
 	write_imagef(hdb, coors, pixel);
+
+	write_imagef(lum, coors, (float4)(0.0f, pixel.w, 0.0f, pixel.w));
 }
 
-/*
+__kernel void linLumKernel(__read_only image2d_t inp, __write_only image2d_t oup, int2 stp, uint16_t siz) {
+	const int2 gid = { get_global_id(1), get_global_id(0) };
 
-TO DO: optimize texture reads per pixel
+	int2 coors = (((int2)(1, 1)) - stp) * (uint16_t)((gid.x << 5) + gid.y);
+	const int2 end = coors + stp * (siz - 1);
 
-*/
+	float4 buf[3];
 
-__kernel void hdrExpKernel(__read_only image2d_t hdr, __write_only image2d_t ldr) {
+	buf[0] = buf[1] = read_imagef(inp, nearSampler, min(end, coors));
+
+	uint8_t cen = 1;
+
+	for (uint16_t i = 0; i < siz; ++i) {
+		buf[(cen + 1) & -(cen != 2)] = read_imagef(inp, nearSampler, min(end, coors + stp));
+
+		write_imagef(oup, coors, (float4)(buf[((cen - 1) & 0x03) - (cen == 0)].w, buf[(cen + 1) & -(cen != 2)].w, buf[cen].xy));
+
+		coors += stp;
+
+		cen = ((cen + 1) & -(cen != 2));
+	}
+}
+
+__kernel void hdrExpKernel(__read_only image2d_t hdr, __read_only image2d_t lum, __write_only image2d_t ldr) {
 	const int2 coors = { get_global_id(0), get_global_id(1) };
 
 	float4 pixel = read_imagef(hdr, nearSampler, coors);
+	float4 lvals = read_imagef(lum, nearSampler, coors);
 
-	uint32_t median[5] = { as_uint(read_imagef(hdr, nearSampler, coors - (int2)(1, 0)).w),
-		as_uint(read_imagef(hdr, nearSampler, coors + (int2)(1, 0)).w),
-		as_uint(pixel.w),
-		as_uint(read_imagef(hdr, nearSampler, coors - (int2)(0, 1)).w),
-		as_uint(read_imagef(hdr, nearSampler, coors + (int2)(0, 1)).w)
-	};
+	uint32_t median[5] = { as_uint(lvals.z), as_uint(lvals.w), as_uint(pixel.w), as_uint(lvals.x), as_uint(lvals.y) };
 
 	uint32_t msk = (as_float(median[0]) < as_float(median[1]));
 

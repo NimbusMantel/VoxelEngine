@@ -225,10 +225,16 @@ int main(int argc, char* argv[]) {
 	bloomKernel.setArg(0, hdrImage);
 	bloomKernel.setArg(1, blmImage);
 	bloomKernel.setArg(2, hdrImage);
+	bloomKernel.setArg(3, blmImage);
+
+	cl::Kernel linLumKernel = cl::Kernel(clProgram, "linLumKernel");
+	linLumKernel.setArg(0, blmImage);
+	linLumKernel.setArg(1, blmImage);
 
 	cl::Kernel hdrExpKernel = cl::Kernel(clProgram, "hdrExpKernel");
 	hdrExpKernel.setArg(0, hdrImage);
-	hdrExpKernel.setArg(1, ldrImage);
+	hdrExpKernel.setArg(1, blmImage);
+	hdrExpKernel.setArg(2, ldrImage);
 
 	cl::Kernel gcReqKernel = cl::Kernel(clProgram, "gcReqKernel");
 	gcReqKernel.setArg(0, vxBuffer);
@@ -456,6 +462,28 @@ int main(int argc, char* argv[]) {
 			for (uint16_t w = 0; w < width; w += min(32, width - w)) {
 				clQueue.enqueueNDRangeKernel(bloomKernel, cl::NDRange(w, h), cl::NDRange(min(32, width - w), min(32, height - h)), cl::NullRange);
 			}
+		}
+
+		clQueue.enqueueBarrierWithWaitList();
+
+		step = { 1, 0 };
+
+		linLumKernel.setArg(2, step);
+		linLumKernel.setArg(3, width);
+
+		for (uint16_t h = 0; h < height; h += (((height - h) > 32) ? (min(32, (height - h) / 32) * 32) : (height - h))) {
+			clQueue.enqueueNDRangeKernel(linLumKernel, cl::NDRange(0, h / 32), cl::NDRange(min(32, height - h), ((height - h) > 32) ? min(32, (height - h) / 32) : 1), cl::NullRange);
+		}
+
+		clQueue.enqueueBarrierWithWaitList();
+
+		step = { 0, 1 };
+
+		linLumKernel.setArg(2, step);
+		linLumKernel.setArg(3, height);
+
+		for (uint16_t w = 0; w < width; w += (((width - w) > 32) ? (min(32, (width - w) / 32) * 32) : (width - w))) {
+			clQueue.enqueueNDRangeKernel(linLumKernel, cl::NDRange(0, w / 32), cl::NDRange(min(32, width - w), ((width - w) > 32) ? min(32, (width - w) / 32) : 1), cl::NullRange);
 		}
 
 		clQueue.enqueueBarrierWithWaitList();
