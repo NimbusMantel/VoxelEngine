@@ -57,8 +57,8 @@ namespace camera {
 	}
 
 	void rot(float dx, float dy) {
-		dx *= -M_PI;
-		dy *= -M_PI;
+		dx *= -(float)PI;
+		dy *= -(float)PI;
 
 		float right[3] = { rotation[0], rotation[3], rotation[6] };
 		float up[3] = { rotation[1], rotation[4], rotation[7] };

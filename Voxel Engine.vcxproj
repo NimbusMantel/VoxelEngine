@@ -194,6 +194,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\host\camera.hpp" />
+    <ClInclude Include="src\host\macros.hpp" />
     <ClInclude Include="src\kernel\instruct.hpp" />
     <ClInclude Include="src\voxel\material.hpp" />
     <ClInclude Include="src\voxel\voxel.hpp" />

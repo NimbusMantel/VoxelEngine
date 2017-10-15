@@ -9,7 +9,7 @@ Colour model according to "A physically Based Colour Model"
                        by Robert J Oddy and Philip J Willis
 */
 
-/*KERNEL_BETSTOPS_BEG*/const uint8_t bets[9] = { 8, 16, 48, 96, 160, 208, 240, 248, 256 };/*KERNEL_BETSTOPS_END*/
+/*KERNEL_BETSTOPS_BEG*/const uint8_t bets[9] = { 8, 16, 48, 96, 160, 208, 240, 248, 0 };/*KERNEL_BETSTOPS_END*/
 
 struct col {
 	col(float R, float G, float B) : r(R), g(G), b(B) {}
@@ -82,7 +82,7 @@ struct mat {
 		med.g = min(max(med.g, 0.0f), 1.0f);
 		med.b = min(max(med.b, 0.0f), 1.0f);
 
-		uint8_t beta = roundf(bet * 255.0f);
+		uint8_t beta = (uint8_t)roundf(bet * 255.0f);
 
 		uint8_t parBits = 0x00;
 

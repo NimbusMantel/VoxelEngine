@@ -2,8 +2,9 @@
 
 #include <cstring>
 
-#define _USE_MATH_DEFINES
 #include <cmath>
+
+#include "host/macros.hpp"
 
 namespace camera {
 	enum Mode {

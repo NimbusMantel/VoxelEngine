@@ -11,6 +11,7 @@
 
 #include <Windows.h>
 
+#include "host/macros.hpp"
 #include "host/camera.hpp"
 #include "voxel/voxel.hpp"
 #include "voxel/material.hpp"
@@ -151,7 +152,7 @@ int main(int argc, char* argv[]) {
 	cl::Buffer vxBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, 0x80 << BUFFER_DEPTH);
 
 	cl::Image2D hdrImage = cl::Image2D(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, { CL_RGBA, CL_HALF_FLOAT }, width, height);
-	cl::Image2D blmImage = cl::Image2D(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, { CL_RGBA, CL_HALF_FLOAT }, width, height * 1.5f);
+	cl::Image2D blmImage = cl::Image2D(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, { CL_RGBA, CL_HALF_FLOAT }, width, height * 3 / 2);
 
 	cl::Buffer cgBuffer = cl::Buffer(clContext, (cl_mem_flags)(CL_MEM_READ_WRITE), 0x01 << 24);
 
@@ -187,7 +188,7 @@ int main(int argc, char* argv[]) {
 
 	char* clBuild = new char[30]();
 
-	sprintf(clBuild, "-cl-std=CL1.2 -D OpenCLDebug=%u", (bool)OpenCLDebug);
+	sprintf_s(clBuild, 31, "-cl-std=CL1.2 -D OpenCLDebug=%u", (bool)OpenCLDebug);
 	
 	clProgram.build(clBuild);
 
@@ -272,7 +273,7 @@ int main(int argc, char* argv[]) {
 	// Init ray direction vectors
 
 	{
-		float fovRad = (M_PI * fov) / 360.0f;
+		float fovRad = (float)(PI * fov) / 360.0f;
 		float hwRat = height / (float)width;
 		float halfW = tanf(fovRad);
 		float halfH = hwRat * halfW;
@@ -541,7 +542,7 @@ int main(int argc, char* argv[]) {
 
 		currentFrame = SDL_GetTicks();
 		fps = (1000 / ((currentFrame - previousFrame) | (currentFrame == previousFrame)));
-		sprintf(title, titat, fps);
+		sprintf_s(title, 32, titat, fps);
 		SDL_SetWindowTitle(window, title);
 		previousFrame = currentFrame;
 
@@ -687,16 +688,16 @@ void testVoxelBinaryTree() {
 	manBuf::dis();
 
 	std::cout << std::endl << std::endl << "Set All" << std::endl << std::endl;
-	manBuf::set(0, 0x01 << BUFFER_DEPTH, true);
+	manBuf::set(0, true, 0x01 << BUFFER_DEPTH);
 	manBuf::dis();
 
 	std::cout << std::endl << std::endl << "Set Gap" << std::endl << std::endl;
-	manBuf::set(2, (0x01 << BUFFER_DEPTH) - 4, false);
+	manBuf::set(2, false, (0x01 << BUFFER_DEPTH) - 4);
 	manBuf::dis();
 
 	std::cout << std::endl << std::endl << "Set Block" << std::endl << std::endl;
-	manBuf::set(11, 18, true);
-	manBuf::set(39, 7, true);
+	manBuf::set(11, true, 18);
+	manBuf::set(39, true, 7);
 	manBuf::dis();
 
 	std::cout << std::endl << std::endl << "Allocation" << std::endl << std::endl;
@@ -709,7 +710,7 @@ void testVoxelBinaryTree() {
 
 	std::cout << std::endl;
 	for (std::vector<std::pair<uint32_t, uint32_t>>::iterator it = rs.begin(); it != rs.end(); ++it) {
-		manBuf::set(it->first, it->second, true);
+		manBuf::set(it->first, true, it->second);
 	}
 	manBuf::dis();
 

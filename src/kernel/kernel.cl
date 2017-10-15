@@ -54,6 +54,9 @@ enum PLACEHOLDER {
 // voxel depth constant
 
 #define VoxelDepth 23
+#define RayDepth 4
+
+#define VoxelToUnit 4096.9f
 
 #define GammaInv 0.454545f
 
@@ -68,13 +71,10 @@ void cgExpand(__global uint32_t* vxBuffer, volatile __global uint32_t* mnTicket,
 void cgMaterial(__global uint32_t* vxBuffer, uint32_t index, uint32_t material);
 void cgLight(__global uint32_t* vxBuffer, uint32_t index, uint32_t light);
 
-uint32_t getParent(__global uint32_t* vxBuffer, uint32_t index);
-uint32_t getTimestamp(__global uint32_t* vxBuffer, uint32_t index);
+uint32_t getParent(volatile __global uint32_t* vxBuffer, uint32_t index);
+uint32_t getTimestamp(volatile __global uint32_t* vxBuffer, uint32_t index);
 
 float getBrightness(const float3 rgb);
-
-float2 float32Tofloat16(const float val);
-float float16Tofloat32(const float2 val);
 
 // kernels
 
@@ -167,11 +167,29 @@ Colour model according to "A physically Based Colour Model"
 
 */
 
+struct VoxStack {
+	uint32_t idx;
+	float    tax;
+	uint32_t das;
+	float    tin;
+};
+
+struct RayInit {
+	float3 pos;
+	float3 dir;
+	float3 fac;
+	float  dst;
+};
+
 __kernel void hdrRenKernel(volatile __global __read_write uint32_t* vxBuffer, volatile __global __read_write uint32_t* mnTicket, volatile __global __read_write uint32_t* mnBuffer, __global __read_write uint8_t* gcBuffer, __write_only image2d_t hdr, __global __read_only float* rvLookup, __constant __read_only float* rotMat, float3 norPos, float rayCoef, uint32_t timStamp) {
 	const int2 size = { get_image_width(hdr), get_image_height(hdr) };
 	const int2 coors = { get_global_id(0), get_global_id(1) };
 
 	/*KERNEL_BETSTOPS_BEG*/const uint8_t bets[9];/*KERNEL_BETSTOPS_END*/
+
+	const float epsilon = as_float((127 - VoxelDepth) << 23);
+
+	struct VoxStack stack[VoxelDepth];
 
 	float3 dir = vload3(coors.y * size.x + coors.x, rvLookup);
 
@@ -179,339 +197,351 @@ __kernel void hdrRenKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 		rotMat[3] * dir.x + rotMat[4] * dir.y + rotMat[5] * dir.z,
 		rotMat[6] * dir.x + rotMat[7] * dir.y + rotMat[8] * dir.z);
 
-	const float epsilon = as_float((127 - VoxelDepth) << 23);
+	struct RayInit queue[RayDepth] = { { norPos, dir, { 1.0f, 1.0f, 1.0f }, 0.0f } };
 
-	uint3 stack[VoxelDepth];
+	uint8_t qIdx = 0x00;
+	uint8_t qEnd = 0x01;
 
-	if (fabs(dir.x) < epsilon) dir.x = as_float(as_uint(epsilon) ^ (as_uint(dir.x) & 0x80000000));
-	if (fabs(dir.y) < epsilon) dir.y = as_float(as_uint(epsilon) ^ (as_uint(dir.y) & 0x80000000));
-	if (fabs(dir.z) < epsilon) dir.z = as_float(as_uint(epsilon) ^ (as_uint(dir.z) & 0x80000000));
+	uint8_t octant_mask;
 
-	uint8_t octant_mask = 0x00;
+	uint8_t scale;
+	float scaExp2;
 
-	if (dir.x > 0.0f) { octant_mask ^= 1; norPos.x = 3.0f - norPos.x; }
-	if (dir.y > 0.0f) { octant_mask ^= 2; norPos.y = 3.0f - norPos.y; }
-	if (dir.z > 0.0f) { octant_mask ^= 4; norPos.z = 3.0f - norPos.z; }
+	float3 pos, t_coef, t_bias, t_corner;
+	float t_min, t_max, h, tc_max;
 
-	float tx_coef = 1.0f / -fabs(dir.x);
-	float ty_coef = 1.0f / -fabs(dir.y);
-	float tz_coef = 1.0f / -fabs(dir.z);
+	volatile __global uint32_t* parent;
+	uint4 voxel;
 
-	float tx_bias = tx_coef * norPos.x;
-	float ty_bias = ty_coef * norPos.y;
-	float tz_bias = tz_coef * norPos.z;
-
-	float t_min = fmax(fmax(2.0f * tx_coef - tx_bias, 2.0f * ty_coef - ty_bias), 2.0f * tz_coef - tz_bias);
-	float t_max = fmin(fmin(tx_coef - tx_bias, ty_coef - ty_bias), tz_coef - tz_bias);
-	
-	float h = t_max;
-
-	t_min = fmax(t_min, 0.0f);
-	t_max = fmin(t_max, 1.0f);
-
-	volatile __global uint32_t* parent = vxBuffer;
-	uint4 voxel = { 0x00, 0x00, 0x00, 0x00 };
-
-	uint8_t idx = 0x00;
-
-	float3 pos = { 1.0f, 1.0f, 1.0f };
-
-	uint8_t scale = VoxelDepth - 1;
-	float scaExp2 = 0.5f;
-
-	if ((norPos.x - 1.5f) > t_min) { idx ^= 1; pos.x = 1.5f; }
-	if ((norPos.y - 1.5f) > t_min) { idx ^= 2; pos.y = 1.5f; }
-	if ((norPos.z - 1.5f) > t_min) { idx ^= 4; pos.z = 1.5f; }
-	
-	float tx_corner, ty_corner, tz_corner, tc_max;
-	uint8_t cidx;
+	uint8_t idx, cidx, step_mask;
 
 	timStamp = (timStamp & 0x0000003F) << 10;
 
-	uint32_t oldTimeStamp;
+	uint32_t oldTimeStamp, ticketIndex;
 
-	uint32_t ticketIndex;
-
-	bool shouldRender = false;
-	bool hasRequested = false;
-	uint8_t step_mask = 0x00;
+	bool shouldRender, hasRequested;
 
 	uint32_t difBits;
+	uint3 sh;
 
-	uint32_t shx, shy, shz;
-
-	bool curr_active, prev_active = false;
+	bool curr_active, prev_active;
 
 	uint8_t parBits;
 
-	uint8_t curr_lightDir = 0x00, prev_lightDir = 0x00;
-	uint8_t curr_lightIdx = 0x00, prev_lightIdx = 0x00;
-	
+	uint8_t curr_lightDir, prev_lightDir, curr_lightIdx, prev_lightIdx, curr_side;
+
 	float4 cach_lights[4];
 	float3 opps_lights[2];
 	float3 savg_light;
 
-	float3 fac = { 1.0f, 1.0f, 1.0f };
+	float3 fac;
 
 	float8 material;
 
-	float curr_depth = 0.0f;
-	uint8_t curr_side = 0x00;
+	float curr_dist, curr_fallOff, curr_depth;
 
 	float3 pixel = { 0.0f, 0.0f, 0.0f };
 
-	while (scale < VoxelDepth) {
-		if ((voxel.x & 0x80000000) == 0) {
-			voxel = *((__global uint4*)parent);
-		}
+	while (qIdx != qEnd) {
+		norPos = queue[qIdx].pos;
+		dir = queue[qIdx].dir;
+		fac = queue[qIdx].fac;
 
-		tx_corner = pos.x * tx_coef - tx_bias;
-		ty_corner = pos.y * ty_coef - ty_bias;
-		tz_corner = pos.z * tz_coef - tz_bias;
+		if (fabs(dir.x) < epsilon) dir.x = as_float(as_uint(epsilon) ^ (as_uint(dir.x) & 0x80000000));
+		if (fabs(dir.y) < epsilon) dir.y = as_float(as_uint(epsilon) ^ (as_uint(dir.y) & 0x80000000));
+		if (fabs(dir.z) < epsilon) dir.z = as_float(as_uint(epsilon) ^ (as_uint(dir.z) & 0x80000000));
 
-		tc_max = fmin(fmin(tx_corner, ty_corner), tz_corner);
+		octant_mask = 0x00;
 
-		cidx = idx ^ octant_mask;
+		if (dir.x > 0.0f) { octant_mask ^= 1; norPos.x = 3.0f - norPos.x; }
+		if (dir.y > 0.0f) { octant_mask ^= 2; norPos.y = 3.0f - norPos.y; }
+		if (dir.z > 0.0f) { octant_mask ^= 4; norPos.z = 3.0f - norPos.z; }
 
-		shouldRender = (!(voxel.x & 0x00FF0000) || (tc_max > (scaExp2 * rayCoef)));
-		
-		if (!shouldRender && ((voxel.x & (0x00800000 >> cidx)) != 0x00) && (t_min <= t_max)) {
-			if (((voxel.x & 0x0000FC00) != timStamp) && (!hasRequested || (voxel.y != 0x00))) {
-				oldTimeStamp = atomic_cmpxchg(parent, voxel.x, (voxel.x & 0xFFFF03FF) | timStamp);
+		t_coef = (float3)(1.0f / -fabs(dir.x), 1.0f / -fabs(dir.y), 1.0f / -fabs(dir.z));
+		t_bias = t_coef * norPos;
 
-				if (oldTimeStamp == voxel.x) {
-					ticketIndex = atomic_inc(mnTicket);
+		t_min = fmax(fmax(2.0f * t_coef.x - t_bias.x, 2.0f * t_coef.y - t_bias.y), 2.0f * t_coef.z - t_bias.z);
+		t_max = fmin(fmin(t_coef.x - t_bias.x, t_coef.y - t_bias.y), t_coef.z - t_bias.z);
 
-					while (mnTicket[0x01] != ticketIndex) {
-						continue;
-					}
+		h = t_max;
 
-					if (voxel.y == 0x00) {
-						ticketIndex = ((gcBuffer[15] << 16) | (gcBuffer[16] << 8) | gcBuffer[17]);
+		t_min = fmax(t_min, 0.0f);
+		t_max = fmin(t_max, 1.0f);
 
-						gcBuffer[21 + (ticketIndex << 2) + 0] = (((parent - vxBuffer) >> 2) & 0xFF000000) >> 24;
-						gcBuffer[21 + (ticketIndex << 2) + 1] = (((parent - vxBuffer) >> 2) & 0x00FF0000) >> 16;
-						gcBuffer[21 + (ticketIndex << 2) + 2] = (((parent - vxBuffer) >> 2) & 0x0000FF00) >> 8;
-						gcBuffer[21 + (ticketIndex << 2) + 3] = (((parent - vxBuffer) >> 2) & 0x000000FF);
+		parent = vxBuffer;
+		voxel = (uint4)(0x00, 0x00, 0x00, 0x00);
 
-						ticketIndex += 1;
+		idx = 0x00;
 
-						gcBuffer[15] = (ticketIndex & 0x00FF0000) >> 16;
-						gcBuffer[16] = (ticketIndex & 0x0000FF00) >> 8;
-						gcBuffer[17] = ticketIndex & 0x000000FF;
+		pos = (float3)(1.0f, 1.0f, 1.0f);
+
+		scale = VoxelDepth - 1;
+		scaExp2 = 0.5f;
+
+		if ((norPos.x - 1.5f) > t_min) { idx ^= 1; pos.x = 1.5f; }
+		if ((norPos.y - 1.5f) > t_min) { idx ^= 2; pos.y = 1.5f; }
+		if ((norPos.z - 1.5f) > t_min) { idx ^= 4; pos.z = 1.5f; }
+
+		shouldRender = hasRequested = false;
+		step_mask = curr_side = 0x00;
+
+		prev_active = false;
+
+		curr_lightDir = prev_lightDir = curr_lightIdx = prev_lightIdx = 0x00;
+
+		while (scale < VoxelDepth) {
+			if ((voxel.x & 0x80000000) == 0) {
+				voxel = *((__global uint4*)parent);
+			}
+
+			t_corner = pos * t_coef - t_bias;
+
+			tc_max = fmin(fmin(t_corner.x, t_corner.y), t_corner.z);
+
+			cidx = idx ^ octant_mask;
+
+			shouldRender = (!(voxel.x & 0x00FF0000) || (tc_max > (scaExp2 * rayCoef)));
+
+			if (!shouldRender && ((voxel.x & (0x00800000 >> cidx)) != 0x00) && (t_min <= t_max)) {
+				if (((voxel.x & 0x0000FC00) != timStamp) && (!hasRequested || (voxel.y != 0x00))) {
+					oldTimeStamp = atomic_cmpxchg(parent, voxel.x, (voxel.x & 0xFFFF03FF) | timStamp);
+
+					if (oldTimeStamp == voxel.x) {
+						ticketIndex = atomic_inc(mnTicket);
+
+						while (mnTicket[0x01] != ticketIndex) {
+							continue;
+						}
+
+						if (voxel.y == 0x00) {
+							ticketIndex = ((gcBuffer[15] << 16) | (gcBuffer[16] << 8) | gcBuffer[17]);
+
+							gcBuffer[21 + (ticketIndex << 2) + 0] = (((parent - vxBuffer) >> 2) & 0xFF000000) >> 24;
+							gcBuffer[21 + (ticketIndex << 2) + 1] = (((parent - vxBuffer) >> 2) & 0x00FF0000) >> 16;
+							gcBuffer[21 + (ticketIndex << 2) + 2] = (((parent - vxBuffer) >> 2) & 0x0000FF00) >> 8;
+							gcBuffer[21 + (ticketIndex << 2) + 3] = (((parent - vxBuffer) >> 2) & 0x000000FF);
+
+							ticketIndex += 1;
+
+							gcBuffer[15] = (ticketIndex & 0x00FF0000) >> 16;
+							gcBuffer[16] = (ticketIndex & 0x0000FF00) >> 8;
+							gcBuffer[17] = ticketIndex & 0x000000FF;
 
 #if OpenCLDebug
-						printf("gcRequest(parent: %u)\n\n", (parent - vxBuffer) >> 2);
+							printf("gcRequest(parent: %u)\n\n", (parent - vxBuffer) >> 2);
 #endif
-					}
-					else {
-						ticketIndex = (voxel.y >> 3);
-						
-						mnBuffer[(mnBuffer[ticketIndex << 1] << 1) | 0x01] = mnBuffer[(ticketIndex << 1) | 0x01];
-						mnBuffer[mnBuffer[(ticketIndex << 1) | 0x01] << 1] = mnBuffer[ticketIndex << 1];
+						}
+						else {
+							ticketIndex = (voxel.y >> 3);
 
-						mnBuffer[(ticketIndex << 1) | 0x01] = 0x00;
-						mnBuffer[ticketIndex << 1] = mnBuffer[0x00];
-						
-						mnBuffer[(mnBuffer[0x00] << 1) | 0x01] = ticketIndex;
-						mnBuffer[0x00] = ticketIndex;
+							mnBuffer[(mnBuffer[ticketIndex << 1] << 1) | 0x01] = mnBuffer[(ticketIndex << 1) | 0x01];
+							mnBuffer[mnBuffer[(ticketIndex << 1) | 0x01] << 1] = mnBuffer[ticketIndex << 1];
+
+							mnBuffer[(ticketIndex << 1) | 0x01] = 0x00;
+							mnBuffer[ticketIndex << 1] = mnBuffer[0x00];
+
+							mnBuffer[(mnBuffer[0x00] << 1) | 0x01] = ticketIndex;
+							mnBuffer[0x00] = ticketIndex;
 
 #if OpenCLDebug
-						printf("gcValidate(parent: %u)\n\n", (parent - vxBuffer) >> 2);
+							printf("gcValidate(parent: %u)\n\n", (parent - vxBuffer) >> 2);
 #endif
+						}
+
+						mnTicket[0x01] += 1;
 					}
-
-					mnTicket[0x01] += 1;
-				}
-			}
-
-			if (voxel.y == 0x00) {
-				shouldRender = true;
-
-				voxel.x &= 0xFF00FFFF;
-			}
-			else {
-				if (tc_max < h) {
-					stack[scale].xy = (uint2)((parent - vxBuffer) >> 2, as_uint(t_max));
 				}
 
-				stack[scale].z = ((as_uint((tc_max - t_min) / scaExp2) & 0xFFFFFFF8) | (step_mask & 0x07));
+				if (voxel.y == 0x00) {
+					shouldRender = true;
 
-				h = tc_max;
-
-				parent = vxBuffer + ((voxel.y + cidx) << 2);
-
-				idx = 0x00;
-				scale--;
-				scaExp2 *= 0.5f;
-
-				if ((scaExp2 * tx_coef + tx_corner) > t_min) { idx ^= 1; pos.x += scaExp2; }
-				if ((scaExp2 * ty_coef + ty_corner) > t_min) { idx ^= 2; pos.y += scaExp2; }
-				if ((scaExp2 * tz_coef + tz_corner) > t_min) { idx ^= 4; pos.z += scaExp2; }
-
-				t_max = fmin(t_max, tc_max);
-				voxel.x = 0x00;
-
-				continue;
-			}
-		}
-
-		step_mask = 0x00;
-
-		if (tx_corner <= tc_max) { step_mask ^= 1; pos.x -= scaExp2; }
-		if (ty_corner <= tc_max) { step_mask ^= 2; pos.y -= scaExp2; }
-		if (tz_corner <= tc_max) { step_mask ^= 4; pos.z -= scaExp2; }
-
-		t_min = tc_max;
-		idx ^= step_mask;
-
-		if ((idx & step_mask) != 0x00) {
-			if (shouldRender) {
-				curr_active = (voxel.x & 0x80000000);
-
-				if (voxel.w & 0x80000000) {
-					curr_lightDir = (voxel.w & 0x70000000) >> 28;
-
-					cach_lights[curr_lightIdx] = (float4)(((voxel.w & 0x0E000000) >> 25) / 7.0f, ((voxel.w & 0x01C00000) >> 22) / 7.0f, ((voxel.w & 0x00380000) >> 19) / 7.0f,
-						as_float((0x3b000000 - 0x01800000 + ((voxel.w & 0x0007C000) << 9)) & -((voxel.w & 0x0007C000) != 0x00))
-						);
-					cach_lights[curr_lightIdx | 0x01] = (float4)(((voxel.w & 0x00003800) >> 11) / 7.0f, ((voxel.w & 0x00000700) >> 8) / 7.0f, ((voxel.w & 0x000000E0) >> 5) / 7.0f,
-						as_float((0x3b000000 - 0x01800000 + ((voxel.w & 0x0000001F) << 23)) & -((voxel.w & 0x0000001F) != 0x00))
-						);
+					voxel.x &= 0xFF00FFFF;
 				}
 				else {
-					curr_lightDir = 0x00;
+					if (tc_max < h) {
+						stack[scale].idx = (parent - vxBuffer) >> 2;
+						stack[scale].tax = t_max;
+					}
 
-					cach_lights[curr_lightIdx] = (float4)(((voxel.w & 0x7E000000) >> 25) / 63.0f, ((voxel.w & 0x01F80000) >> 19) / 63.0f, ((voxel.w & 0x0007E000) >> 13) / 63.0f,
-						as_float((0x38000000 + 0x01800000 + ((voxel.w & 0x00001FFF) << 15)) & -((voxel.w & 0x00001F00) != 0x00))
-						);
+					stack[scale].das = ((as_uint((tc_max - t_min) / scaExp2) & 0xFFFFFFF8) | (step_mask & 0x07));
+					stack[scale].tin = t_min;
 
-					cach_lights[curr_lightIdx | 0x01] = cach_lights[curr_lightIdx];
+					h = tc_max;
+
+					parent = vxBuffer + ((voxel.y + cidx) << 2);
+
+					idx = 0x00;
+					scale--;
+					scaExp2 *= 0.5f;
+
+					if ((scaExp2 * t_coef.x + t_corner.x) > t_min) { idx ^= 1; pos.x += scaExp2; }
+					if ((scaExp2 * t_coef.y + t_corner.y) > t_min) { idx ^= 2; pos.y += scaExp2; }
+					if ((scaExp2 * t_coef.z + t_corner.z) > t_min) { idx ^= 4; pos.z += scaExp2; }
+
+					t_max = fmin(t_max, tc_max);
+					voxel.x = 0x00;
+
+					continue;
 				}
-
-				if (shouldRender && (prev_active || curr_active)) {
-					material = (float8)(0.0f, 0.0f, 0.0f, (voxel.z & 0x000000FF) / 255.0f, 0.0f, 0.0f, 0.0f, as_float(voxel.z & 0x000000FF));
-
-					parBits = 0x00;
-
-					parBits |= (as_uint(material.s7) >= bets[parBits | 0x04]) << 2;
-					parBits |= (as_uint(material.s7) >= bets[parBits | 0x02]) << 1;
-					parBits |= (as_uint(material.s7) >= bets[parBits | 0x01]);
-					parBits += (as_uint(material.s7) >= bets[parBits]);
-
-					if ((parBits & 0x07) == 0x00) {
-						material.s4 = ((voxel.z & 0xFF000000) >> 24) / 255.0f;
-						material.s5 = ((voxel.z & 0x00FF0000) >> 16) / 255.0f;
-						material.s6 = ((voxel.z & 0x0000FF00) >> 8) / 255.0f;
-
-						material.s0 = as_float(as_uint(material.s4) & -(parBits == 0x08));
-						material.s1 = as_float(as_uint(material.s5) & -(parBits == 0x08));
-						material.s2 = as_float(as_uint(material.s6) & -(parBits == 0x08));
-
-						material.s4 = as_float(as_uint(material.s4) & -(parBits == 0x00));
-						material.s5 = as_float(as_uint(material.s5) & -(parBits == 0x00));
-						material.s6 = as_float(as_uint(material.s6) & -(parBits == 0x00));
-					}
-					else {
-						material.s7 = as_float(((0x01 << parBits) - 1));
-
-						material.s0 = (float)((voxel.z >> (32 - parBits)) & as_uint(material.s7));
-						material.s1 = (float)((voxel.z >> (24 - parBits)) & as_uint(material.s7));
-						material.s2 = (float)((voxel.z >> (16 - parBits)) & as_uint(material.s7));
-
-						material.s7 = (8.0f / (float)parBits);
-
-						material.s0 = native_powr(material.s0, material.s7);
-						material.s1 = native_powr(material.s1, material.s7);
-						material.s2 = native_powr(material.s2, material.s7);
-
-						material.s7 = ((bets[parBits] - 1) / (float)(voxel.z & 0x000000FF)) / 255.0f;
-						material.s012 *= material.s7;
-
-						material.s7 = as_float((0x01 << (8 - parBits)) - 1);
-
-						material.s4 = (float)((voxel.z >> 24) & as_uint(material.s7));
-						material.s5 = (float)((voxel.z >> 16) & as_uint(material.s7));
-						material.s6 = (float)((voxel.z >> 8) & as_uint(material.s7));
-
-						material.s7 = (8.0f / (float)(8 - parBits));
-
-						material.s4 = native_powr(material.s4, material.s7);
-						material.s5 = native_powr(material.s5, material.s7);
-						material.s6 = native_powr(material.s6, material.s7);
-
-						material.s7 = ((bets[8 - parBits] - 1) / (float)(voxel.z & 0x000000FF)) / 255.0f;
-						material.s456 *= material.s7;
-					}
-
-					curr_side = (stack[scale + 1].z & 0x06) + (bool)((octant_mask ^ 0x07) & stack[scale + 1].z);
-
-					opps_lights[0] = cach_lights[curr_lightIdx | (((curr_lightDir & ((curr_side & 0x06) | (curr_side < 0x02))) != 0x00) ^ (curr_side & 0x01))].xyz;
-					opps_lights[1] = cach_lights[prev_lightIdx | (((prev_lightDir & ((curr_side & 0x06) | (curr_side < 0x02))) != 0x00) ^ (curr_side & 0x01) ^ 0x01)].xyz;
-
-					material.s7 = getBrightness(opps_lights[0].xyz);
-					opps_lights[0] *= cach_lights[curr_lightIdx | (((curr_lightDir & ((curr_side & 0x06) | (curr_side < 0x02))) != 0x00) ^ (curr_side & 0x01))].w / as_float(as_uint(material.s7) | (0x3f800000 & -(material.s7 == 0.0f)));
-
-					material.s7 = getBrightness(opps_lights[1].xyz);
-					opps_lights[1] *= cach_lights[prev_lightIdx | (((prev_lightDir & ((curr_side & 0x06) | (curr_side < 0x02))) != 0x00) ^ (curr_side & 0x01) ^ 0x01)].w / as_float(as_uint(material.s7) | (0x3f800000 & -(material.s7 == 0.0f)));
-
-					savg_light = (opps_lights[0] + opps_lights[1]) * 0.5f;
-
-					if (curr_active) {
-						pixel += (fac * material.s012 * savg_light.xyz * material.s3);
-
-						curr_depth = as_float(stack[scale + 1].z & 0xFFFFFFF8);
-
-						fac *= (float3)(native_powr(material.s4 + 0.00390625f, curr_depth), native_powr(material.s5 + 0.00390625f, curr_depth), native_powr(material.s6 + 0.00390625f, curr_depth)) * (1.0f - material.s3);
-
-						if (fac.x <= 0.00390625 && fac.y <= 0.00390625 && fac.z <= 0.00390625) {
-							break;
-						}
-					}
-					else if (prev_active) {
-						pixel += (fac * savg_light.xyz * 0.25f);
-					}
-				}
-
-				prev_active = curr_active;
-
-				prev_lightDir = curr_lightDir;
-
-				prev_lightIdx = curr_lightIdx;
-				curr_lightIdx ^= 0x02;
 			}
 
-			difBits = 0x00;
+			step_mask = 0x00;
 
-			if ((step_mask & 0x01) != 0x00) difBits |= as_uint(pos.x) ^ as_int(pos.x + scaExp2);
-			if ((step_mask & 0x02) != 0x00) difBits |= as_uint(pos.y) ^ as_int(pos.y + scaExp2);
-			if ((step_mask & 0x04) != 0x00) difBits |= as_uint(pos.z) ^ as_int(pos.z + scaExp2);
+			if (t_corner.x <= tc_max) { step_mask ^= 1; pos.x -= scaExp2; }
+			if (t_corner.y <= tc_max) { step_mask ^= 2; pos.y -= scaExp2; }
+			if (t_corner.z <= tc_max) { step_mask ^= 4; pos.z -= scaExp2; }
 
-			scale = (as_uint((float)difBits) >> 23) - 127;
-			scaExp2 = as_float((127 - (VoxelDepth - scale)) << 23);
+			t_min = tc_max;
+			idx ^= step_mask;
 
-			shx = as_uint(pos.x) >> scale;
-			shy = as_uint(pos.y) >> scale;
-			shz = as_uint(pos.z) >> scale;
+			if ((idx & step_mask) != 0x00) {
+				if (shouldRender) {
+					curr_active = (voxel.x & 0x80000000);
 
-			pos.x = as_float(shx << scale);
-			pos.y = as_float(shy << scale);
-			pos.z = as_float(shz << scale);
+					if (voxel.w & 0x80000000) {
+						curr_lightDir = (voxel.w & 0x70000000) >> 28;
 
-			idx = (shx & 0x01) | ((shy & 0x01) << 1) | ((shz & 0x01) << 2);
+						cach_lights[curr_lightIdx] = (float4)(((voxel.w & 0x0E000000) >> 25) / 7.0f, ((voxel.w & 0x01C00000) >> 22) / 7.0f, ((voxel.w & 0x00380000) >> 19) / 7.0f,
+							as_float((0x3b000000 - 0x01800000 + ((voxel.w & 0x0007C000) << 9)) & -((voxel.w & 0x0007C000) != 0x00))
+							);
+						cach_lights[curr_lightIdx | 0x01] = (float4)(((voxel.w & 0x00003800) >> 11) / 7.0f, ((voxel.w & 0x00000700) >> 8) / 7.0f, ((voxel.w & 0x000000E0) >> 5) / 7.0f,
+							as_float((0x3b000000 - 0x01800000 + ((voxel.w & 0x0000001F) << 23)) & -((voxel.w & 0x0000001F) != 0x00))
+							);
+					}
+					else {
+						curr_lightDir = 0x00;
 
-			parent = vxBuffer + (stack[scale].x << 2);
-			t_max = as_float(stack[scale].y);
+						cach_lights[curr_lightIdx] = (float4)(((voxel.w & 0x7E000000) >> 25) / 63.0f, ((voxel.w & 0x01F80000) >> 19) / 63.0f, ((voxel.w & 0x0007E000) >> 13) / 63.0f,
+							as_float((0x38000000 + 0x01800000 + ((voxel.w & 0x00001FFF) << 15)) & -((voxel.w & 0x00001F00) != 0x00))
+							);
 
-			h = 0.0f;
-			voxel.x = 0x00;
+						cach_lights[curr_lightIdx | 0x01] = cach_lights[curr_lightIdx];
+					}
+
+					if (shouldRender && (prev_active || curr_active)) {
+						material = (float8)(0.0f, 0.0f, 0.0f, (voxel.z & 0x000000FF) / 255.0f, 0.0f, 0.0f, 0.0f, as_float(voxel.z & 0x000000FF));
+
+						parBits = 0x00;
+
+						parBits |= (as_uint(material.s7) >= bets[parBits | 0x04]) << 2;
+						parBits |= (as_uint(material.s7) >= bets[parBits | 0x02]) << 1;
+						parBits |= (as_uint(material.s7) >= bets[parBits | 0x01]);
+						parBits += (as_uint(material.s7) >= bets[parBits]);
+
+						if ((parBits & 0x07) == 0x00) {
+							material.s4 = ((voxel.z & 0xFF000000) >> 24) / 255.0f;
+							material.s5 = ((voxel.z & 0x00FF0000) >> 16) / 255.0f;
+							material.s6 = ((voxel.z & 0x0000FF00) >> 8) / 255.0f;
+
+							material.s0 = as_float(as_uint(material.s4) & -(parBits == 0x08));
+							material.s1 = as_float(as_uint(material.s5) & -(parBits == 0x08));
+							material.s2 = as_float(as_uint(material.s6) & -(parBits == 0x08));
+
+							material.s4 = as_float(as_uint(material.s4) & -(parBits == 0x00));
+							material.s5 = as_float(as_uint(material.s5) & -(parBits == 0x00));
+							material.s6 = as_float(as_uint(material.s6) & -(parBits == 0x00));
+						}
+						else {
+							material.s7 = as_float(((0x01 << parBits) - 1));
+
+							material.s0 = (float)((voxel.z >> (32 - parBits)) & as_uint(material.s7));
+							material.s1 = (float)((voxel.z >> (24 - parBits)) & as_uint(material.s7));
+							material.s2 = (float)((voxel.z >> (16 - parBits)) & as_uint(material.s7));
+
+							material.s7 = (8.0f / (float)parBits);
+
+							material.s0 = native_powr(material.s0, material.s7);
+							material.s1 = native_powr(material.s1, material.s7);
+							material.s2 = native_powr(material.s2, material.s7);
+
+							material.s7 = ((bets[parBits] - 1) / (float)(voxel.z & 0x000000FF)) / 255.0f;
+							material.s012 *= material.s7;
+
+							material.s7 = as_float((0x01 << (8 - parBits)) - 1);
+
+							material.s4 = (float)((voxel.z >> 24) & as_uint(material.s7));
+							material.s5 = (float)((voxel.z >> 16) & as_uint(material.s7));
+							material.s6 = (float)((voxel.z >> 8) & as_uint(material.s7));
+
+							material.s7 = (8.0f / (float)(8 - parBits));
+
+							material.s4 = native_powr(material.s4, material.s7);
+							material.s5 = native_powr(material.s5, material.s7);
+							material.s6 = native_powr(material.s6, material.s7);
+
+							material.s7 = ((bets[8 - parBits] - 1) / (float)(voxel.z & 0x000000FF)) / 255.0f;
+							material.s456 *= material.s7;
+						}
+
+						curr_side = (stack[scale + 1].das & 0x06) + (bool)((octant_mask ^ 0x07) & stack[scale + 1].das);
+
+						opps_lights[0] = cach_lights[curr_lightIdx | (((curr_lightDir & ((curr_side & 0x06) | (curr_side < 0x02))) != 0x00) ^ (curr_side & 0x01))].xyz;
+						opps_lights[1] = cach_lights[prev_lightIdx | (((prev_lightDir & ((curr_side & 0x06) | (curr_side < 0x02))) != 0x00) ^ (curr_side & 0x01) ^ 0x01)].xyz;
+
+						material.s7 = getBrightness(opps_lights[0].xyz);
+						opps_lights[0] *= cach_lights[curr_lightIdx | (((curr_lightDir & ((curr_side & 0x06) | (curr_side < 0x02))) != 0x00) ^ (curr_side & 0x01))].w / as_float(as_uint(material.s7) | (0x3f800000 & -(material.s7 == 0.0f)));
+
+						material.s7 = getBrightness(opps_lights[1].xyz);
+						opps_lights[1] *= cach_lights[prev_lightIdx | (((prev_lightDir & ((curr_side & 0x06) | (curr_side < 0x02))) != 0x00) ^ (curr_side & 0x01) ^ 0x01)].w / as_float(as_uint(material.s7) | (0x3f800000 & -(material.s7 == 0.0f)));
+
+						savg_light = (opps_lights[0] + opps_lights[1]) * 0.5f;
+
+						curr_dist = stack[scale + 1].tin * VoxelToUnit;
+						curr_fallOff = 1.0f + curr_dist * curr_dist;
+
+						if (curr_active) {
+							pixel += (fac * material.s012 * savg_light.xyz * material.s3 / curr_fallOff);
+
+							curr_depth = as_float(stack[scale + 1].das & 0xFFFFFFF8);
+
+							fac *= (float3)(native_powr(material.s4 + 0.00390625f, curr_depth), native_powr(material.s5 + 0.00390625f, curr_depth), native_powr(material.s6 + 0.00390625f, curr_depth)) * (1.0f - material.s3);
+							
+							if (fac.x <= 0.00390625 && fac.y <= 0.00390625 && fac.z <= 0.00390625) {
+								break;
+							}
+						}
+						else if (prev_active) {
+							pixel += (fac * savg_light.xyz * 0.25f / curr_fallOff);
+						}
+					}
+
+					prev_active = curr_active;
+
+					prev_lightDir = curr_lightDir;
+
+					prev_lightIdx = curr_lightIdx;
+					curr_lightIdx ^= 0x02;
+				}
+
+				difBits = 0x00;
+
+				if ((step_mask & 0x01) != 0x00) difBits |= as_uint(pos.x) ^ as_int(pos.x + scaExp2);
+				if ((step_mask & 0x02) != 0x00) difBits |= as_uint(pos.y) ^ as_int(pos.y + scaExp2);
+				if ((step_mask & 0x04) != 0x00) difBits |= as_uint(pos.z) ^ as_int(pos.z + scaExp2);
+
+				scale = (as_uint((float)difBits) >> 23) - 127;
+				scaExp2 = as_float((127 - (VoxelDepth - scale)) << 23);
+
+				sh = (uint3)(as_uint(pos.x) >> scale, as_uint(pos.y) >> scale, as_uint(pos.z) >> scale);
+
+				pos.x = as_float(sh.x << scale);
+				pos.y = as_float(sh.y << scale);
+				pos.z = as_float(sh.z << scale);
+
+				idx = (sh.x & 0x01) | ((sh.y & 0x01) << 1) | ((sh.z & 0x01) << 2);
+
+				parent = vxBuffer + (stack[scale].idx << 2);
+				t_max = stack[scale].tax;
+
+				h = 0.0f;
+				voxel.x = 0x00;
+			}
 		}
-	}
 
-	if (scale >= VoxelDepth) {
-		t_min = 2.0f;
+		qIdx += 1;
+		qIdx &= (qIdx != RayDepth);
 	}
-
+	
 	write_imagef(hdr, coors, (float4)(pixel, 0.0f));
 }
 
@@ -981,29 +1011,17 @@ void cgLight(__global uint32_t* vxBuffer, uint32_t index, uint32_t light) {
 }
 
 
-uint32_t getParent(__global uint32_t* vxBuffer, uint32_t index) {
+uint32_t getParent(volatile __global uint32_t* vxBuffer, uint32_t index) {
 	index <<= 2;
 	
 	return ((vxBuffer[index + 4] & 0x0F000000) | ((vxBuffer[index + 8] & 0x0F000000) >> 4) | ((vxBuffer[index + 12] & 0x0F000000) >> 8) | ((vxBuffer[index + 16] & 0x0F000000) >> 12) |
 		    ((vxBuffer[index + 20] & 0x0F000000) >> 16) | ((vxBuffer[index + 24] & 0x0F000000) >> 20) | ((vxBuffer[index + 28] & 0x0F000000) >> 24));
 }
 
-uint32_t getTimestamp(__global uint32_t* vxBuffer, uint32_t index) {
+uint32_t getTimestamp(volatile __global uint32_t* vxBuffer, uint32_t index) {
 	return ((vxBuffer[index << 2] & 0x0000FC00) >> 10);
 }
 
 inline float getBrightness(const float3 rgb) {
 	return (0.299 * rgb.x + 0.587 * rgb.y + 0.114 * rgb.z);
-}
-
-inline float2 float32Tofloat16(const float v) {
-	uint32_t val = as_uint(v);
-
-	return (float2)(as_float((val & 0x80000000) | (((val & 0x7C000000) >> 3) + 0x38000000) | ((val & 0x03FF0000) >> 3)), as_float(((val & 0x00008000) << 16) | (((val & 0x00007C00) << 13) + 0x38000000) | ((val & 0x000003FF) << 13)));
-}
-
-inline float float16Tofloat32(const float2 v) {
-	uint2 val = as_uint2(v);
-
-	return as_float((val.x & 0x80000000) | (((val.x & 0x7F800000) - 0x38000000) << 3) | ((val.x & 0x007FE000) << 3) | ((val.y & 0x80000000) >> 16) | (((val.y & 0x7F800000) - 0x38000000) >> 13) | ((val.y & 0x007FE000) >> 13));
 }
