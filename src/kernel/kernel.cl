@@ -172,6 +172,7 @@ struct VoxStack {
 	float    tax;
 	uint32_t das;
 	float    tin;
+	float3   pos;
 };
 
 struct RayInit {
@@ -228,6 +229,8 @@ __kernel void hdrRenKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 
 	uint8_t parBits;
 
+	bool shouldRenderOrigin = true;
+
 	uint8_t curr_lightDir, prev_lightDir, curr_lightIdx, prev_lightIdx, curr_side;
 
 	float4 cach_lights[4];
@@ -238,14 +241,21 @@ __kernel void hdrRenKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 
 	float8 material;
 
+	float dst;
+
 	float curr_dist, curr_fallOff, curr_depth;
 
 	float3 pixel = { 0.0f, 0.0f, 0.0f };
+
+	float3 hitPos;
+
+	bool shouldPrepareRay;
 
 	while (qIdx != qEnd) {
 		norPos = queue[qIdx].pos;
 		dir = queue[qIdx].dir;
 		fac = queue[qIdx].fac;
+		dst = queue[qIdx].dst;
 
 		if (fabs(dir.x) < epsilon) dir.x = as_float(as_uint(epsilon) ^ (as_uint(dir.x) & 0x80000000));
 		if (fabs(dir.y) < epsilon) dir.y = as_float(as_uint(epsilon) ^ (as_uint(dir.y) & 0x80000000));
@@ -262,12 +272,12 @@ __kernel void hdrRenKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 
 		t_min = fmax(fmax(2.0f * t_coef.x - t_bias.x, 2.0f * t_coef.y - t_bias.y), 2.0f * t_coef.z - t_bias.z);
 		t_max = fmin(fmin(t_coef.x - t_bias.x, t_coef.y - t_bias.y), t_coef.z - t_bias.z);
-
+		
 		h = t_max;
 
 		t_min = fmax(t_min, 0.0f);
 		t_max = fmin(t_max, 1.0f);
-
+		
 		parent = vxBuffer;
 		voxel = (uint4)(0x00, 0x00, 0x00, 0x00);
 
@@ -300,7 +310,7 @@ __kernel void hdrRenKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 
 			cidx = idx ^ octant_mask;
 
-			shouldRender = (!(voxel.x & 0x00FF0000) || (tc_max > (scaExp2 * rayCoef)));
+			shouldRender = (!(voxel.x & 0x00FF0000) || ((tc_max + dst) > (scaExp2 * rayCoef)));
 
 			if (!shouldRender && ((voxel.x & (0x00800000 >> cidx)) != 0x00) && (t_min <= t_max)) {
 				if (((voxel.x & 0x0000FC00) != timStamp) && (!hasRequested || (voxel.y != 0x00))) {
@@ -365,6 +375,7 @@ __kernel void hdrRenKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 
 					stack[scale].das = ((as_uint((tc_max - t_min) / scaExp2) & 0xFFFFFFF8) | (step_mask & 0x07));
 					stack[scale].tin = t_min;
+					stack[scale].pos = pos;
 
 					h = tc_max;
 
@@ -391,11 +402,11 @@ __kernel void hdrRenKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 			if (t_corner.y <= tc_max) { step_mask ^= 2; pos.y -= scaExp2; }
 			if (t_corner.z <= tc_max) { step_mask ^= 4; pos.z -= scaExp2; }
 
-			t_min = tc_max;
 			idx ^= step_mask;
-
+			t_min = tc_max;
+			
 			if ((idx & step_mask) != 0x00) {
-				if (shouldRender) {
+				if (true) {
 					curr_active = (voxel.x & 0x80000000);
 
 					if (voxel.w & 0x80000000) {
@@ -418,9 +429,11 @@ __kernel void hdrRenKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 						cach_lights[curr_lightIdx | 0x01] = cach_lights[curr_lightIdx];
 					}
 
-					if (shouldRender && (prev_active || curr_active)) {
-						material = (float8)(0.0f, 0.0f, 0.0f, (voxel.z & 0x000000FF) / 255.0f, 0.0f, 0.0f, 0.0f, as_float(voxel.z & 0x000000FF));
+					shouldRenderOrigin |= (stack[scale + 1].tin > epsilon);
 
+					if (shouldRender && shouldRenderOrigin && (prev_active || curr_active)) {
+						material = (float8)(0.0f, 0.0f, 0.0f, (voxel.z & 0x000000FF) / 255.0f, 0.0f, 0.0f, 0.0f, as_float(voxel.z & 0x000000FF));
+						
 						parBits = 0x00;
 
 						parBits |= (as_uint(material.s7) >= bets[parBits | 0x04]) << 2;
@@ -475,6 +488,24 @@ __kernel void hdrRenKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 
 						curr_side = (stack[scale + 1].das & 0x06) + (bool)((octant_mask ^ 0x07) & stack[scale + 1].das);
 
+						shouldPrepareRay = false && curr_active;
+
+						if (shouldPrepareRay) {
+							hitPos = stack[scale + 1].pos;
+
+							hitPos.x = as_uint(hitPos.x) ^ ((as_uint(hitPos.x) ^ as_uint(3.0f - 2.0f * scaExp2 - hitPos.x)) & -(bool)(octant_mask & 0x01));
+							hitPos.y = as_uint(hitPos.y) ^ ((as_uint(hitPos.y) ^ as_uint(3.0f - 2.0f * scaExp2 - hitPos.y)) & -(bool)(octant_mask & 0x02));
+							hitPos.z = as_uint(hitPos.z) ^ ((as_uint(hitPos.z) ^ as_uint(3.0f - 2.0f * scaExp2 - hitPos.z)) & -(bool)(octant_mask & 0x04));
+
+							hitPos = fmin(fmax(queue[qIdx].pos + dir * stack[scale + 1].tin, hitPos), hitPos + (2.0f * scaExp2));
+
+							// Prepare new ray data
+
+							shouldRenderOrigin = false;
+
+							break;
+						}
+
 						opps_lights[0] = cach_lights[curr_lightIdx | (((curr_lightDir & ((curr_side & 0x06) | (curr_side < 0x02))) != 0x00) ^ (curr_side & 0x01))].xyz;
 						opps_lights[1] = cach_lights[prev_lightIdx | (((prev_lightDir & ((curr_side & 0x06) | (curr_side < 0x02))) != 0x00) ^ (curr_side & 0x01) ^ 0x01)].xyz;
 
@@ -486,7 +517,7 @@ __kernel void hdrRenKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 
 						savg_light = (opps_lights[0] + opps_lights[1]) * 0.5f;
 
-						curr_dist = stack[scale + 1].tin * VoxelToUnit;
+						curr_dist = (stack[scale + 1].tin + dst) * VoxelToUnit;
 						curr_fallOff = 1.0f + curr_dist * curr_dist;
 
 						if (curr_active) {
@@ -511,6 +542,8 @@ __kernel void hdrRenKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 
 					prev_lightIdx = curr_lightIdx;
 					curr_lightIdx ^= 0x02;
+
+					shouldRenderOrigin = true;
 				}
 
 				difBits = 0x00;
