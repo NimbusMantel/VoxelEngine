@@ -52,5 +52,8 @@
     <Intel_OpenCL_Build_Rules Include="src\kernel\kernel.cl">
       <Filter>OpenCL Files</Filter>
     </Intel_OpenCL_Build_Rules>
+    <Intel_OpenCL_Build_Rules Include="src\kernel\render.cl">
+      <Filter>OpenCL Files</Filter>
+    </Intel_OpenCL_Build_Rules>
   </ItemGroup>
 </Project>

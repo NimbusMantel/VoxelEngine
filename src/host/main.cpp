@@ -151,6 +151,8 @@ int main(int argc, char* argv[]) {
 
 	cl::Buffer vxBuffer = cl::Buffer(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, 0x80 << BUFFER_DEPTH);
 
+	cl::Image3D litImage = cl::Image3D(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, { CL_RGBA, CL_UNSIGNED_INT32 }, 256, 256, 256);
+
 	cl::Image2D hdrImage = cl::Image2D(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, { CL_RGBA, CL_HALF_FLOAT }, width, height);
 	cl::Image2D blmImage = cl::Image2D(clContext, CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS, { CL_RGBA, CL_HALF_FLOAT }, width, height * 3 / 2);
 
@@ -186,9 +188,9 @@ int main(int argc, char* argv[]) {
 
 	cl::Program clProgram(clContext, sources);
 
-	char* clBuild = new char[30]();
+	char* clBuild = new char[53]();
 
-	sprintf_s(clBuild, 31, "-cl-std=CL1.2 -D OpenCLDebug=%u", (bool)OpenCLDebug);
+	sprintf_s(clBuild, 54, "-cl-std=CL1.2 -D OpenCLDebug=%u -D CL_LITTLE_ENDIAN=%u", (bool)OpenCLDebug, !(bool)DEVICE_BIG_ENDIAN);
 	
 	clProgram.build(clBuild);
 
@@ -249,8 +251,8 @@ int main(int argc, char* argv[]) {
 	gcSugKernel.setArg(2, mnBuffer);
 	gcSugKernel.setArg(3, cgBuffer);
 	
-	cl::CommandQueue clQueue = cl::CommandQueue(clContext, device);
-
+	cl::CommandQueue clQueue = cl::CommandQueue(clContext, device, CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE);
+	
 	uint8_t* cgBuf = manCTG::buf();
 	uint32_t cgBufSize;
 

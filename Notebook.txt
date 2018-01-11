@@ -27,10 +27,10 @@ Voxel strucuture on the GPU
 Voxel structure on the CPU
 - 32-bit structure: 1-active, 3-index,
                     4-depth (child 0) / 4-parent (children 1-7),
-					8-children, 6-position, (10-unused)
+					8-children, 6-position (absolute), (10-unused)
 - 32-bit children: 32-pointer (absolute, refer to the block of voxel data (4*4=16 bytes))
-- 32 bit unused: (32-unused)
-- 32 bit unused: (32-unused)
+- 32-bit unused: (32-unused)
+- 32-bit unused: (32-unused)
 
 Voxel buffer dynamics
 - Loading of voxels in order (root -> recursion on children) by requests from the GPU and CPU
@@ -133,3 +133,35 @@ Voxel Engine controls
   - D: rotate rightward around the local y-axis
   - A: rotate leftward around the local y-axis
   - S: rotate downward around the local x-axis
+
+GPU voxel timestamp planning
+- 32-bit tPrev: 8-time, 24-prev (atomic access)
+- 32-bit pNext: 8-unused, 24-next (locked access)
+- rendering procedure:
+  - read timestamp and break if correct
+  - atomically and timestamp and break if unchanged
+  - atomically or timestamp and break if unchanged
+  - request ticket and wait for locked access
+  - change previous element's next pointer with a set
+  - atomically xor next element's previous pointer
+  - change previous and next pointer with a set
+  - change head's previous element's next pointer with a set
+  - change head's previous pointer with a set
+  - increment ticket and exit locked access
+
+GPU voxel buffer
+- 256x256x256 3D texture for structure
+  - 1 pixel per voxel
+  - 8 byte per voxel (RA, uint32)
+  - access using z-order, eight adjacent voxels are siblings
+- 256x256x256 3D texture for material
+  - 1 pixel per voxel
+  - 8 byte per voxel (RA, uint32)
+  - access using z-order, eight adjacent voxels are siblings
+- 256x256x256 3D texture for lighting
+  - 1 pixel per corner (3 sides)
+  - 16 byte per corner (RGBA, uint32)
+  - access using hash function on absolute position
+- 2^(7+7+7) doubly linked list buffer
+  - 8 byte per sibling slot (2x2x2)
+  - access using sibling slot position (reverse z-order)

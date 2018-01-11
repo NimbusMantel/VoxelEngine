@@ -9,6 +9,12 @@ typedef int					int32_t;
 
 // macro definitions
 
+#if CL_LITTLE_ENDIAN
+	#define LittleEndian(n) (n)
+#else
+	#define LittleEndian(n) (rotate(n & 0x00FF00FF, 24U) | (rotate(n, 8U) & 0x00FF00FF))
+#endif
+
 #define INT_BUF(b, p) (((uint32_t)b[p] << 24) | ((uint32_t)b[p + 1] << 16) | ((uint32_t)b[p + 2] << 8) | b[p + 3])
 
 
@@ -50,6 +56,10 @@ enum PLACEHOLDER {
 
 #define OpenCLDebug 1
 
+// opencl endianness placeholder
+
+#define CL_LITTLE_ENDIAN 1
+
 /*KERNEL_EXCLUDE_END*/
 // voxel depth constant
 
@@ -75,6 +85,8 @@ uint32_t getParent(volatile __global uint32_t* vxBuffer, uint32_t index);
 uint32_t getTimestamp(volatile __global uint32_t* vxBuffer, uint32_t index);
 
 float getBrightness(const float3 rgb);
+
+uint32_t xxh32(uint2 data);
 
 // kernels
 
@@ -185,7 +197,7 @@ struct RayInit {
 __kernel void hdrRenKernel(volatile __global __read_write uint32_t* vxBuffer, volatile __global __read_write uint32_t* mnTicket, volatile __global __read_write uint32_t* mnBuffer, __global __read_write uint8_t* gcBuffer, __write_only image2d_t hdr, __global __read_only float* rvLookup, __constant __read_only float* rotMat, float3 norPos, float rayCoef, uint32_t timStamp) {
 	const int2 size = { get_image_width(hdr), get_image_height(hdr) };
 	const int2 coors = { get_global_id(0), get_global_id(1) };
-
+	
 	/*KERNEL_BETSTOPS_BEG*/const uint8_t bets[9];/*KERNEL_BETSTOPS_END*/
 
 	const float epsilon = as_float((127 - VoxelDepth) << 23);
@@ -336,6 +348,8 @@ __kernel void hdrRenKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 							gcBuffer[15] = (ticketIndex & 0x00FF0000) >> 16;
 							gcBuffer[16] = (ticketIndex & 0x0000FF00) >> 8;
 							gcBuffer[17] = ticketIndex & 0x000000FF;
+
+							hasRequested = true;
 
 #if OpenCLDebug
 							printf("gcRequest(parent: %u)\n\n", (parent - vxBuffer) >> 2);
@@ -505,6 +519,32 @@ __kernel void hdrRenKernel(volatile __global __read_write uint32_t* vxBuffer, vo
 
 							break;
 						}
+
+						/*BEGIN Light Texture Hashing Test*/
+
+						uint3 bin = as_uint3(stack[scale + 1].pos);
+
+						bin.x ^= -(bool)(octant_mask & 0x01);
+						bin.y ^= -(bool)(octant_mask & 0x02);
+						bin.z ^= -(bool)(octant_mask & 0x04);
+
+						bin.xyz &= 0x007FFFFF;
+						bin.xyz >>= (scale + 1);
+
+						//if (coors.x == 320 && coors.y == 180) printf("%2u: (%5u|%5u|%5u).%c%c", VoxelDepth - 1 - scale, bin.x, bin.y, bin.z, (curr_side < 0x02) ? 'x' : ((curr_side & 0x02) ? 'y' : 'z'), (curr_side & 0x01) ? '+' : '-');
+
+						bin.xyz += (uint3)(curr_side == 0x01, curr_side == 0x03, curr_side == 0x05);
+
+						bin.xyz += ((0x01 << (VoxelDepth - 1 - scale)) + (VoxelDepth - 1 - scale) - 1);
+						bin.xyz &= 0x001FFFFF;
+
+						uint32_t hash = xxh32(as_uint2(bin.x | ((uint64_t)bin.y << 21) | ((uint64_t)bin.z << 42)));
+
+						uchar3 lup = as_uchar3(hash);
+
+						//if (coors.x == 320 && coors.y == 180) printf(" -> (%3u|%3u|%3u).%c\n", lup.x, lup.y, lup.z, (curr_side < 0x02) ? 'x' : ((curr_side & 0x02) ? 'y' : 'z'));
+
+						/*END Light Texture Hashing Test*/
 
 						opps_lights[0] = cach_lights[curr_lightIdx | (((curr_lightDir & ((curr_side & 0x06) | (curr_side < 0x02))) != 0x00) ^ (curr_side & 0x01))].xyz;
 						opps_lights[1] = cach_lights[prev_lightIdx | (((prev_lightDir & ((curr_side & 0x06) | (curr_side < 0x02))) != 0x00) ^ (curr_side & 0x01) ^ 0x01)].xyz;
@@ -1057,4 +1097,55 @@ uint32_t getTimestamp(volatile __global uint32_t* vxBuffer, uint32_t index) {
 
 inline float getBrightness(const float3 rgb) {
 	return (0.299 * rgb.x + 0.587 * rgb.y + 0.114 * rgb.z);
+}
+
+/*
+xxHash - Extremely Fast Hash algorithm
+Copyright (C) 2012-2017, Yann Collet.
+
+BSD 2-Clause License (http://www.opensource.org/licenses/bsd-license.php)
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+* Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+* Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+You can contact the author at :
+- xxHash source repository : https://github.com/Cyan4973/xxHash
+*/
+
+uint32_t xxh32(uint2 data) {
+	uint32_t hash = 374761393U + 8;
+	
+	hash += LittleEndian(data.x) * 3266489917U;
+	hash = rotate(hash, 17U) * 668265263U;
+	
+	hash += LittleEndian(data.y) * 3266489917U;
+	hash = rotate(hash, 17U) * 668265263U;
+
+	hash ^= hash >> 15;
+	hash *= 2246822519U;
+	hash ^= hash >> 13;
+	hash *= 3266489917U;
+	hash ^= hash >> 16;
+
+	return hash;
 }
