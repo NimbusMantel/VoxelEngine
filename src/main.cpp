@@ -1,8 +1,11 @@
 #include <SDL2/SDL.h>
+#include <vulkan/vulkan.hpp>
 
 #include <iostream>
+#include <vector>
+#include <cstdint>
 
-int main(int argc, char* argv[]) {
+int SDL_main(int argc, char* argv[]) {
 	if (SDL_Init(SDL_INIT_VIDEO) != 0) {
 		std::cerr << "SDL_Init Error: " << SDL_GetError() << std::endl;
 
@@ -19,11 +22,31 @@ int main(int argc, char* argv[]) {
 		return -1;
 	}
 
+	std::vector<const char*> layers;
+#ifdef _DEBUG
+	layers.push_back("VK_LAYER_LUNARG_standard_validation");
+#endif
+
+	vk::ApplicationInfo appInfo = vk::ApplicationInfo("Voxel Engine", 0, "LunarG SDK", 1, VK_API_VERSION_1_0);
+
+	vk::InstanceCreateInfo instInfo = vk::InstanceCreateInfo(vk::InstanceCreateFlags(), &appInfo, 0, nullptr, static_cast<uint32_t>(layers.size()), layers.data());
+
+	vk::Instance instance;
+
+	try {
+		instance = vk::createInstance(instInfo);
+	}
+	catch (std::exception e) {
+		std::cerr << "vk_CreateInstance Error: " << e.what() << std::endl;
+	}
+
 #ifdef _WIN32
 	system("pause");
 #endif
 
 	SDL_Quit();
+	
+	instance.destroy();
 
 	return 0;
 }
