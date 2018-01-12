@@ -22,14 +22,9 @@ int SDL_main(int argc, char* argv[]) {
 		return -1;
 	}
 
-	std::vector<const char*> layers;
-#ifdef _DEBUG
-	layers.push_back("VK_LAYER_LUNARG_standard_validation");
-#endif
-
 	vk::ApplicationInfo appInfo = vk::ApplicationInfo("Voxel Engine", 0, "LunarG SDK", 1, VK_API_VERSION_1_0);
 
-	vk::InstanceCreateInfo instInfo = vk::InstanceCreateInfo(vk::InstanceCreateFlags(), &appInfo, 0, nullptr, static_cast<uint32_t>(layers.size()), layers.data());
+	vk::InstanceCreateInfo instInfo = vk::InstanceCreateInfo(vk::InstanceCreateFlags(), &appInfo, 0, nullptr, 0, nullptr);
 
 	vk::Instance instance;
 
