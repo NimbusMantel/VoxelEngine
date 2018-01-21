@@ -6,6 +6,8 @@
 #include <vector>
 #include <stdexcept>
 #include <functional>
+#include <set>
+#include <algorithm>
 
 const uint16_t WIDTH = 640;
 const uint16_t HEIGHT = 360;
@@ -13,9 +15,23 @@ const uint16_t HEIGHT = 360;
 SDL_Window* window;
 
 vk::Instance instance;
-std::vector<vk::ExtensionProperties> extensions;
 vk::DebugReportCallbackEXT callback;
+
+vk::SurfaceKHR surface;
+
 vk::Device device;
+
+vk::Queue graphicsQueue;
+vk::Queue computeQueue;
+vk::Queue presentationQueue;
+
+vk::SwapchainKHR swapChain;
+
+std::vector<vk::Image> swapChainImages;
+std::vector<vk::ImageView> swapChainImageViews;
+
+vk::Format swapChainFormat;
+vk::Extent2D swapChainExtent;
 
 #ifndef NDEBUG
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugReportFlagsEXT, VkDebugReportObjectTypeEXT, uint64_t, size_t, int32_t, const char*, const char* msg, void*) {
@@ -39,14 +55,14 @@ void initVulkan() {
 	vk::ApplicationInfo appInfo = vk::ApplicationInfo("Voxel Engine", VK_MAKE_VERSION(1, 0, 0), "LunarG SDK", VK_MAKE_VERSION(1, 0, 0), VK_API_VERSION_1_0);
 
 #ifdef NDEBUG
-	std::vector<const char*> layers = {};
+	const std::vector<const char*> layers = {};
 #else
-	std::vector<const char*> layers = {
+	const std::vector<const char*> layers = {
 		"VK_LAYER_LUNARG_standard_validation"
 	};
 #endif
 
-	std::vector<const char*> extSDL;
+	std::vector<const char*> instExt;
 
 	uint32_t extCount = 0;
 
@@ -54,15 +70,15 @@ void initVulkan() {
 		throw std::runtime_error(std::string("SDL_Vulkan_GetInstanceExtensions Error: ") + SDL_GetError());
 	}
 
-	extSDL = std::vector<const char*>(extCount);
+	instExt.resize(extCount);
 
-	SDL_Vulkan_GetInstanceExtensions(window, &extCount, extSDL.data());
+	SDL_Vulkan_GetInstanceExtensions(window, &extCount, instExt.data());
 
 #ifndef NDEBUG
-	extSDL.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
+	instExt.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
 #endif
 
-	vk::InstanceCreateInfo instInfo = vk::InstanceCreateInfo(vk::InstanceCreateFlags(), &appInfo, static_cast<uint32_t>(layers.size()), layers.data(), static_cast<uint32_t>(extSDL.size()), extSDL.data());
+	vk::InstanceCreateInfo instInfo(vk::InstanceCreateFlags(), &appInfo, static_cast<uint32_t>(layers.size()), layers.data(), static_cast<uint32_t>(instExt.size()), instExt.data());
 
 	try {
 		instance = vk::createInstance(instInfo);
@@ -71,41 +87,278 @@ void initVulkan() {
 		throw std::runtime_error(std::string("VK_CreateInstance Error: ") + e.what());
 	}
 
-#ifndef NDEBUG
-	vk::DebugReportCallbackCreateInfoEXT callInfo = vk::DebugReportCallbackCreateInfoEXT(vk::DebugReportFlagBitsEXT::eError | vk::DebugReportFlagBitsEXT::eWarning, debugCallback);
+	vk::Result res;
 
-	vk::Result res = vk::Result(((PFN_vkCreateDebugReportCallbackEXT)instance.getProcAddr("vkCreateDebugReportCallbackEXT"))(instance, reinterpret_cast<const VkDebugReportCallbackCreateInfoEXT*>(&callInfo), nullptr, reinterpret_cast<VkDebugReportCallbackEXT*>(&callback)));
+#ifndef NDEBUG
+	vk::DebugReportCallbackCreateInfoEXT callInfo(vk::DebugReportFlagBitsEXT::eError | vk::DebugReportFlagBitsEXT::eWarning, debugCallback);
+
+	res = vk::Result(((PFN_vkCreateDebugReportCallbackEXT)instance.getProcAddr("vkCreateDebugReportCallbackEXT"))(instance,
+		reinterpret_cast<const VkDebugReportCallbackCreateInfoEXT*>(&callInfo), nullptr, reinterpret_cast<VkDebugReportCallbackEXT*>(&callback)));
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateDebugReportCallbackEXT Error: ") + vk::to_string(res));
 	}
 #endif
 
-	uint32_t physCount = 0;
+	if (SDL_Vulkan_CreateSurface(window, instance, reinterpret_cast<VkSurfaceKHR*>(&surface)) != SDL_TRUE) {
+		throw std::runtime_error(std::string("SDL_Vulkan_CreateSurface Error: ") + SDL_GetError());
+	}
 
-	instance.enumeratePhysicalDevices(&physCount, nullptr);
+	std::vector<vk::PhysicalDevice> physDevs = instance.enumeratePhysicalDevices();
 
-	if (physCount == 0) {
+	if (physDevs.size() == 0) {
 		throw std::runtime_error(std::string("VK_EnumeratePhysicalDevices Error: ") + "ErrorVulkanGPUNotPresent");
 	}
 
-	std::vector<vk::PhysicalDevice> physDevs(physCount);
+	const std::vector<const char*> devExt = {
+		VK_KHR_SWAPCHAIN_EXTENSION_NAME
+	};
 
-	instance.enumeratePhysicalDevices(&physCount, physDevs.data());
+	uint32_t maxGPUScore = 0;
+	uint32_t gpuScore;
+
+	vk::PhysicalDeviceProperties devProps;
+	vk::PhysicalDeviceFeatures devFeats;
+
+	vk::PhysicalDevice selDev;
+
+	std::vector<vk::QueueFamilyProperties> queueFamilies;
+
+	uint32_t graphicsQueueIndex, computeQueueIndex, presentationQueueIndex;
+
+	uint32_t graQueIdx, comQueIdx, prsQueIdx;
+	uint32_t tmp;
+
+	std::vector<vk::ExtensionProperties> avaExt;
+	std::set<std::string> reqExt;
+
+	vk::SurfaceCapabilitiesKHR surfaceCapabilities;
+	std::vector<vk::SurfaceFormatKHR> surfaceFormats;
+	std::vector<vk::PresentModeKHR> presentModes;
+
+	vk::SurfaceCapabilitiesKHR surCap;
+	std::vector<vk::SurfaceFormatKHR> surFor;
+	std::vector<vk::PresentModeKHR> prsMod;
 
 	for (const vk::PhysicalDevice dev : physDevs) {
-		// TO DO: check to see if dev is a suitable device
+		gpuScore = 0;
 
-		goto deviceFound;
+		dev.getProperties(&devProps);
+		dev.getFeatures(&devFeats);
+
+		if (devProps.deviceType == vk::PhysicalDeviceType::eCpu) {
+			continue;
+		}
+
+		if (devProps.deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+			gpuScore += 1000;
+		}
+
+		gpuScore += devProps.limits.maxImageDimension2D;
+
+		queueFamilies = dev.getQueueFamilyProperties();
+
+		graQueIdx = comQueIdx = -1;
+
+		tmp = 0;
+
+		for (const vk::QueueFamilyProperties queFamily : queueFamilies) {
+			if (queFamily.queueCount > 0) {
+				if (queFamily.queueFlags & vk::QueueFlags(vk::QueueFlagBits::eGraphics)) {
+					graQueIdx = tmp;
+				}
+				
+				if (queFamily.queueFlags & vk::QueueFlags(vk::QueueFlagBits::eCompute)) {
+					comQueIdx = tmp;
+
+					gpuScore += (comQueIdx == graQueIdx) << 5;
+				}
+
+				if (dev.getSurfaceSupportKHR(tmp, surface)) {
+					prsQueIdx = tmp;
+
+					gpuScore += ((comQueIdx == graQueIdx) || (comQueIdx == comQueIdx)) << 5;
+				}
+			}
+
+			tmp++;
+		}
+
+		if (graQueIdx == -1 || comQueIdx == -1 || prsQueIdx == -1) {
+			continue;
+		}
+
+		avaExt = dev.enumerateDeviceExtensionProperties(nullptr);
+
+		reqExt = std::set<std::string>(devExt.begin(), devExt.end());
+
+		for (const vk::ExtensionProperties ext : avaExt) {
+			reqExt.erase(ext.extensionName);
+		}
+
+		if (!reqExt.empty()) {
+			continue;
+		}
+
+		surCap = dev.getSurfaceCapabilitiesKHR(surface);
+		surFor = dev.getSurfaceFormatsKHR(surface);
+		prsMod = dev.getSurfacePresentModesKHR(surface);
+
+		if (surFor.empty() || prsMod.empty()) {
+			continue;
+		}
+
+		if (gpuScore > maxGPUScore) {
+			maxGPUScore = gpuScore;
+
+			selDev = dev;
+
+			graphicsQueueIndex = graQueIdx;
+			computeQueueIndex = comQueIdx;
+			presentationQueueIndex = prsQueIdx;
+
+			surfaceCapabilities = surCap;
+			surfaceFormats = surFor;
+			presentModes = prsMod;
+		}
 	}
 
-	throw std::runtime_error(std::string("VK_EnumeratePhysicalDevices Error: ") + "ErrorSuitableGPUNotPresent");
+	if (maxGPUScore <= 0) {
+		throw std::runtime_error(std::string("VK_EnumeratePhysicalDevices Error: ") + "ErrorSuitableGPUNotPresent");
+	}
 
-deviceFound:
+	std::vector<vk::DeviceQueueCreateInfo> queueInfos;
+	std::set<uint32_t> uniqueQueueFamilies = { graphicsQueueIndex, computeQueueIndex, presentationQueueIndex };
 
-	// TO DO: start using device
+	float queuePriority = 1.0f;
 
-	std::cout << "";
+	for (const uint32_t queFam : uniqueQueueFamilies) {
+		queueInfos.push_back(vk::DeviceQueueCreateInfo(vk::DeviceQueueCreateFlags(), queFam, 1, &queuePriority));
+	}
+
+	vk::PhysicalDeviceFeatures deviceFeatures;
+	deviceFeatures.geometryShader = true;
+	
+	vk::DeviceCreateInfo deviceInfo(vk::DeviceCreateFlags(), static_cast<uint32_t>(queueInfos.size()), queueInfos.data(),
+		static_cast<uint32_t>(layers.size()), layers.data(), static_cast<uint32_t>(devExt.size()), devExt.data(), &deviceFeatures);
+
+	res = selDev.createDevice(&deviceInfo, nullptr, &device);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateDevice Error: ") + vk::to_string(res));
+	}
+
+	graphicsQueue = device.getQueue(graphicsQueueIndex, 0);
+	computeQueue = device.getQueue(computeQueueIndex, 0);
+	presentationQueue = device.getQueue(presentationQueueIndex, 0);
+
+	vk::SurfaceFormatKHR surfaceFormat;
+
+	if (surfaceFormats.size() == 1 && surfaceFormats[0].format == vk::Format::eUndefined) {
+		surfaceFormat = { vk::Format::eB8G8R8A8Unorm, vk::ColorSpaceKHR::eSrgbNonlinear };
+	}
+	else {
+		surfaceFormat = surfaceFormats[0];
+
+		for (const vk::SurfaceFormatKHR format : surfaceFormats) {
+			if (format.format == vk::Format::eB8G8R8A8Unorm && format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
+				surfaceFormat = format;
+
+				break;
+			}
+		}
+	}
+
+	vk::PresentModeKHR presentMode = vk::PresentModeKHR::eFifo;
+
+	for (const vk::PresentModeKHR mode : presentModes) {
+		if (mode == vk::PresentModeKHR::eMailbox) {
+			presentMode = mode;
+
+			break;
+		}
+		else if (mode == vk::PresentModeKHR::eImmediate) {
+			presentMode = mode;
+
+			break;
+		}
+	}
+	
+	if (surfaceCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+		swapChainExtent = surfaceCapabilities.currentExtent;
+	}
+	else {
+		swapChainExtent = vk::Extent2D(std::max(static_cast<uint16_t>(surfaceCapabilities.minImageExtent.width), std::min(static_cast<uint16_t>(surfaceCapabilities.maxImageExtent.width), WIDTH)),
+			std::max(static_cast<uint16_t>(surfaceCapabilities.minImageExtent.height), std::min(static_cast<uint16_t>(surfaceCapabilities.maxImageExtent.height), HEIGHT)));
+	}
+
+	uint32_t imageCount = surfaceCapabilities.minImageCount + 1;
+
+	if (surfaceCapabilities.maxImageCount > 0 && imageCount > surfaceCapabilities.maxImageCount) {
+		imageCount = surfaceCapabilities.maxImageCount;
+	}
+
+	vk::SwapchainCreateInfoKHR swapInfo;
+	swapInfo.surface = surface;
+	swapInfo.minImageCount = imageCount;
+	swapInfo.imageFormat = surfaceFormat.format;
+	swapInfo.imageColorSpace = surfaceFormat.colorSpace;
+	swapInfo.imageExtent = swapChainExtent;
+	swapInfo.imageArrayLayers = 1;
+	swapInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
+
+	std::vector<uint32_t> queueIndices(uniqueQueueFamilies.size());
+
+	for (const uint32_t queIdx : uniqueQueueFamilies) {
+		queueIndices.push_back(queIdx);
+	}
+	
+	if (uniqueQueueFamilies.size() > 1) {
+		swapInfo.imageSharingMode = vk::SharingMode::eConcurrent;
+		swapInfo.queueFamilyIndexCount = static_cast<uint32_t>(queueIndices.size());
+		swapInfo.pQueueFamilyIndices = queueIndices.data();
+	}
+	else {
+		swapInfo.imageSharingMode = vk::SharingMode::eExclusive;
+		swapInfo.queueFamilyIndexCount = 0;
+		swapInfo.pQueueFamilyIndices = nullptr;
+	}
+
+	swapInfo.preTransform = vk::SurfaceTransformFlagBitsKHR::eIdentity;
+	swapInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
+	swapInfo.presentMode = presentMode;
+	swapInfo.clipped = false;
+	swapInfo.oldSwapchain = nullptr;
+
+	res = device.createSwapchainKHR(&swapInfo, nullptr, &swapChain);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateSwapchainKHR Error: ") + vk::to_string(res));
+	}
+
+	swapChainImages = device.getSwapchainImagesKHR(swapChain);
+	swapChainFormat = surfaceFormat.format;
+
+	swapChainImageViews.resize(swapChainImages.size());
+
+	vk::ImageViewCreateInfo viewInfo;
+
+	tmp = 0;
+
+	for (const vk::Image img : swapChainImages) {
+		viewInfo = vk::ImageViewCreateInfo(vk::ImageViewCreateFlags(), img, vk::ImageViewType::e2D, swapChainFormat, vk::ComponentMapping(vk::ComponentSwizzle::eIdentity,
+			vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity), vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
+
+		res = device.createImageView(&viewInfo, nullptr, &swapChainImageViews[tmp]);
+
+		if (res != vk::Result::eSuccess) {
+			throw std::runtime_error(std::string("VK_CreateImageView Error: ") + vk::to_string(res));
+		}
+
+		tmp++;
+	}
+
+	// TO DO: Graphics pipeline basics
 }
 
 void update() {
@@ -113,18 +366,23 @@ void update() {
 }
 
 void cleanUp() {
+	for (const vk::ImageView view : swapChainImageViews) {
+		device.destroyImageView(view, nullptr);
+	}
+
+	device.destroySwapchainKHR(swapChain, nullptr);
+
+	device.destroy();
+
 #ifndef NDEBUG
 	((PFN_vkDestroyDebugReportCallbackEXT)instance.getProcAddr("vkDestroyDebugReportCallbackEXT"))(instance, static_cast<VkDebugReportCallbackEXT>(callback), nullptr);
 #endif
 
+	instance.destroySurfaceKHR(surface);
 	instance.destroy();
 
 	SDL_DestroyWindow(window);
 	SDL_Quit();
-
-#ifdef _WIN32
-	system("pause");
-#endif
 }
 
 int SDL_main(int argc, char* argv[]) {
@@ -138,8 +396,17 @@ int SDL_main(int argc, char* argv[]) {
 	catch (std::runtime_error e) {
 		std::cerr << e.what() << std::endl;
 	}
-	
-	cleanUp();
+
+	try {
+		cleanUp();
+	}
+	catch (std::runtime_error e) {
+		std::cerr << e.what() << std::endl;
+	}
+
+#ifdef _WIN32
+	system("pause");
+#endif
 
 	return 0;
 }
