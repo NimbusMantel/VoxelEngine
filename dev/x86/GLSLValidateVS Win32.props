@@ -1,0 +1,24 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project InitialTargets="GLSLValidate" DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <PropertyPageSchema Include="$(MSBuildThisFileDirectory)/../GLSLValidateTargets.props" />
+    <AvailableItemName Include="GLSLValidate">
+      <Targets>GLSLValidate</Targets>
+    </AvailableItemName>
+  </ItemGroup>
+  <ImportGroup Label="PropertySheets" />
+  <PropertyGroup Label="UserMacros">
+    <GLSLVALIDATOREXE>glslangValidator.exe</GLSLVALIDATOREXE>
+	<GLSLVALIDATOROUTPUT>obj/shaders</GLSLVALIDATOROUTPUT>
+  </PropertyGroup>
+  <PropertyGroup />
+  <ItemDefinitionGroup />
+  <ItemGroup>
+    <BuildMacro Include="GLSLVALIDATOREXE">
+      <Value>$(GLSLVALIDATOREXE)</Value>
+    </BuildMacro>
+  </ItemGroup>
+  <Target Name="GLSLValidate" Inputs="@(GLSLValidate)" BeforeTargets="ClCompile" Outputs="@(GLSLValidate->'$(GLSLVALIDATOROUTPUT)/%(Filename)%(Extension).spv')">
+    <Exec Command="$(GLSLVALIDATOREXE) -V -o &quot;$(GLSLVALIDATOROUTPUT)/%(Filename)%(Extension).spv&quot; &quot;%(GLSLValidate.FullPath)&quot;" />
+  </Target>
+</Project>
