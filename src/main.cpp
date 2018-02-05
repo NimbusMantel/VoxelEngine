@@ -8,6 +8,7 @@
 #include <functional>
 #include <set>
 #include <algorithm>
+#include <fstream>
 
 const uint16_t WIDTH = 640;
 const uint16_t HEIGHT = 360;
@@ -33,11 +34,47 @@ std::vector<vk::ImageView> swapChainImageViews;
 vk::Format swapChainFormat;
 vk::Extent2D swapChainExtent;
 
+vk::Viewport viewport;
+
+vk::PipelineLayout pipelineLayout;
+
 #ifndef NDEBUG
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugReportFlagsEXT, VkDebugReportObjectTypeEXT, uint64_t, size_t, int32_t, const char*, const char* msg, void*) {
 	throw std::runtime_error(std::string("VK_ValidationLayer Error: ") + msg);
 }
 #endif
+
+static std::vector<char> readFile(const std::string& filename) {
+	std::ifstream file(filename, std::ios::ate | std::ios::binary);
+	
+	if (!file.is_open()) {
+		throw std::runtime_error("I/O readFile Error: Failed to open file " + filename);
+	}
+
+	size_t fileSize = (size_t)file.tellg();
+	std::vector<char> buffer(fileSize);
+
+	file.seekg(0);
+	file.read(buffer.data(), fileSize);
+
+	file.close();
+
+	return buffer;
+}
+
+static vk::ShaderModule createShaderModule(const std::vector<char>& code) {
+	vk::ShaderModuleCreateInfo moduleInfo = vk::ShaderModuleCreateInfo(vk::ShaderModuleCreateFlags(), code.size(), reinterpret_cast<const uint32_t*>(code.data()));
+	
+	vk::ShaderModule shaderModule;
+
+	vk::Result res = device.createShaderModule(&moduleInfo, nullptr, &shaderModule);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateShaderModule Error: ") + vk::to_string(res));
+	}
+
+	return shaderModule;
+}
 
 void initSDL() {
 	if (SDL_Init(SDL_INIT_VIDEO) != 0) {
@@ -358,7 +395,51 @@ void initVulkan() {
 		tmp++;
 	}
 
-	// TO DO: Graphics pipeline basics
+	std::vector<char> vertShaderCode = readFile("obj/shaders/test.vert.spv");
+	std::vector<char> fragShaderCode = readFile("obj/shaders/test.frag.spv");
+
+	vk::ShaderModule vertShaderModule = createShaderModule(vertShaderCode);
+	vk::ShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+
+	vk::PipelineShaderStageCreateInfo vertStageInfo = vk::PipelineShaderStageCreateInfo(vk::PipelineShaderStageCreateFlags(), vk::ShaderStageFlagBits::eVertex, vertShaderModule, "main", nullptr);
+	vk::PipelineShaderStageCreateInfo fragStageInfo = vk::PipelineShaderStageCreateInfo(vk::PipelineShaderStageCreateFlags(), vk::ShaderStageFlagBits::eFragment, fragShaderModule, "main", nullptr);
+
+	vk::PipelineShaderStageCreateInfo shaderStages[] = { vertStageInfo, fragStageInfo };
+
+	vk::PipelineVertexInputStateCreateInfo vertexInfo(vk::PipelineVertexInputStateCreateFlags(), 0, nullptr, 0, nullptr);
+	vk::PipelineInputAssemblyStateCreateInfo inputInfo(vk::PipelineInputAssemblyStateCreateFlags(), vk::PrimitiveTopology::eTriangleList, false);
+
+	viewport = vk::Viewport(0.0f, 0.0f, (float)swapChainExtent.width, (float)swapChainExtent.height, 0.0f, 1.0f);
+	vk::Rect2D scissor = vk::Rect2D(vk::Offset2D(0, 0), swapChainExtent);
+	vk::PipelineViewportStateCreateInfo viewportInfo(vk::PipelineViewportStateCreateFlags(), 1, &viewport, 1, &scissor);
+
+	vk::PipelineRasterizationStateCreateInfo rasterizerInfo(vk::PipelineRasterizationStateCreateFlags(), false, false, vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack, vk::FrontFace::eClockwise,
+		false, 0.0f, 0.0f, 0.0f, 1.0f);
+
+	vk::PipelineMultisampleStateCreateInfo multisamplerInfo(vk::PipelineMultisampleStateCreateFlags(), vk::SampleCountFlagBits::e1, false, 1.0f, nullptr, false, false);
+
+	vk::PipelineColorBlendAttachmentState colorBlend(false, vk::BlendFactor::eOne, vk::BlendFactor::eZero, vk::BlendOp::eAdd, vk::BlendFactor::eOne, vk::BlendFactor::eZero,
+		vk::BlendOp::eAdd, vk::ColorComponentFlags());
+	vk::PipelineColorBlendStateCreateInfo colorInfo = vk::PipelineColorBlendStateCreateInfo(vk::PipelineColorBlendStateCreateFlags(), false, vk::LogicOp::eCopy, 1, &colorBlend, { 0.0f, 0.0f, 0.0f, 0.0f });
+
+	vk::DynamicState dynamicStates[] = {
+		vk::DynamicState::eViewport,
+		vk::DynamicState::eLineWidth
+	};
+
+	vk::PipelineDynamicStateCreateInfo stateInfo(vk::PipelineDynamicStateCreateFlags(), 2, dynamicStates);
+	vk::PipelineLayoutCreateInfo layoutInfo(vk::PipelineLayoutCreateFlags(), 0, nullptr, 0, nullptr);
+
+	res = device.createPipelineLayout(&layoutInfo, nullptr, &pipelineLayout);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreatePipelineLayout Error: ") + vk::to_string(res));
+	}
+
+	// TO DO: Render passes
+
+	device.destroyShaderModule(vertShaderModule, nullptr);
+	device.destroyShaderModule(fragShaderModule, nullptr);
 }
 
 void update() {
@@ -366,6 +447,8 @@ void update() {
 }
 
 void cleanUp() {
+	device.destroyPipelineLayout(pipelineLayout, nullptr);
+
 	for (const vk::ImageView view : swapChainImageViews) {
 		device.destroyImageView(view, nullptr);
 	}

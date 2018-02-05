@@ -22,5 +22,8 @@
     <GLSLValidate Include="src\shaders\test.frag">
       <Filter>Shader Files</Filter>
     </GLSLValidate>
+    <GLSLValidate Include="src\shaders\test.vert">
+      <Filter>Shader Files</Filter>
+    </GLSLValidate>
   </ItemGroup>
 </Project>
