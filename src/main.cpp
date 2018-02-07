@@ -36,7 +36,10 @@ vk::Extent2D swapChainExtent;
 
 vk::Viewport viewport;
 
+vk::RenderPass renderPass;
 vk::PipelineLayout pipelineLayout;
+
+vk::Pipeline graphicsPipeline;
 
 #ifndef NDEBUG
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugReportFlagsEXT, VkDebugReportObjectTypeEXT, uint64_t, size_t, int32_t, const char*, const char* msg, void*) {
@@ -395,6 +398,20 @@ void initVulkan() {
 		tmp++;
 	}
 
+	vk::AttachmentDescription colorAttachment(vk::AttachmentDescriptionFlags(), swapChainFormat, vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore,
+		vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare, vk::ImageLayout::eUndefined, vk::ImageLayout::ePresentSrcKHR);
+	vk::AttachmentReference colorReference(0, vk::ImageLayout::eColorAttachmentOptimal);
+
+	vk::SubpassDescription subpass(vk::SubpassDescriptionFlags(), vk::PipelineBindPoint::eGraphics, 0, nullptr, 1, &colorReference, nullptr, nullptr, 0, nullptr);
+
+	vk::RenderPassCreateInfo renderInfo = vk::RenderPassCreateInfo(vk::RenderPassCreateFlags(), 1, &colorAttachment, 1, &subpass, 0, nullptr);
+
+	res = device.createRenderPass(&renderInfo, nullptr, &renderPass);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateRenderPass Error: ") + vk::to_string(res));
+	}
+
 	std::vector<char> vertShaderCode = readFile("obj/shaders/test.vert.spv");
 	std::vector<char> fragShaderCode = readFile("obj/shaders/test.frag.spv");
 
@@ -427,7 +444,7 @@ void initVulkan() {
 		vk::DynamicState::eLineWidth
 	};
 
-	vk::PipelineDynamicStateCreateInfo stateInfo(vk::PipelineDynamicStateCreateFlags(), 2, dynamicStates);
+	vk::PipelineDynamicStateCreateInfo dynamicInfo(vk::PipelineDynamicStateCreateFlags(), 2, dynamicStates);
 	vk::PipelineLayoutCreateInfo layoutInfo(vk::PipelineLayoutCreateFlags(), 0, nullptr, 0, nullptr);
 
 	res = device.createPipelineLayout(&layoutInfo, nullptr, &pipelineLayout);
@@ -436,7 +453,14 @@ void initVulkan() {
 		throw std::runtime_error(std::string("VK_CreatePipelineLayout Error: ") + vk::to_string(res));
 	}
 
-	// TO DO: Render passes
+	vk::GraphicsPipelineCreateInfo pipelineInfo = vk::GraphicsPipelineCreateInfo(vk::PipelineCreateFlags(), 2, shaderStages, &vertexInfo, &inputInfo, nullptr, &viewportInfo, &rasterizerInfo,
+		&multisamplerInfo, nullptr, &colorInfo, &dynamicInfo, pipelineLayout, renderPass, 0, nullptr, -1);
+
+	res = device.createGraphicsPipelines(nullptr, 1, &pipelineInfo, nullptr, &graphicsPipeline);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateGraphicsPipelines Error: ") + vk::to_string(res));
+	}
 
 	device.destroyShaderModule(vertShaderModule, nullptr);
 	device.destroyShaderModule(fragShaderModule, nullptr);
@@ -447,7 +471,10 @@ void update() {
 }
 
 void cleanUp() {
+	device.destroyPipeline(graphicsPipeline, nullptr);
 	device.destroyPipelineLayout(pipelineLayout, nullptr);
+
+	device.destroyRenderPass(renderPass, nullptr);
 
 	for (const vk::ImageView view : swapChainImageViews) {
 		device.destroyImageView(view, nullptr);
