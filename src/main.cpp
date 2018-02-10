@@ -41,6 +41,14 @@ vk::PipelineLayout pipelineLayout;
 
 vk::Pipeline graphicsPipeline;
 
+std::vector<vk::Framebuffer> swapChainFramebuffers;
+
+vk::CommandPool commandPool;
+std::vector<vk::CommandBuffer> commandBuffers;
+
+vk::Semaphore imageAvailable;
+vk::Semaphore renderFinished;
+
 #ifndef NDEBUG
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugReportFlagsEXT, VkDebugReportObjectTypeEXT, uint64_t, size_t, int32_t, const char*, const char* msg, void*) {
 	throw std::runtime_error(std::string("VK_ValidationLayer Error: ") + msg);
@@ -404,7 +412,10 @@ void initVulkan() {
 
 	vk::SubpassDescription subpass(vk::SubpassDescriptionFlags(), vk::PipelineBindPoint::eGraphics, 0, nullptr, 1, &colorReference, nullptr, nullptr, 0, nullptr);
 
-	vk::RenderPassCreateInfo renderInfo = vk::RenderPassCreateInfo(vk::RenderPassCreateFlags(), 1, &colorAttachment, 1, &subpass, 0, nullptr);
+	vk::SubpassDependency dependency(VK_SUBPASS_EXTERNAL, 0, vk::PipelineStageFlags(vk::PipelineStageFlagBits::eColorAttachmentOutput), vk::PipelineStageFlags(vk::PipelineStageFlagBits::
+		eColorAttachmentOutput), vk::AccessFlags(vk::AccessFlagBits(0)), vk::AccessFlags(vk::AccessFlagBits::eColorAttachmentRead | vk::AccessFlagBits::eColorAttachmentWrite), vk::DependencyFlags());
+
+	vk::RenderPassCreateInfo renderInfo = vk::RenderPassCreateInfo(vk::RenderPassCreateFlags(), 1, &colorAttachment, 1, &subpass, 1, &dependency);
 
 	res = device.createRenderPass(&renderInfo, nullptr, &renderPass);
 
@@ -439,12 +450,13 @@ void initVulkan() {
 		vk::BlendOp::eAdd, vk::ColorComponentFlags());
 	vk::PipelineColorBlendStateCreateInfo colorInfo = vk::PipelineColorBlendStateCreateInfo(vk::PipelineColorBlendStateCreateFlags(), false, vk::LogicOp::eCopy, 1, &colorBlend, { 0.0f, 0.0f, 0.0f, 0.0f });
 
-	vk::DynamicState dynamicStates[] = {
+	/*vk::DynamicState dynamicStates[] = {
 		vk::DynamicState::eViewport,
 		vk::DynamicState::eLineWidth
 	};
 
-	vk::PipelineDynamicStateCreateInfo dynamicInfo(vk::PipelineDynamicStateCreateFlags(), 2, dynamicStates);
+	vk::PipelineDynamicStateCreateInfo dynamicInfo = (vk::PipelineDynamicStateCreateFlags(), 2, dynamicStates);*/
+
 	vk::PipelineLayoutCreateInfo layoutInfo(vk::PipelineLayoutCreateFlags(), 0, nullptr, 0, nullptr);
 
 	res = device.createPipelineLayout(&layoutInfo, nullptr, &pipelineLayout);
@@ -454,7 +466,7 @@ void initVulkan() {
 	}
 
 	vk::GraphicsPipelineCreateInfo pipelineInfo = vk::GraphicsPipelineCreateInfo(vk::PipelineCreateFlags(), 2, shaderStages, &vertexInfo, &inputInfo, nullptr, &viewportInfo, &rasterizerInfo,
-		&multisamplerInfo, nullptr, &colorInfo, &dynamicInfo, pipelineLayout, renderPass, 0, nullptr, -1);
+		&multisamplerInfo, nullptr, &colorInfo, nullptr, pipelineLayout, renderPass, 0, nullptr, -1);
 
 	res = device.createGraphicsPipelines(nullptr, 1, &pipelineInfo, nullptr, &graphicsPipeline);
 
@@ -464,13 +476,154 @@ void initVulkan() {
 
 	device.destroyShaderModule(vertShaderModule, nullptr);
 	device.destroyShaderModule(fragShaderModule, nullptr);
+
+	swapChainFramebuffers.resize(swapChainImageViews.size());
+
+	vk::FramebufferCreateInfo framebufferInfo;
+
+	for (size_t i = 0; i < swapChainImageViews.size(); i++) {
+		framebufferInfo = vk::FramebufferCreateInfo(vk::FramebufferCreateFlags(), renderPass, 1, &swapChainImageViews[i], swapChainExtent.width, swapChainExtent.height, 1);
+		
+		res = device.createFramebuffer(&framebufferInfo, nullptr, &swapChainFramebuffers[i]);
+
+		if (res != vk::Result::eSuccess) {
+			throw std::runtime_error(std::string("VK_CreateFramebuffer Error: ") + vk::to_string(res));
+		}
+	}
+
+	vk::CommandPoolCreateInfo poolInfo(vk::CommandPoolCreateFlags(), graphicsQueueIndex);
+
+	res = device.createCommandPool(&poolInfo, nullptr, &commandPool);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateCommandPool Error: ") + vk::to_string(res));
+	}
+
+	commandBuffers.resize(swapChainFramebuffers.size());
+
+	vk::CommandBufferAllocateInfo allocInfo = vk::CommandBufferAllocateInfo(commandPool, vk::CommandBufferLevel::ePrimary, (uint32_t)commandBuffers.size());
+
+	res = device.allocateCommandBuffers(&allocInfo, commandBuffers.data());
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_AllocateCommandBuffers Error: ") + vk::to_string(res));
+	}
+
+	vk::CommandBufferBeginInfo commandBeginInfo;
+	vk::RenderPassBeginInfo renderBeginInfo;
+
+	vk::ClearValue clearColor(vk::ClearColorValue(std::array<float, 4>({ 1.0f, 0.0f, 0.0f, 1.0f })));
+
+	for (size_t i = 0; i < commandBuffers.size(); i++) {
+		commandBeginInfo = vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eSimultaneousUse, nullptr);
+		commandBuffers[i].begin(&commandBeginInfo);
+
+		renderBeginInfo = vk::RenderPassBeginInfo(renderPass, swapChainFramebuffers[i], scissor, 1, &clearColor);
+		commandBuffers[i].beginRenderPass(&renderBeginInfo, vk::SubpassContents::eInline);
+
+		commandBuffers[i].bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
+		commandBuffers[i].draw(3, 1, 0, 0);
+		commandBuffers[i].endRenderPass();
+
+		//commandBuffers[i].end();
+
+		res = vk::Result(vkEndCommandBuffer(commandBuffers[i]));
+
+		if (res != vk::Result::eSuccess) {
+			throw std::runtime_error(std::string("VK_EndCommandBuffer Error: ") + vk::to_string(res));
+		}
+	}
+
+	vk::SemaphoreCreateInfo semaphoreInfo = vk::SemaphoreCreateInfo(vk::SemaphoreCreateFlags());
+
+	res = device.createSemaphore(&semaphoreInfo, nullptr, &imageAvailable);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateSemaphore Error: ") + vk::to_string(res));
+	}
+
+	res = device.createSemaphore(&semaphoreInfo, nullptr, &renderFinished);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateSemaphore Error: ") + vk::to_string(res));
+	}
+}
+
+void drawFrame() {
+	// Update engine state
+
+	presentationQueue.waitIdle();
+
+	uint32_t imageIndex;
+
+	vk::Result res = device.acquireNextImageKHR(swapChain, std::numeric_limits<uint64_t>::max(), imageAvailable, nullptr, &imageIndex);
+
+	if (res == vk::Result::eErrorOutOfDateKHR) {
+		throw std::runtime_error("TO DO: Handle out of date swapchain");
+	}
+	else if (res != vk::Result::eSuccess && res != vk::Result::eSuboptimalKHR) {
+		throw std::runtime_error(std::string("VK_AcquireNextImageKHR Error: ") + vk::to_string(res));
+	}
+
+	vk::PipelineStageFlags waitStages[] = {
+		vk::PipelineStageFlagBits::eColorAttachmentOutput
+	};
+
+	vk::SubmitInfo submitInfo(1, &imageAvailable, waitStages, 1, &commandBuffers[imageIndex], 1, &renderFinished);
+
+	res = graphicsQueue.submit(1, &submitInfo, nullptr);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_QueueSubmit Error: ") + vk::to_string(res));
+	}
+
+	vk::PresentInfoKHR presentInfo = vk::PresentInfoKHR(1, &renderFinished, 1, &swapChain, &imageIndex, nullptr);
+
+	res = presentationQueue.presentKHR(&presentInfo);
+
+	if (res == vk::Result::eErrorOutOfDateKHR || res == vk::Result::eSuboptimalKHR) {
+		throw std::runtime_error("TO DO: Handle out of date swapchain");
+	}
+	else if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_QueuePresentKHR Error: ") + vk::to_string(res));
+	}
+
+	presentationQueue.waitIdle();
 }
 
 void update() {
-	// TO DO
+	SDL_Event event;
+
+	bool quit = false;
+
+	while (!quit) {
+		while (SDL_PollEvent(&event)) {
+			if (event.type == SDL_QUIT) {
+				quit = true;
+			}
+			else if (event.type == SDL_KEYDOWN) {
+				if (event.key.keysym.sym == SDLK_ESCAPE) {
+					quit = true;
+				}
+			}
+		}
+
+		drawFrame();
+	}
+
+	device.waitIdle();
 }
 
 void cleanUp() {
+	device.destroySemaphore(imageAvailable, nullptr);
+	device.destroySemaphore(renderFinished, nullptr);
+
+	device.destroyCommandPool(commandPool, nullptr);
+
+	for (const vk::Framebuffer framebuffer : swapChainFramebuffers) {
+		device.destroyFramebuffer(framebuffer, nullptr);
+	}
+
 	device.destroyPipeline(graphicsPipeline, nullptr);
 	device.destroyPipelineLayout(pipelineLayout, nullptr);
 
