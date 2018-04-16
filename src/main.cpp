@@ -27,6 +27,8 @@ const std::vector<const char*> devExt = {
 
 SDL_Window* window;
 
+bool isFullscreen = false;
+
 vk::Instance instance;
 vk::DebugReportCallbackEXT callback;
 
@@ -100,7 +102,7 @@ int SDL_main(int argc, char* argv[]);
 static void initSDL();
 static void initVulkan();
 static void update();
-static void cleanUp();
+static void cleanup();
 
 static void drawFrame();
 
@@ -118,6 +120,9 @@ static void createCommandPool();
 static void createCommandBuffers();
 static void createSemaphores();
 
+static void recreateSwapChain();
+static void cleanupSwapChain();
+
 int SDL_main(int argc, char* argv[]) {
 	try {
 		initSDL();
@@ -131,7 +136,7 @@ int SDL_main(int argc, char* argv[]) {
 	}
 
 	try {
-		cleanUp();
+		cleanup();
 	}
 	catch (std::runtime_error e) {
 		std::cerr << e.what() << std::endl;
@@ -192,6 +197,13 @@ static void update() {
 				if (event.key.keysym.sym == SDLK_ESCAPE) {
 					quit = true;
 				}
+				else if (event.key.keysym.sym == SDLK_f) {
+					isFullscreen = !isFullscreen;
+
+					SDL_SetWindowFullscreen(window, isFullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+
+					recreateSwapChain();
+				}
 			}
 		}
 
@@ -201,26 +213,13 @@ static void update() {
 	device.waitIdle();
 }
 
-static void cleanUp() {
+static void cleanup() {
 	device.destroySemaphore(imageAvailable, nullptr);
 	device.destroySemaphore(renderFinished, nullptr);
 
 	device.destroyCommandPool(commandPool, nullptr);
 
-	for (const vk::Framebuffer framebuffer : swapChainFramebuffers) {
-		device.destroyFramebuffer(framebuffer, nullptr);
-	}
-
-	device.destroyPipeline(graphicsPipeline, nullptr);
-	device.destroyPipelineLayout(pipelineLayout, nullptr);
-
-	device.destroyRenderPass(renderPass, nullptr);
-
-	for (const vk::ImageView view : swapChainImageViews) {
-		device.destroyImageView(view, nullptr);
-	}
-
-	device.destroySwapchainKHR(swapChain, nullptr);
+	cleanupSwapChain();
 
 	device.destroy();
 
@@ -245,7 +244,9 @@ static void drawFrame() {
 	vk::Result res = device.acquireNextImageKHR(swapChain, std::numeric_limits<uint64_t>::max(), imageAvailable, nullptr, &imageIndex);
 
 	if (res == vk::Result::eErrorOutOfDateKHR) {
-		throw std::runtime_error("TO DO: Handle out of date swapchain");
+		recreateSwapChain();
+
+		return;
 	}
 	else if (res != vk::Result::eSuccess && res != vk::Result::eSuboptimalKHR) {
 		throw std::runtime_error(std::string("VK_AcquireNextImageKHR Error: ") + vk::to_string(res));
@@ -268,7 +269,7 @@ static void drawFrame() {
 	res = presentationQueue.presentKHR(&presentInfo);
 
 	if (res == vk::Result::eErrorOutOfDateKHR || res == vk::Result::eSuboptimalKHR) {
-		throw std::runtime_error("TO DO: Handle out of date swapchain");
+		recreateSwapChain();
 	}
 	else if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_QueuePresentKHR Error: ") + vk::to_string(res));
@@ -506,8 +507,12 @@ static void createSwapChain() {
 		swapChainExtent = surfaceCapabilities.currentExtent;
 	}
 	else {
-		swapChainExtent = vk::Extent2D(std::max(static_cast<uint16_t>(surfaceCapabilities.minImageExtent.width), std::min(static_cast<uint16_t>(surfaceCapabilities.maxImageExtent.width), WIDTH)),
-			std::max(static_cast<uint16_t>(surfaceCapabilities.minImageExtent.height), std::min(static_cast<uint16_t>(surfaceCapabilities.maxImageExtent.height), HEIGHT)));
+		uint32_t width, height;
+
+		SDL_GetWindowSize(window, (int*)&width, (int*)&height);
+
+		swapChainExtent = vk::Extent2D(std::max(surfaceCapabilities.minImageExtent.width, std::min(surfaceCapabilities.maxImageExtent.width, width)),
+			std::max(surfaceCapabilities.minImageExtent.height, std::min(surfaceCapabilities.maxImageExtent.height, height)));
 	}
 
 	uint32_t imageCount = surfaceCapabilities.minImageCount + 1;
@@ -746,4 +751,34 @@ static void createSemaphores() {
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateSemaphore Error: ") + vk::to_string(res));
 	}
+}
+
+static void recreateSwapChain() {
+	device.waitIdle();
+
+	cleanupSwapChain();
+
+	createSwapChain();
+	createImageViews();
+	createRenderPass();
+	createGraphicsPipeline();
+	createFramebuffers();
+	createCommandBuffers();
+}
+
+static void cleanupSwapChain() {
+	for (const vk::Framebuffer framebuffer : swapChainFramebuffers) {
+		device.destroyFramebuffer(framebuffer, nullptr);
+	}
+
+	device.destroyPipeline(graphicsPipeline, nullptr);
+	device.destroyPipelineLayout(pipelineLayout, nullptr);
+
+	device.destroyRenderPass(renderPass, nullptr);
+
+	for (const vk::ImageView view : swapChainImageViews) {
+		device.destroyImageView(view, nullptr);
+	}
+
+	device.destroySwapchainKHR(swapChain, nullptr);
 }
