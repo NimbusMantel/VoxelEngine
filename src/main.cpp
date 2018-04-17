@@ -214,6 +214,21 @@ static void update() {
 			if (event.type == SDL_QUIT) {
 				quit = true;
 			}
+			else if (event.type == SDL_WINDOWEVENT) {
+				vk::SurfaceCapabilitiesKHR surfaceCapabilities = physical.getSurfaceCapabilitiesKHR(surface);
+
+				if (surfaceCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max() && surfaceCapabilities.currentExtent.height != std::numeric_limits<uint32_t>::max()) {
+					swapChainExtent = surfaceCapabilities.currentExtent;
+				}
+				else {
+					uint32_t width, height;
+
+					SDL_GetWindowSize(window, (int*)&width, (int*)&height);
+
+					swapChainExtent = vk::Extent2D(std::max(surfaceCapabilities.minImageExtent.width, std::min(surfaceCapabilities.maxImageExtent.width, width)),
+						std::max(surfaceCapabilities.minImageExtent.height, std::min(surfaceCapabilities.maxImageExtent.height, height)));
+				}
+			}
 			else if (event.type == SDL_KEYDOWN) {
 				if (event.key.keysym.sym == SDLK_ESCAPE) {
 					quit = true;
@@ -228,7 +243,9 @@ static void update() {
 			}
 		}
 
-		drawFrame();
+		if (swapChainExtent.width > 0 && swapChainExtent.height > 0) {
+			drawFrame();
+		}
 	}
 
 	device.waitIdle();
@@ -553,7 +570,7 @@ static void createSwapChain() {
 		}
 	}
 
-	if (surfaceCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+	if (surfaceCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max() && surfaceCapabilities.currentExtent.height != std::numeric_limits<uint32_t>::max()) {
 		swapChainExtent = surfaceCapabilities.currentExtent;
 	}
 	else {
@@ -819,7 +836,7 @@ static void createCommandBuffers() {
 		vk::ImageSubresourceLayers imageLayer = vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1);
 		std::array<vk::Offset3D, 2> imageExtent = { vk::Offset3D(0, 0, 0), vk::Offset3D(swapChainExtent.width, swapChainExtent.height, 1) };
 
-		commandBuffers[i].blitImage(offscreenPass.image, vk::ImageLayout::eTransferSrcOptimal, swapChainImages[i], vk::ImageLayout::ePresentSrcKHR,
+		commandBuffers[i].blitImage(offscreenPass.image, vk::ImageLayout::eTransferSrcOptimal, swapChainImages[i], vk::ImageLayout::eTransferDstOptimal,
 			std::array<vk::ImageBlit, 1>({ vk::ImageBlit(offsetLayer, offsetExtent, imageLayer, imageExtent) }), vk::Filter::eNearest);
 
 		commandBuffers[i].pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAllCommands, vk::DependencyFlagBits::eByRegion, {}, {},
@@ -858,6 +875,12 @@ static void createSemaphores() {
 
 static void recreateSwapChain() {
 	device.waitIdle();
+
+	vk::SurfaceCapabilitiesKHR surfaceCapabilities = physical.getSurfaceCapabilitiesKHR(surface);
+
+	if (surfaceCapabilities.currentExtent.width == 0 || surfaceCapabilities.currentExtent.height == 0) {
+		return;
+	}
 
 	cleanupSwapChain();
 
