@@ -46,6 +46,8 @@ struct QueueFamilies {
 
 vk::Device device;
 
+vk::PhysicalDeviceMemoryProperties memoryProps;
+
 vk::Queue graphicsQueue;
 vk::Queue computeQueue;
 vk::Queue presentationQueue;
@@ -53,7 +55,6 @@ vk::Queue presentationQueue;
 vk::SwapchainKHR swapChain;
 
 std::vector<vk::Image> swapChainImages;
-std::vector<vk::ImageView> swapChainImageViews;
 
 vk::Format swapChainFormat;
 vk::Extent2D swapChainExtent;
@@ -65,13 +66,29 @@ vk::PipelineLayout pipelineLayout;
 
 vk::Pipeline graphicsPipeline;
 
-std::vector<vk::Framebuffer> swapChainFramebuffers;
-
 vk::CommandPool commandPool;
 std::vector<vk::CommandBuffer> commandBuffers;
 
 vk::Semaphore imageAvailable;
 vk::Semaphore renderFinished;
+
+struct OffscreenPass {
+	vk::Format format = vk::Format::eR8G8B8A8Unorm;
+	vk::Extent2D extent = vk::Extent2D(WIDTH, HEIGHT);
+	vk::ClearValue clearColor = vk::ClearColorValue(std::array<float, 4>( { 0.0f, 0.0f, 0.0f, 0.0f }));
+
+	vk::Image image;
+	vk::DeviceMemory memory;
+	vk::ImageView view;
+
+	vk::RenderPass renderPass;
+
+	vk::Framebuffer frameBuffer;
+
+	vk::CommandBuffer commandBuffer;
+
+	vk::Semaphore semaphore;
+} offscreenPass;
 
 #ifndef NDEBUG
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugReportFlagsEXT, VkDebugReportObjectTypeEXT, uint64_t, size_t, int32_t, const char*, const char* msg, void*) {
@@ -112,11 +129,13 @@ static void createSurface();
 static void pickPhysicalDevice();
 static void createLogicalDevice();
 static void createSwapChain();
-static void createImageViews();
+static void createImage();
+static void createImageView();
 static void createRenderPass();
 static void createGraphicsPipeline();
-static void createFramebuffers();
+static void createFramebuffer();
 static void createCommandPool();
+static void createCommandBuffer();
 static void createCommandBuffers();
 static void createSemaphores();
 
@@ -172,12 +191,14 @@ static void initVulkan() {
 	createLogicalDevice();
 
 	createSwapChain();
-	createImageViews();
+	createImage();
+	createImageView();
 	createRenderPass();
 	createGraphicsPipeline();
-	createFramebuffers();
+	createFramebuffer();
 
 	createCommandPool();
+	createCommandBuffer();
 	createCommandBuffers();
 
 	createSemaphores();
@@ -216,10 +237,23 @@ static void update() {
 static void cleanup() {
 	device.destroySemaphore(imageAvailable, nullptr);
 	device.destroySemaphore(renderFinished, nullptr);
+	device.destroySemaphore(offscreenPass.semaphore, nullptr);
 
+	device.destroyFramebuffer(offscreenPass.frameBuffer, nullptr);
+
+	device.freeCommandBuffers(commandPool, { offscreenPass.commandBuffer });
+	device.freeCommandBuffers(commandPool, commandBuffers);
 	device.destroyCommandPool(commandPool, nullptr);
 
-	cleanupSwapChain();
+	device.destroyPipeline(graphicsPipeline, nullptr);
+	device.destroyPipelineLayout(pipelineLayout, nullptr);
+	device.destroyRenderPass(renderPass, nullptr);
+
+	device.destroyImageView(offscreenPass.view, nullptr);
+	device.destroyImage(offscreenPass.image, nullptr);
+	device.freeMemory(offscreenPass.memory, nullptr);
+
+	device.destroySwapchainKHR(swapChain, nullptr);
 
 	device.destroy();
 
@@ -256,7 +290,17 @@ static void drawFrame() {
 		vk::PipelineStageFlagBits::eColorAttachmentOutput
 	};
 
-	vk::SubmitInfo submitInfo(1, &imageAvailable, waitStages, 1, &commandBuffers[imageIndex], 1, &renderFinished);
+	vk::SubmitInfo submitInfo(1, &imageAvailable, waitStages, 1, &offscreenPass.commandBuffer, 1, &offscreenPass.semaphore);
+
+	res = graphicsQueue.submit(1, &submitInfo, nullptr);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_QueueSubmit Error: ") + vk::to_string(res));
+	}
+
+	waitStages[0] = vk::PipelineStageFlagBits::eTransfer;
+
+	submitInfo = vk::SubmitInfo(1, &offscreenPass.semaphore, waitStages, 1, &commandBuffers[imageIndex], 1, &renderFinished);
 
 	res = graphicsQueue.submit(1, &submitInfo, nullptr);
 
@@ -329,7 +373,7 @@ static void pickPhysicalDevice() {
 	std::vector<vk::PhysicalDevice> physDevs = instance.enumeratePhysicalDevices();
 
 	if (physDevs.size() == 0) {
-		throw std::runtime_error(std::string("VK_EnumeratePhysicalDevices Error: ") + "ErrorVulkanGPUNotPresent");
+		throw std::runtime_error(std::string("VK_EnumeratePhysicalDevices Error: ") + "VulkanGPUNotPresent");
 	}
 
 	uint32_t maxGPUScore = 0;
@@ -414,6 +458,10 @@ static void pickPhysicalDevice() {
 			continue;
 		}
 
+		if ((dev.getSurfaceCapabilitiesKHR(surface).supportedUsageFlags & vk::ImageUsageFlagBits::eTransferDst) != vk::ImageUsageFlagBits::eTransferDst) {
+			continue;
+		}
+
 		if (gpuScore > maxGPUScore) {
 			maxGPUScore = gpuScore;
 
@@ -426,10 +474,12 @@ static void pickPhysicalDevice() {
 	}
 
 	if (maxGPUScore <= 0) {
-		throw std::runtime_error(std::string("VK_EnumeratePhysicalDevices Error: ") + "ErrorSuitableGPUNotPresent");
+		throw std::runtime_error(std::string("VK_EnumeratePhysicalDevices Error: ") + "SuitableGPUNotAvailable");
 	}
 
 	physical = selDev;
+
+	physical.getMemoryProperties(&memoryProps);
 
 	queueIndices.graphicsFamily = graphicsQueueIndex;
 	queueIndices.computeFamily = computeQueueIndex;
@@ -528,7 +578,7 @@ static void createSwapChain() {
 	swapInfo.imageColorSpace = surfaceFormat.colorSpace;
 	swapInfo.imageExtent = swapChainExtent;
 	swapInfo.imageArrayLayers = 1;
-	swapInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
+	swapInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst;
 
 	std::vector<uint32_t> queueIndicesData(queueIndices.uniqueFamilies.size());
 
@@ -558,36 +608,66 @@ static void createSwapChain() {
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateSwapchainKHR Error: ") + vk::to_string(res));
 	}
+
+	swapChainImages = device.getSwapchainImagesKHR(swapChain);
 }
 
-static void createImageViews() {
-	swapChainImages = device.getSwapchainImagesKHR(swapChain);
+static void createImage() {
+	vk::ImageCreateInfo offscreenInfo = vk::ImageCreateInfo(vk::ImageCreateFlags(), vk::ImageType::e2D, offscreenPass.format, vk::Extent3D(WIDTH, HEIGHT, 1), 1, 1, vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal,
+		vk::ImageUsageFlags(vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferSrc), vk::SharingMode::eExclusive, 1, &queueIndices.graphicsFamily, vk::ImageLayout::eUndefined);
 
-	swapChainImageViews.resize(swapChainImages.size());
+	vk::Result res = device.createImage(&offscreenInfo, nullptr, &offscreenPass.image);
 
-	vk::ImageViewCreateInfo viewInfo;
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateImage Error: ") + vk::to_string(res));
+	}
 
-	vk::Result res;
+	vk::MemoryRequirements memReqs = device.getImageMemoryRequirements(offscreenPass.image);
 
-	uint32_t tmp = 0;
+	int offscreenIndex = -1;
+	uint32_t typeBits = memReqs.memoryTypeBits;
 
-	for (const vk::Image img : swapChainImages) {
-		viewInfo = vk::ImageViewCreateInfo(vk::ImageViewCreateFlags(), img, vk::ImageViewType::e2D, swapChainFormat, vk::ComponentMapping(vk::ComponentSwizzle::eIdentity,
-			vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity), vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
+	for (uint32_t i = 0; i < memoryProps.memoryTypeCount; i++) {
+		if ((typeBits & 0x01) == 0x01) {
+			if ((memoryProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal) == vk::MemoryPropertyFlagBits::eDeviceLocal) {
+				offscreenIndex = i;
 
-		res = device.createImageView(&viewInfo, nullptr, &swapChainImageViews[tmp]);
-
-		if (res != vk::Result::eSuccess) {
-			throw std::runtime_error(std::string("VK_CreateImageView Error: ") + vk::to_string(res));
+				break;
+			}
 		}
 
-		tmp++;
+		typeBits >>= 1;
+	}
+
+	if (offscreenIndex == -1) {
+		throw std::runtime_error(std::string("VK_GetPhysicalDeviceMemoryProperties Error: ") + "SuitableMemoryNotAvailable");
+	}
+
+	vk::MemoryAllocateInfo allocInfo = vk::MemoryAllocateInfo(memReqs.size, offscreenIndex);
+
+	res = device.allocateMemory(&allocInfo, nullptr, &offscreenPass.memory);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
+	}
+
+	device.bindImageMemory(offscreenPass.image, offscreenPass.memory, 0);
+}
+
+static void createImageView() {
+	vk::ImageViewCreateInfo viewInfo(vk::ImageViewCreateFlags(), offscreenPass.image, vk::ImageViewType::e2D, offscreenPass.format, vk::ComponentMapping(vk::ComponentSwizzle::eIdentity,
+		vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity), vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
+
+	vk::Result res = device.createImageView(&viewInfo, nullptr, &offscreenPass.view);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateImageView Error: ") + vk::to_string(res));
 	}
 }
 
 static void createRenderPass() {
-	vk::AttachmentDescription colorAttachment(vk::AttachmentDescriptionFlags(), swapChainFormat, vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore,
-		vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare, vk::ImageLayout::eUndefined, vk::ImageLayout::ePresentSrcKHR);
+	vk::AttachmentDescription colorAttachment(vk::AttachmentDescriptionFlags(), offscreenPass.format, vk::SampleCountFlagBits::e1, vk::AttachmentLoadOp::eClear, vk::AttachmentStoreOp::eStore,
+		vk::AttachmentLoadOp::eDontCare, vk::AttachmentStoreOp::eDontCare, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferSrcOptimal);
 	vk::AttachmentReference colorReference(0, vk::ImageLayout::eColorAttachmentOptimal);
 
 	vk::SubpassDescription subpass(vk::SubpassDescriptionFlags(), vk::PipelineBindPoint::eGraphics, 0, nullptr, 1, &colorReference, nullptr, nullptr, 0, nullptr);
@@ -633,8 +713,8 @@ static void createGraphicsPipeline() {
 	vk::PipelineVertexInputStateCreateInfo vertexInfo(vk::PipelineVertexInputStateCreateFlags(), 0, nullptr, 0, nullptr);
 	vk::PipelineInputAssemblyStateCreateInfo inputInfo(vk::PipelineInputAssemblyStateCreateFlags(), vk::PrimitiveTopology::eTriangleList, false);
 
-	viewport = vk::Viewport(0.0f, 0.0f, (float)swapChainExtent.width, (float)swapChainExtent.height, 0.0f, 1.0f);
-	vk::Rect2D scissor = vk::Rect2D(vk::Offset2D(0, 0), swapChainExtent);
+	viewport = vk::Viewport(0.0f, 0.0f, (float)offscreenPass.extent.width, (float)offscreenPass.extent.height, 0.0f, 1.0f);
+	vk::Rect2D scissor = vk::Rect2D(vk::Offset2D(0, 0), offscreenPass.extent);
 	vk::PipelineViewportStateCreateInfo viewportInfo(vk::PipelineViewportStateCreateFlags(), 1, &viewport, 1, &scissor);
 
 	vk::PipelineRasterizationStateCreateInfo rasterizerInfo(vk::PipelineRasterizationStateCreateFlags(), false, false, vk::PolygonMode::eFill, vk::CullModeFlagBits::eBack, vk::FrontFace::eClockwise,
@@ -645,14 +725,6 @@ static void createGraphicsPipeline() {
 	vk::PipelineColorBlendAttachmentState colorBlend(false, vk::BlendFactor::eOne, vk::BlendFactor::eZero, vk::BlendOp::eAdd, vk::BlendFactor::eOne, vk::BlendFactor::eZero,
 		vk::BlendOp::eAdd, vk::ColorComponentFlags(vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA));
 	vk::PipelineColorBlendStateCreateInfo colorInfo = vk::PipelineColorBlendStateCreateInfo(vk::PipelineColorBlendStateCreateFlags(), false, vk::LogicOp::eCopy, 1, &colorBlend, { 0.0f, 0.0f, 0.0f, 0.0f });
-
-	/*vk::DynamicState dynamicStates[] = {
-	vk::DynamicState::eViewport,
-	vk::DynamicState::eLineWidth
-	};
-
-	vk::PipelineDynamicStateCreateInfo dynamicInfo = (vk::PipelineDynamicStateCreateFlags(), 2, dynamicStates);*/
-
 	vk::PipelineLayoutCreateInfo layoutInfo(vk::PipelineLayoutCreateFlags(), 0, nullptr, 0, nullptr);
 
 	vk::Result res = device.createPipelineLayout(&layoutInfo, nullptr, &pipelineLayout);
@@ -674,21 +746,13 @@ static void createGraphicsPipeline() {
 	device.destroyShaderModule(fragShaderModule, nullptr);
 }
 
-static void createFramebuffers() {
-	swapChainFramebuffers.resize(swapChainImageViews.size());
+static void createFramebuffer() {
+	vk::FramebufferCreateInfo framebufferInfo(vk::FramebufferCreateFlags(), renderPass, 1, &offscreenPass.view, offscreenPass.extent.width, offscreenPass.extent.height, 1);
 
-	vk::FramebufferCreateInfo framebufferInfo;
+	vk::Result res = device.createFramebuffer(&framebufferInfo, nullptr, &offscreenPass.frameBuffer);
 
-	vk::Result res;
-
-	for (size_t i = 0; i < swapChainImageViews.size(); i++) {
-		framebufferInfo = vk::FramebufferCreateInfo(vk::FramebufferCreateFlags(), renderPass, 1, &swapChainImageViews[i], swapChainExtent.width, swapChainExtent.height, 1);
-
-		res = device.createFramebuffer(&framebufferInfo, nullptr, &swapChainFramebuffers[i]);
-
-		if (res != vk::Result::eSuccess) {
-			throw std::runtime_error(std::string("VK_CreateFramebuffer Error: ") + vk::to_string(res));
-		}
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateFramebuffer Error: ") + vk::to_string(res));
 	}
 }
 
@@ -702,8 +766,34 @@ static void createCommandPool() {
 	}
 }
 
+static void createCommandBuffer() {
+	vk::CommandBufferAllocateInfo allocInfo = vk::CommandBufferAllocateInfo(commandPool, vk::CommandBufferLevel::ePrimary, 1);
+
+	vk::Result res = device.allocateCommandBuffers(&allocInfo, &offscreenPass.commandBuffer);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_AllocateCommandBuffers Error: ") + vk::to_string(res));
+	}
+
+	vk::CommandBufferBeginInfo commandBeginInfo(vk::CommandBufferUsageFlagBits::eSimultaneousUse, nullptr);
+	vk::RenderPassBeginInfo renderBeginInfo(renderPass, offscreenPass.frameBuffer, vk::Rect2D(vk::Offset2D(0, 0), swapChainExtent), 1, &offscreenPass.clearColor);
+
+	offscreenPass.commandBuffer.begin(&commandBeginInfo);
+	offscreenPass.commandBuffer.beginRenderPass(&renderBeginInfo, vk::SubpassContents::eInline);
+
+	offscreenPass.commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
+	offscreenPass.commandBuffer.draw(3, 1, 0, 0);
+	offscreenPass.commandBuffer.endRenderPass();
+
+	res = vk::Result(vkEndCommandBuffer(offscreenPass.commandBuffer)); // use C API to get result value
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_EndCommandBuffer Error: ") + vk::to_string(res));
+	}
+}
+
 static void createCommandBuffers() {
-	commandBuffers.resize(swapChainFramebuffers.size());
+	commandBuffers.resize(swapChainImages.size());
 
 	vk::CommandBufferAllocateInfo allocInfo = vk::CommandBufferAllocateInfo(commandPool, vk::CommandBufferLevel::ePrimary, (uint32_t)commandBuffers.size());
 
@@ -714,20 +804,27 @@ static void createCommandBuffers() {
 	}
 
 	vk::CommandBufferBeginInfo commandBeginInfo;
-	vk::RenderPassBeginInfo renderBeginInfo;
 
-	vk::ClearValue clearColor(vk::ClearColorValue(std::array<float, 4>({ 0.0f, 0.0f, 0.0f, 0.0f })));
+	vk::ImageSubresourceLayers offsetLayer(vk::ImageAspectFlagBits::eColor, 0, 0, 1);
+	std::array<vk::Offset3D, 2> offsetExtent = { vk::Offset3D(0, 0, 0), vk::Offset3D(offscreenPass.extent.width, offscreenPass.extent.height, 1) };
 
 	for (size_t i = 0; i < commandBuffers.size(); i++) {
 		commandBeginInfo = vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eSimultaneousUse, nullptr);
 		commandBuffers[i].begin(&commandBeginInfo);
 
-		renderBeginInfo = vk::RenderPassBeginInfo(renderPass, swapChainFramebuffers[i], vk::Rect2D(vk::Offset2D(0, 0), swapChainExtent), 1, &clearColor);
-		commandBuffers[i].beginRenderPass(&renderBeginInfo, vk::SubpassContents::eInline);
+		commandBuffers[i].pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion, {}, {},
+			{ vk::ImageMemoryBarrier(vk::AccessFlagBits::eColorAttachmentRead, vk::AccessFlagBits::eTransferWrite, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
+				VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, swapChainImages[i], vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1)) });
 
-		commandBuffers[i].bindPipeline(vk::PipelineBindPoint::eGraphics, graphicsPipeline);
-		commandBuffers[i].draw(3, 1, 0, 0);
-		commandBuffers[i].endRenderPass();
+		vk::ImageSubresourceLayers imageLayer = vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1);
+		std::array<vk::Offset3D, 2> imageExtent = { vk::Offset3D(0, 0, 0), vk::Offset3D(swapChainExtent.width, swapChainExtent.height, 1) };
+
+		commandBuffers[i].blitImage(offscreenPass.image, vk::ImageLayout::eTransferSrcOptimal, swapChainImages[i], vk::ImageLayout::ePresentSrcKHR,
+			std::array<vk::ImageBlit, 1>({ vk::ImageBlit(offsetLayer, offsetExtent, imageLayer, imageExtent) }), vk::Filter::eNearest);
+
+		commandBuffers[i].pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAllCommands, vk::DependencyFlagBits::eByRegion, {}, {},
+			{ vk::ImageMemoryBarrier(vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eColorAttachmentRead, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR,
+				VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, swapChainImages[i], vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1)) });
 
 		res = vk::Result(vkEndCommandBuffer(commandBuffers[i])); // use C API to get result value
 
@@ -751,6 +848,12 @@ static void createSemaphores() {
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateSemaphore Error: ") + vk::to_string(res));
 	}
+
+	res = device.createSemaphore(&semaphoreInfo, nullptr, &offscreenPass.semaphore);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateSemaphore Error: ") + vk::to_string(res));
+	}
 }
 
 static void recreateSwapChain() {
@@ -759,26 +862,12 @@ static void recreateSwapChain() {
 	cleanupSwapChain();
 
 	createSwapChain();
-	createImageViews();
-	createRenderPass();
-	createGraphicsPipeline();
-	createFramebuffers();
+
 	createCommandBuffers();
 }
 
 static void cleanupSwapChain() {
-	for (const vk::Framebuffer framebuffer : swapChainFramebuffers) {
-		device.destroyFramebuffer(framebuffer, nullptr);
-	}
-
-	device.destroyPipeline(graphicsPipeline, nullptr);
-	device.destroyPipelineLayout(pipelineLayout, nullptr);
-
-	device.destroyRenderPass(renderPass, nullptr);
-
-	for (const vk::ImageView view : swapChainImageViews) {
-		device.destroyImageView(view, nullptr);
-	}
+	device.freeCommandBuffers(commandPool, commandBuffers);
 
 	device.destroySwapchainKHR(swapChain, nullptr);
 }
