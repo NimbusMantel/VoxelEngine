@@ -19,10 +19,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <GLSLValidate Include="src\shaders\test.frag">
-      <Filter>Shader Files</Filter>
-    </GLSLValidate>
-    <GLSLValidate Include="src\shaders\test.vert">
+    <GLSLValidate Include="src\shaders\test.comp">
       <Filter>Shader Files</Filter>
     </GLSLValidate>
   </ItemGroup>
