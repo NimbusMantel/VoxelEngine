@@ -1,5 +1,7 @@
 #include <SDL2/SDL.h>
 #include <vulkan/vulkan.hpp>
+#include <glm/mat3x3.hpp>
+#include <glm/vec3.hpp>
 
 #include <iostream>
 #include <cstdint>
@@ -87,6 +89,11 @@ struct OffscreenPass {
 	vk::CommandBuffer commandBuffer;
 
 	vk::Semaphore semaphore;
+
+	struct Constants {
+		glm::mat3 rot = glm::mat3(1.0f);
+		glm::vec3 pos = glm::vec3(0.0f, 1.0f, 0.0f);
+	} constants;
 } offscreenPass;
 
 #ifndef NDEBUG
@@ -120,6 +127,7 @@ static void initVulkan();
 static void update();
 static void cleanup();
 
+static void updateState();
 static void drawFrame();
 
 static void createInstance();
@@ -136,9 +144,10 @@ static void createDescriptorPool();
 static void createDescriptorSet();
 static void createComputePipeline();
 
-static void createCommandPool();
-static void createCommandBuffer();
-static void createCommandBuffers();
+static void createCommandPools();
+static void createRenderCommandBuffer();
+static void recordRenderCommandBuffer();
+static void createTransferCommandBuffers();
 
 static void createSemaphores();
 
@@ -200,9 +209,10 @@ static void initVulkan() {
 	createDescriptorSet();
 	createComputePipeline();
 
-	createCommandPool();
-	createCommandBuffer();
-	createCommandBuffers();
+	createCommandPools();
+	createRenderCommandBuffer();
+	recordRenderCommandBuffer();
+	createTransferCommandBuffers();
 
 	createSemaphores();
 }
@@ -247,6 +257,8 @@ static void update() {
 		}
 
 		if (swapChainExtent.width > 0 && swapChainExtent.height > 0) {
+			updateState();
+
 			drawFrame();
 		}
 	}
@@ -289,9 +301,13 @@ static void cleanup() {
 	SDL_Quit();
 }
 
-static void drawFrame() {
-	// Update engine state
+static void updateState() {
+	offscreenPass.constants.pos = glm::vec3(SDL_sinf(SDL_GetTicks() / 1000.0f) * 0.5f + 0.5f, SDL_sinf(SDL_GetTicks() / 900.0f) * 0.5f + 0.5f, SDL_sinf(SDL_GetTicks() / 700.0f + 2.0f) * 0.5f + 0.5f);
 
+	recordRenderCommandBuffer();
+}
+
+static void drawFrame() {
 	presentationQueue.waitIdle();
 
 	uint32_t imageIndex;
@@ -738,13 +754,9 @@ static vk::ShaderModule createShaderModule(const std::vector<char>& code) {
 }
 
 static void createComputePipeline() {
-	std::vector<char> compShaderCode = readFile("obj/shaders/test.comp.spv");
-
-	vk::ShaderModule compShaderModule = createShaderModule(compShaderCode);
-
-	vk::PipelineShaderStageCreateInfo compStageInfo = vk::PipelineShaderStageCreateInfo(vk::PipelineShaderStageCreateFlags(), vk::ShaderStageFlagBits::eCompute, compShaderModule, "main", nullptr);
-
-	vk::PipelineLayoutCreateInfo layoutInfo(vk::PipelineLayoutCreateFlags(), 1, &descriptorLayout, 0, nullptr);
+	vk::PushConstantRange constantRange(vk::ShaderStageFlagBits::eCompute, 0, sizeof(offscreenPass.constants));
+	
+	vk::PipelineLayoutCreateInfo layoutInfo(vk::PipelineLayoutCreateFlags(), 1, &descriptorLayout, 1, &constantRange);
 
 	vk::Result res = device.createPipelineLayout(&layoutInfo, nullptr, &pipelineLayout);
 
@@ -752,7 +764,11 @@ static void createComputePipeline() {
 		throw std::runtime_error(std::string("VK_CreatePipelineLayout Error: ") + vk::to_string(res));
 	}
 
-	vk::ComputePipelineCreateInfo pipelineInfo = vk::ComputePipelineCreateInfo(vk::PipelineCreateFlags(), compStageInfo, pipelineLayout, nullptr, -1);
+	std::vector<char> compShaderCode = readFile("obj/shaders/test.comp.spv");
+	vk::ShaderModule compShaderModule = createShaderModule(compShaderCode);
+	vk::PipelineShaderStageCreateInfo compStageInfo = vk::PipelineShaderStageCreateInfo(vk::PipelineShaderStageCreateFlags(), vk::ShaderStageFlagBits::eCompute, compShaderModule, "main", nullptr);
+
+	vk::ComputePipelineCreateInfo pipelineInfo(vk::PipelineCreateFlags(), compStageInfo, pipelineLayout, nullptr, -1);
 
 	res = device.createComputePipelines(nullptr, 1, &pipelineInfo, nullptr, &computePipeline);
 
@@ -763,8 +779,8 @@ static void createComputePipeline() {
 	device.destroyShaderModule(compShaderModule, nullptr);
 }
 
-static void createCommandPool() {
-	vk::CommandPoolCreateInfo poolInfo(vk::CommandPoolCreateFlags(vk::CommandPoolCreateFlagBits(0)), queueIndices.computeFamily);
+static void createCommandPools() {
+	vk::CommandPoolCreateInfo poolInfo(vk::CommandPoolCreateFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer), queueIndices.computeFamily);
 
 	vk::Result res = device.createCommandPool(&poolInfo, nullptr, &renderPool);
 
@@ -781,7 +797,7 @@ static void createCommandPool() {
 	}
 }
 
-static void createCommandBuffer() {
+static void createRenderCommandBuffer() {
 	vk::CommandBufferAllocateInfo allocInfo = vk::CommandBufferAllocateInfo(renderPool, vk::CommandBufferLevel::ePrimary, 1);
 
 	vk::Result res = device.allocateCommandBuffers(&allocInfo, &offscreenPass.commandBuffer);
@@ -789,23 +805,26 @@ static void createCommandBuffer() {
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateCommandBuffers Error: ") + vk::to_string(res));
 	}
+}
 
+static void recordRenderCommandBuffer() {
 	vk::CommandBufferBeginInfo commandBeginInfo(vk::CommandBufferUsageFlagBits::eSimultaneousUse, nullptr);
 
 	offscreenPass.commandBuffer.begin(&commandBeginInfo);
 
 	offscreenPass.commandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline);
 	offscreenPass.commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+	offscreenPass.commandBuffer.pushConstants(pipelineLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(offscreenPass.constants), &offscreenPass.constants);
 	offscreenPass.commandBuffer.dispatch(1, 1, 1);
 
-	res = vk::Result(vkEndCommandBuffer(offscreenPass.commandBuffer)); // use C API to get result value
+	vk::Result res = vk::Result(vkEndCommandBuffer(offscreenPass.commandBuffer)); // use C API to get result value
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_EndCommandBuffer Error: ") + vk::to_string(res));
 	}
 }
 
-static void createCommandBuffers() {
+static void createTransferCommandBuffers() {
 	commandBuffers.resize(swapChainImages.size());
 
 	vk::CommandBufferAllocateInfo allocInfo = vk::CommandBufferAllocateInfo(transferPool, vk::CommandBufferLevel::ePrimary, (uint32_t)commandBuffers.size());
@@ -882,7 +901,7 @@ static void recreateSwapChain() {
 
 	createSwapChain();
 
-	createCommandBuffers();
+	createTransferCommandBuffers();
 }
 
 static void cleanupSwapChain() {
