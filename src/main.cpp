@@ -14,6 +14,7 @@
 
 const uint16_t WIDTH = 640;
 const uint16_t HEIGHT = 360;
+const uint8_t  FOV = 70;
 
 #ifdef NDEBUG
 const std::vector<const char*> layers = {};
@@ -39,8 +40,8 @@ vk::SurfaceKHR surface;
 vk::PhysicalDevice physical;
 
 struct QueueFamilies {
-	uint32_t transferFamily;
 	uint32_t computeFamily;
+	uint32_t transferFamily;
 	uint32_t presentFamily;
 
 	std::set<uint32_t> uniqueFamilies;
@@ -93,8 +94,16 @@ struct OffscreenPass {
 	struct Constants {
 		glm::mat3 rot = glm::mat3(1.0f);
 		glm::vec3 pos = glm::vec3(0.0f, 1.0f, 0.0f);
+		float     fov = tanf(M_PI * FOV / 360.0f);
 	} constants;
 } offscreenPass;
+
+struct RayQueue {
+	vk::DeviceSize size = sizeof(uint32_t);
+
+	vk::Buffer buffer;
+	vk::DeviceMemory memory;
+} rayQueue;
 
 #ifndef NDEBUG
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugReportFlagsEXT, VkDebugReportObjectTypeEXT, uint64_t, size_t, int32_t, const char*, const char* msg, void*) {
@@ -139,6 +148,8 @@ static void createLogicalDevice();
 static void createSwapChain();
 static void createImage();
 static void createImageView();
+
+static void createBuffers();
 
 static void createDescriptorPool();
 static void createDescriptorSet();
@@ -205,6 +216,9 @@ static void initVulkan() {
 	createSwapChain();
 	createImage();
 	createImageView();
+
+	createBuffers();
+
 	createDescriptorPool();
 	createDescriptorSet();
 	createComputePipeline();
@@ -282,6 +296,9 @@ static void cleanup() {
 	device.destroyDescriptorSetLayout(descriptorLayout, nullptr);
 	device.destroyDescriptorPool(descriptorPool, nullptr);
 
+	device.destroyBuffer(rayQueue.buffer, nullptr);
+	device.freeMemory(rayQueue.memory, nullptr);
+
 	device.destroyImageView(offscreenPass.view, nullptr);
 	device.destroyImage(offscreenPass.image, nullptr);
 	device.freeMemory(offscreenPass.memory, nullptr);
@@ -302,9 +319,9 @@ static void cleanup() {
 }
 
 static void updateState() {
-	offscreenPass.constants.pos = glm::vec3(SDL_sinf(SDL_GetTicks() / 1000.0f) * 0.5f + 0.5f, SDL_sinf(SDL_GetTicks() / 900.0f) * 0.5f + 0.5f, SDL_sinf(SDL_GetTicks() / 700.0f + 2.0f) * 0.5f + 0.5f);
+	// Update position and rotation
 
-	recordRenderCommandBuffer();
+	//recordRenderCommandBuffer();
 }
 
 static void drawFrame() {
@@ -647,6 +664,28 @@ static void createSwapChain() {
 	swapChainImages = device.getSwapchainImagesKHR(swapChain);
 }
 
+static uint32_t getMemoryTypeIndex(uint32_t typeBits, vk::MemoryPropertyFlags flags) {
+	uint32_t index = -1;
+
+	for (uint32_t i = 0; i < memoryProps.memoryTypeCount; i++) {
+		if ((typeBits & 0x01) == 0x01) {
+			if ((memoryProps.memoryTypes[i].propertyFlags & flags) == flags) {
+				index = i;
+
+				break;
+			}
+		}
+
+		typeBits >>= 1;
+	}
+
+	if (index == -1) {
+		throw std::runtime_error(std::string("VK_GetPhysicalDeviceMemoryProperties Error: ") + "SuitableMemoryNotAvailable");
+	}
+
+	return index;
+}
+
 static void createImage() {
 	vk::ImageCreateInfo offscreenInfo = vk::ImageCreateInfo(vk::ImageCreateFlags(), vk::ImageType::e2D, offscreenPass.format, vk::Extent3D(WIDTH, HEIGHT, 1), 1, 1, vk::SampleCountFlagBits::e1,
 		vk::ImageTiling::eOptimal,vk::ImageUsageFlags(vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc), vk::SharingMode::eExclusive,
@@ -660,26 +699,7 @@ static void createImage() {
 
 	vk::MemoryRequirements memReqs = device.getImageMemoryRequirements(offscreenPass.image);
 
-	int offscreenIndex = -1;
-	uint32_t typeBits = memReqs.memoryTypeBits;
-
-	for (uint32_t i = 0; i < memoryProps.memoryTypeCount; i++) {
-		if ((typeBits & 0x01) == 0x01) {
-			if ((memoryProps.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal) == vk::MemoryPropertyFlagBits::eDeviceLocal) {
-				offscreenIndex = i;
-
-				break;
-			}
-		}
-
-		typeBits >>= 1;
-	}
-
-	if (offscreenIndex == -1) {
-		throw std::runtime_error(std::string("VK_GetPhysicalDeviceMemoryProperties Error: ") + "SuitableMemoryNotAvailable");
-	}
-
-	vk::MemoryAllocateInfo allocInfo = vk::MemoryAllocateInfo(memReqs.size, offscreenIndex);
+	vk::MemoryAllocateInfo allocInfo = vk::MemoryAllocateInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
 
 	res = device.allocateMemory(&allocInfo, nullptr, &offscreenPass.memory);
 
@@ -701,10 +721,35 @@ static void createImageView() {
 	}
 }
 
-static void createDescriptorPool() {
-	vk::DescriptorPoolSize poolSize(vk::DescriptorType::eStorageImage, 1);
+static void createBuffers() {
+	vk::BufferCreateInfo bufferInfo = vk::BufferCreateInfo(vk::BufferCreateFlags(), rayQueue.size, vk::BufferUsageFlagBits::eStorageBuffer, vk::SharingMode::eExclusive, 1, &queueIndices.computeFamily);
 
-	vk::DescriptorPoolCreateInfo poolInfo(vk::DescriptorPoolCreateFlags(), 1, 1, &poolSize);
+	vk::Result res = device.createBuffer(&bufferInfo, nullptr, &rayQueue.buffer);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateBuffer Error: ") + vk::to_string(res));
+	}
+
+	vk::MemoryRequirements memReqs = device.getBufferMemoryRequirements(rayQueue.buffer);
+
+	vk::MemoryAllocateInfo allocInfo = vk::MemoryAllocateInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
+
+	res = device.allocateMemory(&allocInfo, nullptr, &rayQueue.memory);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
+	}
+
+	device.bindBufferMemory(rayQueue.buffer, rayQueue.memory, 0);
+}
+
+static void createDescriptorPool() {
+	std::vector<vk::DescriptorPoolSize> poolSizes = {
+		vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage, 1),
+		vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 1)
+	};
+
+	vk::DescriptorPoolCreateInfo poolInfo(vk::DescriptorPoolCreateFlags(), 1, static_cast<uint32_t>(poolSizes.size()), poolSizes.data());
 
 	vk::Result res = device.createDescriptorPool(&poolInfo, nullptr, &descriptorPool);
 
@@ -714,9 +759,12 @@ static void createDescriptorPool() {
 }
 
 static void createDescriptorSet() {
-	vk::DescriptorSetLayoutBinding binding(0, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute, nullptr);
+	std::vector<vk::DescriptorSetLayoutBinding> bindings = {
+		vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
+		vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr)
+	};
 
-	vk::DescriptorSetLayoutCreateInfo layoutInfo(vk::DescriptorSetLayoutCreateFlags(), 1, &binding);
+	vk::DescriptorSetLayoutCreateInfo layoutInfo(vk::DescriptorSetLayoutCreateFlags(), static_cast<uint32_t>(bindings.size()), bindings.data());
 
 	vk::Result res = device.createDescriptorSetLayout(&layoutInfo, nullptr, &descriptorLayout);
 
@@ -732,11 +780,15 @@ static void createDescriptorSet() {
 		throw std::runtime_error(std::string("VK_AllocateDescriptorSets Error: ") + vk::to_string(res));
 	}
 
-	vk::DescriptorImageInfo imageInfo = vk::DescriptorImageInfo(nullptr, offscreenPass.view, vk::ImageLayout::eGeneral);
+	vk::DescriptorImageInfo imageInfo(nullptr, offscreenPass.view, vk::ImageLayout::eGeneral);
+	vk::DescriptorBufferInfo bufferInfo = vk::DescriptorBufferInfo(rayQueue.buffer, 0, rayQueue.size);
 
-	vk::WriteDescriptorSet descriptorWrite = vk::WriteDescriptorSet(descriptorSet, 0, 0, 1, vk::DescriptorType::eStorageImage, &imageInfo, nullptr, nullptr);
+	std::vector<vk::WriteDescriptorSet> descriptorWrites = {
+		vk::WriteDescriptorSet(descriptorSet, 0, 0, 1, vk::DescriptorType::eStorageImage, &imageInfo, nullptr, nullptr),
+		vk::WriteDescriptorSet(descriptorSet, 1, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &bufferInfo, nullptr)
+	};
 
-	device.updateDescriptorSets(1, &descriptorWrite, 0, nullptr);
+	device.updateDescriptorSets(descriptorWrites, nullptr);
 }
 
 static vk::ShaderModule createShaderModule(const std::vector<char>& code) {

@@ -1,30 +1,47 @@
 #version 460
 #extension GL_ARB_separate_shader_objects : enable
 
-layout(local_size_x = 16, local_size_y = 16) in;
+layout(local_size_x = 32, local_size_y = 32) in;
 
 layout(binding = 0, rgba16f) uniform writeonly image2D hdr_image;
+
+layout(binding = 1) buffer RayQueue {
+    uint pixCnt;
+} rays;
 
 layout(push_constant) uniform Constants {
     float[9] mat; // offset: 0, alignment: 16
     float    n_x; // offset: 36, alignment: 4
     float    n_y; // offset: 40, alignment: 4
     float    n_z; // offset: 44, alignment: 4
+    float    fov; // offset: 48, alignment: 4
 } cst;
 
 void main() {
     const ivec2 size = imageSize(hdr_image);
+    const uint pixels = imageSize(hdr_image).x * imageSize(hdr_image).y;
+
+    const vec4 view = vec4(cst.fov, cst.fov * (size.y / float(size.x)), cst.fov * 2.0f / float(size.x - 1), cst.fov * (size.y / float(size.x)) * 2.0f / float(size.y - 1));
 
     const mat3 mat = mat3(cst.mat[0], cst.mat[1], cst.mat[2], cst.mat[3], cst.mat[4], cst.mat[5], cst.mat[6], cst.mat[7], cst.mat[8]);
     const vec3 n_p = vec3(cst.n_x, cst.n_y, cst.n_z);
 
-    const vec4 colour = vec4(n_p, 1.0f);
+    uint pixIdx = rays.pixCnt;
 
-    ivec2 storePos = ivec2(gl_GlobalInvocationID.xy);
+    if (pixIdx >= pixels) {
+        atomicCompSwap(rays.pixCnt, pixIdx, 0);
+    }
 
-    for (uint y = gl_GlobalInvocationID.y; y < size.y; y += gl_WorkGroupSize.y) {
-        for (uint x = gl_GlobalInvocationID.x; x < size.x; x += gl_WorkGroupSize.x) {
-            imageStore(hdr_image, ivec2(x, y), colour);
-        }
+    pixIdx = atomicAdd(rays.pixCnt, 1);
+
+    while (pixIdx < pixels) {
+        const ivec2 storePos = ivec2(pixIdx % size.x, pixIdx / size.x);
+        const vec3 rayDir = mat * normalize(vec3(storePos.x * view.z - view.x, (size.y - storePos.y - 1) * view.w - view.y, -1.0f));
+
+        vec4 colour = vec4(rayDir, 1.0f);
+
+        imageStore(hdr_image, storePos, colour);
+
+        pixIdx = atomicAdd(rays.pixCnt, 1);
     }
 }
