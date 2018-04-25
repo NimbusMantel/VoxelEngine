@@ -64,46 +64,82 @@ vk::Extent2D swapChainExtent;
 
 vk::Viewport viewport;
 
-vk::DescriptorPool descriptorPool;
-vk::DescriptorSetLayout descriptorLayout;
-vk::DescriptorSet descriptorSet;
-
-vk::PipelineLayout pipelineLayout;
-vk::Pipeline computePipeline;
-
-vk::CommandPool renderPool;
-vk::CommandPool transferPool;
-std::vector<vk::CommandBuffer> commandBuffers;
-
 vk::Semaphore imageAvailable;
 vk::Semaphore renderFinished;
 
 struct OffscreenPass {
-	vk::Format format = vk::Format::eR16G16B16A16Sfloat;
-	vk::Extent2D extent = vk::Extent2D(WIDTH, HEIGHT);
-	vk::ClearValue clearColor = vk::ClearColorValue(std::array<float, 4>( { 0.0f, 0.0f, 0.0f, 0.0f }));
-
-	vk::Image image;
-	vk::DeviceMemory memory;
-	vk::ImageView view;
-
-	vk::CommandBuffer commandBuffer;
+	vk::CommandPool pool;
+	vk::CommandBuffer buffer;
 
 	vk::Semaphore semaphore;
 
-	struct Constants {
-		glm::mat3 rot = glm::mat3(1.0f);
-		glm::vec3 pos = glm::vec3(0.0f, 1.0f, 0.0f);
-		float     fov = tanf(M_PI * FOV / 360.0f);
-	} constants;
+	struct HDRImage {
+		vk::DeviceSize size = sizeof(glm::i16vec4) * WIDTH * HEIGHT;
+
+		vk::Buffer image;
+		vk::DeviceMemory memory;
+	} hdrImage;
+
+	struct LDRImage {
+		vk::Format format = vk::Format::eR8G8B8A8Unorm;
+		vk::Extent3D extent = vk::Extent3D(WIDTH, HEIGHT, 1);
+
+		vk::Image image;
+		vk::DeviceMemory memory;
+		vk::ImageView view;
+	} ldrImage;
+
+	struct RayTracer {
+		vk::PipelineLayout layout;
+		vk::Pipeline pipeline;
+
+		struct Descriptor {
+			vk::DescriptorPool pool;
+			vk::DescriptorSetLayout layout;
+			vk::DescriptorSet set;
+		} descriptor;
+
+		struct Queue {
+			vk::DeviceSize size = sizeof(uint32_t);
+
+			vk::Buffer buffer;
+			vk::DeviceMemory memory;
+		} queue;
+
+		struct Constants {
+			glm::mat3  rot = glm::mat3(1.0f);
+			glm::vec3  pos = glm::vec3(0.0f, 1.0f, 0.0f);
+			glm::uvec2 siz = glm::uvec2(WIDTH, HEIGHT);
+			float      fov = tanf(float(M_PI) * FOV / 360.0f);
+		} constants;
+	} rayTracer;
+
+	struct ToneMapper {
+		vk::PipelineLayout layout;
+		vk::Pipeline pipeline;
+
+		struct Descriptor {
+			vk::DescriptorPool pool;
+			vk::DescriptorSetLayout layout;
+			vk::DescriptorSet set;
+		} descriptor;
+	} toneMapper;
 } offscreenPass;
 
-struct RayQueue {
-	vk::DeviceSize size = sizeof(uint32_t);
+struct transferPass {
+	vk::CommandPool pool;
+	std::vector<vk::CommandBuffer> buffers;
+} transferPass;
 
-	vk::Buffer buffer;
+struct VoxelBuffer {
+	vk::Extent3D extent = vk::Extent3D(256, 256, 256);
+
 	vk::DeviceMemory memory;
-} rayQueue;
+
+	vk::Format strFormat = vk::Format::eR32Uint;
+	vk::Image strImage;
+	vk::ImageView strView;
+} voxelBuffer;
 
 #ifndef NDEBUG
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugReportFlagsEXT, VkDebugReportObjectTypeEXT, uint64_t, size_t, int32_t, const char*, const char* msg, void*) {
@@ -146,14 +182,14 @@ static void pickPhysicalDevice();
 static void createLogicalDevice();
 
 static void createSwapChain();
-static void createImage();
-static void createImageView();
 
+static void createImages();
+static void createImageViews();
 static void createBuffers();
 
-static void createDescriptorPool();
-static void createDescriptorSet();
-static void createComputePipeline();
+static void createDescriptorPools();
+static void createDescriptorSets();
+static void createOffscreenPipeline();
 
 static void createCommandPools();
 static void createRenderCommandBuffer();
@@ -214,14 +250,14 @@ static void initVulkan() {
 	createLogicalDevice();
 
 	createSwapChain();
-	createImage();
-	createImageView();
+	createImages();
+	createImageViews();
 
 	createBuffers();
 
-	createDescriptorPool();
-	createDescriptorSet();
-	createComputePipeline();
+	createDescriptorPools();
+	createDescriptorSets();
+	createOffscreenPipeline();
 
 	createCommandPools();
 	createRenderCommandBuffer();
@@ -235,7 +271,7 @@ static void update() {
 	SDL_Event event;
 
 	bool quit = false;
-
+	
 	while (!quit) {
 		while (SDL_PollEvent(&event)) {
 			if (event.type == SDL_QUIT) {
@@ -285,23 +321,33 @@ static void cleanup() {
 	device.destroySemaphore(renderFinished, nullptr);
 	device.destroySemaphore(offscreenPass.semaphore, nullptr);
 
-	device.freeCommandBuffers(renderPool, { offscreenPass.commandBuffer });
-	device.destroyCommandPool(renderPool, nullptr);
-	device.freeCommandBuffers(transferPool, commandBuffers);
-	device.destroyCommandPool(transferPool, nullptr);
+	device.freeCommandBuffers(offscreenPass.pool, { offscreenPass.buffer });
+	device.destroyCommandPool(offscreenPass.pool, nullptr);
+	device.freeCommandBuffers(transferPass.pool, transferPass.buffers);
+	device.destroyCommandPool(transferPass.pool, nullptr);
 
-	device.destroyPipeline(computePipeline, nullptr);
-	device.destroyPipelineLayout(pipelineLayout, nullptr);
+	device.destroyPipeline(offscreenPass.rayTracer.pipeline, nullptr);
+	device.destroyPipelineLayout(offscreenPass.rayTracer.layout, nullptr);
+	device.destroyPipeline(offscreenPass.toneMapper.pipeline, nullptr);
+	device.destroyPipelineLayout(offscreenPass.toneMapper.layout, nullptr);
 
-	device.destroyDescriptorSetLayout(descriptorLayout, nullptr);
-	device.destroyDescriptorPool(descriptorPool, nullptr);
+	device.destroyDescriptorSetLayout(offscreenPass.rayTracer.descriptor.layout, nullptr);
+	device.destroyDescriptorPool(offscreenPass.rayTracer.descriptor.pool, nullptr);
+	device.destroyDescriptorSetLayout(offscreenPass.toneMapper.descriptor.layout, nullptr);
+	device.destroyDescriptorPool(offscreenPass.toneMapper.descriptor.pool, nullptr);
 
-	device.destroyBuffer(rayQueue.buffer, nullptr);
-	device.freeMemory(rayQueue.memory, nullptr);
+	device.destroyBuffer(offscreenPass.rayTracer.queue.buffer, nullptr);
+	device.freeMemory(offscreenPass.rayTracer.queue.memory, nullptr);
+	device.destroyBuffer(offscreenPass.hdrImage.image, nullptr);
+	device.freeMemory(offscreenPass.hdrImage.memory, nullptr);
 
-	device.destroyImageView(offscreenPass.view, nullptr);
-	device.destroyImage(offscreenPass.image, nullptr);
-	device.freeMemory(offscreenPass.memory, nullptr);
+	device.destroyImageView(offscreenPass.ldrImage.view, nullptr);
+	device.destroyImage(offscreenPass.ldrImage.image, nullptr);
+	device.freeMemory(offscreenPass.ldrImage.memory, nullptr);
+
+	device.destroyImageView(voxelBuffer.strView, nullptr);
+	device.destroyImage(voxelBuffer.strImage, nullptr);
+	device.freeMemory(voxelBuffer.memory, nullptr);
 
 	device.destroySwapchainKHR(swapChain, nullptr);
 
@@ -344,7 +390,7 @@ static void drawFrame() {
 		vk::PipelineStageFlagBits::eTopOfPipe
 	};
 
-	vk::SubmitInfo submitInfo(1, &imageAvailable, waitStages, 1, &offscreenPass.commandBuffer, 1, &offscreenPass.semaphore);
+	vk::SubmitInfo submitInfo(1, &imageAvailable, waitStages, 1, &offscreenPass.buffer, 1, &offscreenPass.semaphore);
 
 	res = computeQueue.submit(1, &submitInfo, nullptr);
 
@@ -354,7 +400,7 @@ static void drawFrame() {
 
 	waitStages[0] = vk::PipelineStageFlagBits::eComputeShader;
 
-	submitInfo = vk::SubmitInfo(1, &offscreenPass.semaphore, waitStages, 1, &commandBuffers[imageIndex], 1, &renderFinished);
+	submitInfo = vk::SubmitInfo(1, &offscreenPass.semaphore, waitStages, 1, &transferPass.buffers[imageIndex], 1, &renderFinished);
 
 	res = transferQueue.submit(1, &submitInfo, nullptr);
 
@@ -552,7 +598,8 @@ static void createLogicalDevice() {
 	}
 
 	vk::PhysicalDeviceFeatures deviceFeatures;
-	deviceFeatures.geometryShader = true;
+	deviceFeatures.shaderStorageImageExtendedFormats = true;
+	deviceFeatures.shaderInt64 = true;
 
 	vk::DeviceCreateInfo deviceInfo(vk::DeviceCreateFlags(), static_cast<uint32_t>(queueInfos.size()), queueInfos.data(),
 		static_cast<uint32_t>(layers.size()), layers.data(), static_cast<uint32_t>(devExt.size()), devExt.data(), &deviceFeatures);
@@ -686,35 +733,64 @@ static uint32_t getMemoryTypeIndex(uint32_t typeBits, vk::MemoryPropertyFlags fl
 	return index;
 }
 
-static void createImage() {
-	vk::ImageCreateInfo offscreenInfo = vk::ImageCreateInfo(vk::ImageCreateFlags(), vk::ImageType::e2D, offscreenPass.format, vk::Extent3D(WIDTH, HEIGHT, 1), 1, 1, vk::SampleCountFlagBits::e1,
-		vk::ImageTiling::eOptimal,vk::ImageUsageFlags(vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc), vk::SharingMode::eExclusive,
-		1, &queueIndices.computeFamily, vk::ImageLayout::eUndefined);
+static void createImages() {
+	vk::ImageCreateInfo imageInfo(vk::ImageCreateFlags(), vk::ImageType::e2D, offscreenPass.ldrImage.format, offscreenPass.ldrImage.extent, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal,
+		vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc, vk::SharingMode::eExclusive, 1, &queueIndices.computeFamily, vk::ImageLayout::eUndefined);
 
-	vk::Result res = device.createImage(&offscreenInfo, nullptr, &offscreenPass.image);
+	vk::Result res = device.createImage(&imageInfo, nullptr, &offscreenPass.ldrImage.image);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateImage Error: ") + vk::to_string(res));
 	}
 
-	vk::MemoryRequirements memReqs = device.getImageMemoryRequirements(offscreenPass.image);
+	vk::MemoryRequirements memReqs = device.getImageMemoryRequirements(offscreenPass.ldrImage.image);
 
-	vk::MemoryAllocateInfo allocInfo = vk::MemoryAllocateInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
+	vk::MemoryAllocateInfo allocInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
 
-	res = device.allocateMemory(&allocInfo, nullptr, &offscreenPass.memory);
+	res = device.allocateMemory(&allocInfo, nullptr, &offscreenPass.ldrImage.memory);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
 	}
 
-	device.bindImageMemory(offscreenPass.image, offscreenPass.memory, 0);
+	device.bindImageMemory(offscreenPass.ldrImage.image, offscreenPass.ldrImage.memory, 0);
+
+	imageInfo = vk::ImageCreateInfo(vk::ImageCreateFlags(), vk::ImageType::e3D, voxelBuffer.strFormat, vk::Extent3D(WIDTH, HEIGHT, 1), 1, 1, vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal,
+		vk::ImageUsageFlagBits::eStorage, vk::SharingMode::eExclusive, 1, &queueIndices.computeFamily, vk::ImageLayout::eUndefined);
+
+	res = device.createImage(&imageInfo, nullptr, &voxelBuffer.strImage);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateImage Error: ") + vk::to_string(res));
+	}
+
+	memReqs = device.getImageMemoryRequirements(voxelBuffer.strImage);
+
+	allocInfo = vk::MemoryAllocateInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
+
+	res = device.allocateMemory(&allocInfo, nullptr, &voxelBuffer.memory);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
+	}
+
+	device.bindImageMemory(voxelBuffer.strImage, voxelBuffer.memory, 0);
 }
 
-static void createImageView() {
-	vk::ImageViewCreateInfo viewInfo(vk::ImageViewCreateFlags(), offscreenPass.image, vk::ImageViewType::e2D, offscreenPass.format, vk::ComponentMapping(vk::ComponentSwizzle::eIdentity,
+static void createImageViews() {
+	vk::ImageViewCreateInfo viewInfo(vk::ImageViewCreateFlags(), offscreenPass.ldrImage.image, vk::ImageViewType::e2D, offscreenPass.ldrImage.format, vk::ComponentMapping(vk::ComponentSwizzle::eIdentity,
 		vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity), vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
 
-	vk::Result res = device.createImageView(&viewInfo, nullptr, &offscreenPass.view);
+	vk::Result res = device.createImageView(&viewInfo, nullptr, &offscreenPass.ldrImage.view);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateImageView Error: ") + vk::to_string(res));
+	}
+
+	viewInfo = vk::ImageViewCreateInfo(vk::ImageViewCreateFlags(), voxelBuffer.strImage, vk::ImageViewType::e3D, voxelBuffer.strFormat, vk::ComponentMapping(vk::ComponentSwizzle::eIdentity,
+		vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity), vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
+
+	res = device.createImageView(&viewInfo, nullptr, &voxelBuffer.strView);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateImageView Error: ") + vk::to_string(res));
@@ -722,70 +798,130 @@ static void createImageView() {
 }
 
 static void createBuffers() {
-	vk::BufferCreateInfo bufferInfo = vk::BufferCreateInfo(vk::BufferCreateFlags(), rayQueue.size, vk::BufferUsageFlagBits::eStorageBuffer, vk::SharingMode::eExclusive, 1, &queueIndices.computeFamily);
+	vk::BufferCreateInfo bufferInfo(vk::BufferCreateFlags(), offscreenPass.rayTracer.queue.size, vk::BufferUsageFlagBits::eStorageBuffer, vk::SharingMode::eExclusive, 1, &queueIndices.computeFamily);
 
-	vk::Result res = device.createBuffer(&bufferInfo, nullptr, &rayQueue.buffer);
+	vk::Result res = device.createBuffer(&bufferInfo, nullptr, &offscreenPass.rayTracer.queue.buffer);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateBuffer Error: ") + vk::to_string(res));
 	}
 
-	vk::MemoryRequirements memReqs = device.getBufferMemoryRequirements(rayQueue.buffer);
+	vk::MemoryRequirements memReqs = device.getBufferMemoryRequirements(offscreenPass.rayTracer.queue.buffer);
 
-	vk::MemoryAllocateInfo allocInfo = vk::MemoryAllocateInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
+	vk::MemoryAllocateInfo allocInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
 
-	res = device.allocateMemory(&allocInfo, nullptr, &rayQueue.memory);
+	res = device.allocateMemory(&allocInfo, nullptr, &offscreenPass.rayTracer.queue.memory);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
 	}
 
-	device.bindBufferMemory(rayQueue.buffer, rayQueue.memory, 0);
+	device.bindBufferMemory(offscreenPass.rayTracer.queue.buffer, offscreenPass.rayTracer.queue.memory, 0);
+
+	bufferInfo = vk::BufferCreateInfo(vk::BufferCreateFlags(), offscreenPass.hdrImage.size, vk::BufferUsageFlagBits::eStorageBuffer, vk::SharingMode::eExclusive, 1, &queueIndices.computeFamily);
+
+	res = device.createBuffer(&bufferInfo, nullptr, &offscreenPass.hdrImage.image);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateBuffer Error: ") + vk::to_string(res));
+	}
+
+	memReqs = device.getBufferMemoryRequirements(offscreenPass.hdrImage.image);
+
+	allocInfo = vk::MemoryAllocateInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
+
+	res = device.allocateMemory(&allocInfo, nullptr, &offscreenPass.hdrImage.memory);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
+	}
+
+	device.bindBufferMemory(offscreenPass.hdrImage.image, offscreenPass.hdrImage.memory, 0);
 }
 
-static void createDescriptorPool() {
+static void createDescriptorPools() {
 	std::vector<vk::DescriptorPoolSize> poolSizes = {
 		vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage, 1),
-		vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 1)
+		vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 2)
 	};
 
 	vk::DescriptorPoolCreateInfo poolInfo(vk::DescriptorPoolCreateFlags(), 1, static_cast<uint32_t>(poolSizes.size()), poolSizes.data());
 
-	vk::Result res = device.createDescriptorPool(&poolInfo, nullptr, &descriptorPool);
+	vk::Result res = device.createDescriptorPool(&poolInfo, nullptr, &offscreenPass.rayTracer.descriptor.pool);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateDescriptorPool Error: ") + vk::to_string(res));
+	}
+
+	poolSizes = {
+		vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage, 1),
+		vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 1)
+	};
+
+	poolInfo = vk::DescriptorPoolCreateInfo(vk::DescriptorPoolCreateFlags(), 1, static_cast<uint32_t>(poolSizes.size()), poolSizes.data());
+
+	res = device.createDescriptorPool(&poolInfo, nullptr, &offscreenPass.toneMapper.descriptor.pool);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateDescriptorPool Error: ") + vk::to_string(res));
 	}
 }
 
-static void createDescriptorSet() {
+static void createDescriptorSets() {
 	std::vector<vk::DescriptorSetLayoutBinding> bindings = {
 		vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
-		vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr)
+		vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
+		vk::DescriptorSetLayoutBinding(2, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr)
 	};
 
 	vk::DescriptorSetLayoutCreateInfo layoutInfo(vk::DescriptorSetLayoutCreateFlags(), static_cast<uint32_t>(bindings.size()), bindings.data());
 
-	vk::Result res = device.createDescriptorSetLayout(&layoutInfo, nullptr, &descriptorLayout);
+	vk::Result res = device.createDescriptorSetLayout(&layoutInfo, nullptr, &offscreenPass.rayTracer.descriptor.layout);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateDescriptorSetLayout Error: ") + vk::to_string(res));
 	}
 
-	vk::DescriptorSetAllocateInfo allocInfo(descriptorPool, 1, &descriptorLayout);
+	vk::DescriptorSetAllocateInfo allocInfo(offscreenPass.rayTracer.descriptor.pool, 1, &offscreenPass.rayTracer.descriptor.layout);
 
-	res = device.allocateDescriptorSets(&allocInfo, &descriptorSet);
+	res = device.allocateDescriptorSets(&allocInfo, &offscreenPass.rayTracer.descriptor.set);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateDescriptorSets Error: ") + vk::to_string(res));
 	}
 
-	vk::DescriptorImageInfo imageInfo(nullptr, offscreenPass.view, vk::ImageLayout::eGeneral);
-	vk::DescriptorBufferInfo bufferInfo = vk::DescriptorBufferInfo(rayQueue.buffer, 0, rayQueue.size);
+	bindings = {
+		vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
+		vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute, nullptr)
+	};
+
+	layoutInfo = vk::DescriptorSetLayoutCreateInfo(vk::DescriptorSetLayoutCreateFlags(), static_cast<uint32_t>(bindings.size()), bindings.data());
+
+	res = device.createDescriptorSetLayout(&layoutInfo, nullptr, &offscreenPass.toneMapper.descriptor.layout);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateDescriptorSetLayout Error: ") + vk::to_string(res));
+	}
+
+	allocInfo = vk::DescriptorSetAllocateInfo(offscreenPass.toneMapper.descriptor.pool, 1, &offscreenPass.toneMapper.descriptor.layout);
+
+	res = device.allocateDescriptorSets(&allocInfo, &offscreenPass.toneMapper.descriptor.set);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_AllocateDescriptorSets Error: ") + vk::to_string(res));
+	}
+
+	vk::DescriptorImageInfo strInfo(nullptr, voxelBuffer.strView, vk::ImageLayout::eGeneral);
+	vk::DescriptorBufferInfo rayInfo(offscreenPass.rayTracer.queue.buffer, 0, offscreenPass.rayTracer.queue.size);
+	vk::DescriptorBufferInfo hdrInfo(offscreenPass.hdrImage.image, 0, offscreenPass.hdrImage.size);
+	vk::DescriptorImageInfo ldrInfo(nullptr, offscreenPass.ldrImage.view, vk::ImageLayout::eGeneral);
 
 	std::vector<vk::WriteDescriptorSet> descriptorWrites = {
-		vk::WriteDescriptorSet(descriptorSet, 0, 0, 1, vk::DescriptorType::eStorageImage, &imageInfo, nullptr, nullptr),
-		vk::WriteDescriptorSet(descriptorSet, 1, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &bufferInfo, nullptr)
+		vk::WriteDescriptorSet(offscreenPass.rayTracer.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageImage, &strInfo, nullptr, nullptr),
+		vk::WriteDescriptorSet(offscreenPass.rayTracer.descriptor.set, 1, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &rayInfo, nullptr),
+		vk::WriteDescriptorSet(offscreenPass.rayTracer.descriptor.set, 2, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &hdrInfo, nullptr),
+		vk::WriteDescriptorSet(offscreenPass.toneMapper.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &hdrInfo, nullptr),
+		vk::WriteDescriptorSet(offscreenPass.toneMapper.descriptor.set, 1, 0, 1, vk::DescriptorType::eStorageImage, &ldrInfo, nullptr, nullptr)
 	};
 
 	device.updateDescriptorSets(descriptorWrites, nullptr);
@@ -805,24 +941,46 @@ static vk::ShaderModule createShaderModule(const std::vector<char>& code) {
 	return shaderModule;
 }
 
-static void createComputePipeline() {
-	vk::PushConstantRange constantRange(vk::ShaderStageFlagBits::eCompute, 0, sizeof(offscreenPass.constants));
+static void createOffscreenPipeline() {
+	vk::PushConstantRange constantRange(vk::ShaderStageFlagBits::eCompute, 0, sizeof(offscreenPass.rayTracer.constants));
 	
-	vk::PipelineLayoutCreateInfo layoutInfo(vk::PipelineLayoutCreateFlags(), 1, &descriptorLayout, 1, &constantRange);
+	vk::PipelineLayoutCreateInfo layoutInfo(vk::PipelineLayoutCreateFlags(), 1, &offscreenPass.rayTracer.descriptor.layout, 1, &constantRange);
 
-	vk::Result res = device.createPipelineLayout(&layoutInfo, nullptr, &pipelineLayout);
+	vk::Result res = device.createPipelineLayout(&layoutInfo, nullptr, &offscreenPass.rayTracer.layout);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreatePipelineLayout Error: ") + vk::to_string(res));
 	}
 
-	std::vector<char> compShaderCode = readFile("obj/shaders/test.comp.spv");
+	std::vector<char> compShaderCode = readFile("obj/shaders/rayTracer.comp.spv");
 	vk::ShaderModule compShaderModule = createShaderModule(compShaderCode);
-	vk::PipelineShaderStageCreateInfo compStageInfo = vk::PipelineShaderStageCreateInfo(vk::PipelineShaderStageCreateFlags(), vk::ShaderStageFlagBits::eCompute, compShaderModule, "main", nullptr);
+	vk::PipelineShaderStageCreateInfo compStageInfo(vk::PipelineShaderStageCreateFlags(), vk::ShaderStageFlagBits::eCompute, compShaderModule, "main", nullptr);
 
-	vk::ComputePipelineCreateInfo pipelineInfo(vk::PipelineCreateFlags(), compStageInfo, pipelineLayout, nullptr, -1);
+	vk::ComputePipelineCreateInfo pipelineInfo(vk::PipelineCreateFlags(), compStageInfo, offscreenPass.rayTracer.layout, nullptr, -1);
 
-	res = device.createComputePipelines(nullptr, 1, &pipelineInfo, nullptr, &computePipeline);
+	res = device.createComputePipelines(nullptr, 1, &pipelineInfo, nullptr, &offscreenPass.rayTracer.pipeline);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateComputePipelines Error: ") + vk::to_string(res));
+	}
+
+	device.destroyShaderModule(compShaderModule, nullptr);
+
+	layoutInfo = vk::PipelineLayoutCreateInfo(vk::PipelineLayoutCreateFlags(), 1, &offscreenPass.toneMapper.descriptor.layout, 0, nullptr);
+
+	res = device.createPipelineLayout(&layoutInfo, nullptr, &offscreenPass.toneMapper.layout);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreatePipelineLayout Error: ") + vk::to_string(res));
+	}
+
+	compShaderCode = readFile("obj/shaders/toneMapper.comp.spv");
+	compShaderModule = createShaderModule(compShaderCode);
+	compStageInfo = vk::PipelineShaderStageCreateInfo(vk::PipelineShaderStageCreateFlags(), vk::ShaderStageFlagBits::eCompute, compShaderModule, "main", nullptr);
+
+	pipelineInfo = vk::ComputePipelineCreateInfo(vk::PipelineCreateFlags(), compStageInfo, offscreenPass.toneMapper.layout, nullptr, -1);
+
+	res = device.createComputePipelines(nullptr, 1, &pipelineInfo, nullptr, &offscreenPass.toneMapper.pipeline);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateComputePipelines Error: ") + vk::to_string(res));
@@ -834,7 +992,7 @@ static void createComputePipeline() {
 static void createCommandPools() {
 	vk::CommandPoolCreateInfo poolInfo(vk::CommandPoolCreateFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer), queueIndices.computeFamily);
 
-	vk::Result res = device.createCommandPool(&poolInfo, nullptr, &renderPool);
+	vk::Result res = device.createCommandPool(&poolInfo, nullptr, &offscreenPass.pool);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateCommandPool Error: ") + vk::to_string(res));
@@ -842,7 +1000,7 @@ static void createCommandPools() {
 
 	poolInfo = vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlags(vk::CommandPoolCreateFlagBits(0)), queueIndices.transferFamily);
 
-	res = device.createCommandPool(&poolInfo, nullptr, &transferPool);
+	res = device.createCommandPool(&poolInfo, nullptr, &transferPass.pool);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateCommandPool Error: ") + vk::to_string(res));
@@ -850,9 +1008,9 @@ static void createCommandPools() {
 }
 
 static void createRenderCommandBuffer() {
-	vk::CommandBufferAllocateInfo allocInfo = vk::CommandBufferAllocateInfo(renderPool, vk::CommandBufferLevel::ePrimary, 1);
+	vk::CommandBufferAllocateInfo allocInfo = vk::CommandBufferAllocateInfo(offscreenPass.pool, vk::CommandBufferLevel::ePrimary, 1);
 
-	vk::Result res = device.allocateCommandBuffers(&allocInfo, &offscreenPass.commandBuffer);
+	vk::Result res = device.allocateCommandBuffers(&allocInfo, &offscreenPass.buffer);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateCommandBuffers Error: ") + vk::to_string(res));
@@ -862,14 +1020,22 @@ static void createRenderCommandBuffer() {
 static void recordRenderCommandBuffer() {
 	vk::CommandBufferBeginInfo commandBeginInfo(vk::CommandBufferUsageFlagBits::eSimultaneousUse, nullptr);
 
-	offscreenPass.commandBuffer.begin(&commandBeginInfo);
+	offscreenPass.buffer.begin(&commandBeginInfo);
 
-	offscreenPass.commandBuffer.bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline);
-	offscreenPass.commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
-	offscreenPass.commandBuffer.pushConstants(pipelineLayout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(offscreenPass.constants), &offscreenPass.constants);
-	offscreenPass.commandBuffer.dispatch(1, 1, 1);
+	offscreenPass.buffer.bindPipeline(vk::PipelineBindPoint::eCompute, offscreenPass.rayTracer.pipeline);
+	offscreenPass.buffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, offscreenPass.rayTracer.layout, 0, 1, &offscreenPass.rayTracer.descriptor.set, 0, nullptr);
+	offscreenPass.buffer.pushConstants(offscreenPass.rayTracer.layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(offscreenPass.rayTracer.constants), &offscreenPass.rayTracer.constants);
+	offscreenPass.buffer.dispatch(1, 1, 1);
 
-	vk::Result res = vk::Result(vkEndCommandBuffer(offscreenPass.commandBuffer)); // use C API to get result value
+	offscreenPass.buffer.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, {},
+		{ vk::BufferMemoryBarrier(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eShaderRead, queueIndices.computeFamily, queueIndices.computeFamily,
+			offscreenPass.hdrImage.image, 0, offscreenPass.hdrImage.size) }, {});
+
+	offscreenPass.buffer.bindPipeline(vk::PipelineBindPoint::eCompute, offscreenPass.toneMapper.pipeline);
+	offscreenPass.buffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, offscreenPass.toneMapper.layout, 0, 1, &offscreenPass.toneMapper.descriptor.set, 0, nullptr);
+	offscreenPass.buffer.dispatch(1, 1, 1);
+
+	vk::Result res = vk::Result(vkEndCommandBuffer(offscreenPass.buffer)); // use C API to get result value
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_EndCommandBuffer Error: ") + vk::to_string(res));
@@ -877,11 +1043,11 @@ static void recordRenderCommandBuffer() {
 }
 
 static void createTransferCommandBuffers() {
-	commandBuffers.resize(swapChainImages.size());
+	transferPass.buffers.resize(swapChainImages.size());
 
-	vk::CommandBufferAllocateInfo allocInfo = vk::CommandBufferAllocateInfo(transferPool, vk::CommandBufferLevel::ePrimary, (uint32_t)commandBuffers.size());
+	vk::CommandBufferAllocateInfo allocInfo(transferPass.pool, vk::CommandBufferLevel::ePrimary, static_cast<uint32_t>(transferPass.buffers.size()));
 
-	vk::Result res = device.allocateCommandBuffers(&allocInfo, commandBuffers.data());
+	vk::Result res = device.allocateCommandBuffers(&allocInfo, transferPass.buffers.data());
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateCommandBuffers Error: ") + vk::to_string(res));
@@ -890,27 +1056,27 @@ static void createTransferCommandBuffers() {
 	vk::CommandBufferBeginInfo commandBeginInfo;
 
 	vk::ImageSubresourceLayers offsetLayer(vk::ImageAspectFlagBits::eColor, 0, 0, 1);
-	std::array<vk::Offset3D, 2> offsetExtent = { vk::Offset3D(0, 0, 0), vk::Offset3D(offscreenPass.extent.width, offscreenPass.extent.height, 1) };
+	std::array<vk::Offset3D, 2> offsetExtent = { vk::Offset3D(0, 0, 0), vk::Offset3D(offscreenPass.ldrImage.extent.width, offscreenPass.ldrImage.extent.height, 1) };
 
-	for (size_t i = 0; i < commandBuffers.size(); i++) {
+	for (size_t i = 0; i < transferPass.buffers.size(); i++) {
 		commandBeginInfo = vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eSimultaneousUse, nullptr);
-		commandBuffers[i].begin(&commandBeginInfo);
+		transferPass.buffers[i].begin(&commandBeginInfo);
 
-		commandBuffers[i].pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion, {}, {},
+		transferPass.buffers[i].pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion, {}, {},
 			{ vk::ImageMemoryBarrier(vk::AccessFlagBits::eColorAttachmentRead, vk::AccessFlagBits::eTransferWrite, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
 				queueIndices.presentFamily, queueIndices.transferFamily, swapChainImages[i], vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1)) });
 
 		vk::ImageSubresourceLayers imageLayer = vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1);
 		std::array<vk::Offset3D, 2> imageExtent = { vk::Offset3D(0, 0, 0), vk::Offset3D(swapChainExtent.width, swapChainExtent.height, 1) };
 
-		commandBuffers[i].blitImage(offscreenPass.image, vk::ImageLayout::eTransferSrcOptimal, swapChainImages[i], vk::ImageLayout::eTransferDstOptimal,
+		transferPass.buffers[i].blitImage(offscreenPass.ldrImage.image, vk::ImageLayout::eTransferSrcOptimal, swapChainImages[i], vk::ImageLayout::eTransferDstOptimal,
 			std::array<vk::ImageBlit, 1>({ vk::ImageBlit(offsetLayer, offsetExtent, imageLayer, imageExtent) }), vk::Filter::eNearest);
 
-		commandBuffers[i].pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAllCommands, vk::DependencyFlagBits::eByRegion, {}, {},
+		transferPass.buffers[i].pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAllCommands, vk::DependencyFlagBits::eByRegion, {}, {},
 			{ vk::ImageMemoryBarrier(vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eColorAttachmentRead, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR,
 				queueIndices.transferFamily, queueIndices.presentFamily, swapChainImages[i], vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1)) });
 
-		res = vk::Result(vkEndCommandBuffer(commandBuffers[i])); // use C API to get result value
+		res = vk::Result(vkEndCommandBuffer(transferPass.buffers[i])); // use C API to get result value
 
 		if (res != vk::Result::eSuccess) {
 			throw std::runtime_error(std::string("VK_EndCommandBuffer Error: ") + vk::to_string(res));
@@ -957,7 +1123,7 @@ static void recreateSwapChain() {
 }
 
 static void cleanupSwapChain() {
-	device.freeCommandBuffers(transferPool, commandBuffers);
+	device.freeCommandBuffers(transferPass.pool, transferPass.buffers);
 
 	device.destroySwapchainKHR(swapChain, nullptr);
 }

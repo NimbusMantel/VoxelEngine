@@ -1,0 +1,93 @@
+#version 460 core
+
+#extension GL_KHR_vulkan_glsl : enable
+
+#extension GL_ARB_separate_shader_objects : require
+
+layout(local_size_x = 32, local_size_y = 32) in;
+
+layout(binding = 0, r32ui) uniform restrict readonly uimage3D voxStr;
+
+layout(binding = 1) buffer restrict RayQueue {
+    uint pixels;
+} rayQueue;
+
+layout(binding = 2) buffer restrict HDRImage {
+    uint[] data;
+} hdrImage;
+
+layout(push_constant) uniform Constants {
+    float[9] mat; // offset: 0, alignment: 16
+    float    n_x; // offset: 36, alignment: 4
+    float    n_y; // offset: 40, alignment: 4
+    float    n_z; // offset: 44, alignment: 4
+    uvec2    siz; // oofset: 48, alignment: 8
+    float    fov; // offset: 56, alignment: 4
+} cst;
+
+struct RayInit { // not yet aligned, only do once all information is inside
+    vec3 pos;
+    vec3 dir;
+    vec3 fac;
+    float dis;
+    uint dst;
+};
+
+void main() {
+    const uvec2 size = cst.siz;
+    const uint pixels = size.x * size.y;
+
+    const vec4 camFrame = vec4(cst.fov, cst.fov * (size.y / float(size.x)), cst.fov * 2.0f / float(size.x - 1), cst.fov * (size.y / float(size.x)) * 2.0f / float(size.y - 1));
+
+    const mat3 camView = mat3(cst.mat[0], cst.mat[1], cst.mat[2], cst.mat[3], cst.mat[4], cst.mat[5], cst.mat[6], cst.mat[7], cst.mat[8]);
+    const vec3 camPos = vec3(cst.n_x, cst.n_y, cst.n_z);
+
+    uint pixIdx = atomicCompSwap(rayQueue.pixels, 0, 0);
+
+    if (pixIdx >= pixels) {
+        atomicCompSwap(rayQueue.pixels, pixIdx, 0);
+    }
+
+    RayInit ray;
+
+    do {
+        if (false) { // ray queue is non-empty
+            // get ray from queue
+        }
+        else {
+            pixIdx = atomicAdd(rayQueue.pixels, 1);
+
+            if (pixIdx >= pixels) {
+                break;
+            }
+
+            ray = RayInit(camPos, camView * normalize(vec3((pixIdx % size.x) * camFrame.z - camFrame.x, (size.y - (pixIdx / size.x) - 1) * camFrame.w - camFrame.y, -1.0f)),
+            vec3(1.0f), 0.0f, pixIdx << 1);
+
+            pixIdx <<= 1;
+
+            atomicExchange(hdrImage.data[pixIdx], 0x00);
+            atomicExchange(hdrImage.data[pixIdx | 0x01], 0x00);
+        }
+
+        vec4 pixel = vec4(ray.dir, 1.0f);
+
+        uint expected, latest = 0x00;
+
+        do {
+            expected = latest;
+
+            latest = atomicCompSwap(hdrImage.data[ray.dst], expected, packHalf2x16(pixel.xy + unpackHalf2x16(expected)));
+        } while (latest != expected);
+
+        latest = 0x00;
+
+        do {
+            expected = latest;
+
+            latest = atomicCompSwap(hdrImage.data[ray.dst | 0x01], expected, packHalf2x16(pixel.zw + unpackHalf2x16(expected)));
+        } while (latest != expected);
+    } while(true);
+
+    // Cleanup if necessary
+}

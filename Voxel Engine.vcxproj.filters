@@ -19,7 +19,10 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <GLSLValidate Include="src\shaders\test.comp">
+    <GLSLValidate Include="src\shaders\rayTracer.comp">
+      <Filter>Shader Files</Filter>
+    </GLSLValidate>
+    <GLSLValidate Include="src\shaders\toneMapper.comp">
       <Filter>Shader Files</Filter>
     </GLSLValidate>
   </ItemGroup>

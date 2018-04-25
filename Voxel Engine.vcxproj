@@ -145,7 +145,8 @@
     <ClCompile Include="src\main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <GLSLValidate Include="src\shaders\test.comp" />
+    <GLSLValidate Include="src\shaders\toneMapper.comp" />
+    <GLSLValidate Include="src\shaders\rayTracer.comp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

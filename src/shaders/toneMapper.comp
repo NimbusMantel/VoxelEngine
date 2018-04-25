@@ -1,0 +1,37 @@
+#version 460 core
+
+#extension GL_KHR_vulkan_glsl : enable
+
+#extension GL_ARB_separate_shader_objects : require
+
+layout(local_size_x = 32, local_size_y = 32) in;
+
+layout(binding = 0) buffer restrict readonly HDRImage {
+    uint[] data;
+} hdrImage;
+
+layout(binding = 1, rgba8_snorm) uniform restrict image2D ldrImage;
+
+void main() {
+    const uvec2 size = imageSize(ldrImage);
+    const uvec2 center = size >> 1;
+    
+    ivec2 storePos = ivec2(gl_GlobalInvocationID.xy);
+
+    for (uint y = gl_GlobalInvocationID.y; y < size.y; y += gl_WorkGroupSize.y) {
+        uint base = y * size.x;
+
+        for (uint x = gl_GlobalInvocationID.x; x < size.x; x += gl_WorkGroupSize.x) {
+            vec4 pixel = vec4(unpackHalf2x16(hdrImage.data[(base + x) << 1]), unpackHalf2x16(hdrImage.data[((base + x) << 1) | 0x01]));
+
+            if (x >= (center.x - 5) && x <= (center.x + 4) && y >= (center.y - 1) && y <= center.y) {
+                pixel = vec4(float(pixel.x < 0.5f), float(pixel.y < 0.5f), float(pixel.z < 0.5f), 1.0f);
+            }
+            else if (y >= (center.y - 5) && y <= (center.y + 4) && x >= (center.x - 1) && x <= center.x) {
+                pixel = vec4(float(pixel.x < 0.5f), float(pixel.y < 0.5f), float(pixel.z < 0.5f), 1.0f);
+            }
+
+            imageStore(ldrImage, ivec2(x, y), pixel);
+        }
+    }
+}
