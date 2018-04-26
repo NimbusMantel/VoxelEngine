@@ -12,7 +12,11 @@ layout(binding = 1) buffer restrict RayQueue {
     uint pixels;
 } rayQueue;
 
-layout(binding = 2) buffer restrict HDRImage {
+layout(binding = 2) buffer restrict Visibiliy {
+    uint[] mask;
+} visibility;
+
+layout(binding = 3) buffer restrict HDRImage {
     uint[] data;
 } hdrImage;
 
@@ -68,6 +72,14 @@ void main() {
 
             atomicExchange(hdrImage.data[pixIdx], 0x00);
             atomicExchange(hdrImage.data[pixIdx | 0x01], 0x00);
+        }
+
+        {
+            if (false) { // If child is to be visited (even if unloaded)
+                uint parent = 0x00; // parent address
+
+                atomicOr(visibility.mask[parent >> 5], 0x80000000 >> (parent & 0x0000001F));
+            }
         }
 
         vec4 pixel = vec4(ray.dir, 1.0f);
