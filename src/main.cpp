@@ -12,9 +12,16 @@
 #include <algorithm>
 #include <fstream>
 
+#include "camera.hpp"
+
+#define VOXEL_DEPTH 16
+
+uint32_t tmp = (127 - VOXEL_DEPTH) << 23;
+
 const uint16_t WIDTH = 640;
 const uint16_t HEIGHT = 360;
 const uint8_t  FOV = 70;
+const float SCALE = *((float*)(&tmp));
 
 #ifdef NDEBUG
 const std::vector<const char*> layers = {};
@@ -31,6 +38,12 @@ const std::vector<const char*> devExt = {
 SDL_Window* window;
 
 bool isFullscreen = false;
+
+struct Mouse {
+	glm::uvec2 pos;
+
+	bool isDragging;
+} mouse;
 
 vk::Instance instance;
 vk::DebugReportCallbackEXT callback;
@@ -190,7 +203,9 @@ static void initVulkan();
 static void update();
 static void cleanup();
 
+static void initState();
 static void updateState();
+static void changeFullscreen(bool fullscreen);
 static void drawFrame();
 
 static void createInstance();
@@ -220,6 +235,8 @@ static void recreateSwapChain();
 static void cleanupSwapChain();
 
 int SDL_main(int argc, char* argv[]) {
+	initState();
+
 	try {
 		initSDL();
 
@@ -286,11 +303,16 @@ static void initVulkan() {
 }
 
 static void update() {
+	uint32_t width, height, size;
+
 	SDL_Event event;
 
 	bool quit = false;
 	
 	while (!quit) {
+		SDL_GetWindowSize(window, (int*)&width, (int*)&height);
+		size = height ^ ((width ^ height) & -(width < height));
+
 		while (SDL_PollEvent(&event)) {
 			if (event.type == SDL_QUIT) {
 				quit = true;
@@ -302,25 +324,46 @@ static void update() {
 					swapChainExtent = surfaceCapabilities.currentExtent;
 				}
 				else {
-					uint32_t width, height;
-
-					SDL_GetWindowSize(window, (int*)&width, (int*)&height);
-
 					swapChainExtent = vk::Extent2D(std::max(surfaceCapabilities.minImageExtent.width, std::min(surfaceCapabilities.maxImageExtent.width, width)),
 						std::max(surfaceCapabilities.minImageExtent.height, std::min(surfaceCapabilities.maxImageExtent.height, height)));
 				}
 			}
 			else if (event.type == SDL_KEYDOWN) {
 				if (event.key.keysym.sym == SDLK_ESCAPE) {
-					quit = true;
+					if (isFullscreen) {
+						changeFullscreen(false);
+					}
+					else {
+						quit = true;
+					}
 				}
 				else if (event.key.keysym.sym == SDLK_f) {
-					isFullscreen = !isFullscreen;
-
-					SDL_SetWindowFullscreen(window, isFullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-
-					recreateSwapChain();
+					changeFullscreen(!isFullscreen);
 				}
+			}
+			else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
+				mouse.isDragging = true;
+
+				mouse.pos = glm::uvec2(event.button.x, height - 1 - event.button.y);
+
+				SDL_SetRelativeMouseMode(SDL_TRUE);
+			}
+			else if (event.type == SDL_MOUSEBUTTONUP && event.button.button == SDL_BUTTON_LEFT) {
+				mouse.isDragging = false;
+
+				mouse.pos = glm::uvec2(event.button.x, height - 1 - event.button.y);
+
+				SDL_SetRelativeMouseMode(SDL_FALSE);
+			}
+			else if (event.type == SDL_MOUSEMOTION) {
+				mouse.pos = glm::uvec2(event.motion.x, height - 1 - event.motion.y);
+
+				if (mouse.isDragging) {
+					camera::rot(glm::vec2(event.motion.xrel, -event.motion.yrel) * -0.02f * (float)M_PI / (0.5f * size));
+				}
+			}
+			else if (event.type == SDL_MOUSEWHEEL) {
+				camera::rad(event.wheel.y * -0.5f);
 			}
 		}
 
@@ -388,10 +431,31 @@ static void cleanup() {
 	SDL_Quit();
 }
 
-static void updateState() {
-	// Update position and rotation
+static void initState() {
+	camera::mov(glm::vec3(1.0f, 1.0f, -1.0f));
+	camera::rad(10.0f);
 
-	//recordRenderCommandBuffer();
+	camera::upd(offscreenPass.rayTracer.constants.pos, offscreenPass.rayTracer.constants.rot);
+}
+
+static void updateState() {
+	if (camera::upd(offscreenPass.rayTracer.constants.pos, offscreenPass.rayTracer.constants.rot)) {
+		offscreenPass.rayTracer.constants.pos = offscreenPass.rayTracer.constants.pos * SCALE + 1.5f;
+
+		recordRenderCommandBuffer();
+	}
+}
+
+static void changeFullscreen(bool fullscreen) {
+	if (fullscreen == isFullscreen) {
+		return;
+	}
+
+	isFullscreen = fullscreen;
+
+	SDL_SetWindowFullscreen(window, isFullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+
+	recreateSwapChain();
 }
 
 static void drawFrame() {
