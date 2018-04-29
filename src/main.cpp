@@ -432,10 +432,12 @@ static void cleanup() {
 }
 
 static void initState() {
-	camera::mov(glm::vec3(1.0f, 1.0f, -1.0f));
+	camera::mov(glm::vec3(0.5f, 0.5f, -0.5f));
 	camera::rad(10.0f);
 
 	camera::upd(offscreenPass.rayTracer.constants.pos, offscreenPass.rayTracer.constants.rot);
+
+	offscreenPass.rayTracer.constants.pos = offscreenPass.rayTracer.constants.pos * SCALE + 1.5f;
 }
 
 static void updateState() {
@@ -847,7 +849,7 @@ static void createImages() {
 
 	// Voxel structure
 
-	imageInfo = vk::ImageCreateInfo(vk::ImageCreateFlags(), vk::ImageType::e3D, voxelBuffer.strFormat, vk::Extent3D(WIDTH, HEIGHT, 1), 1, 1, vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal,
+	imageInfo = vk::ImageCreateInfo(vk::ImageCreateFlags(), vk::ImageType::e3D, voxelBuffer.strFormat, voxelBuffer.extent, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal,
 		vk::ImageUsageFlagBits::eStorage, vk::SharingMode::eExclusive, 1, &queueIndices.computeFamily, vk::ImageLayout::eUndefined);
 
 	res = device.createImage(&imageInfo, nullptr, &voxelBuffer.strImage);

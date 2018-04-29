@@ -4,6 +4,9 @@
 
 #extension GL_ARB_separate_shader_objects : require
 
+#define VoxelDepth 23
+#define VoxelToUnit 4096.9f
+
 layout(local_size_x = 32, local_size_y = 32) in;
 
 layout(binding = 0, r32ui) uniform restrict readonly uimage3D voxStr;
@@ -29,6 +32,13 @@ layout(push_constant) uniform Constants {
     float    fov; // offset: 56, alignment: 4
 } cst;
 
+struct VoxelStack {
+    uint idx;
+    float tax;
+    uint das;
+    float tin;
+};
+
 struct RayInit { // not yet aligned, only do once all information is inside
     vec3 pos;
     vec3 dir;
@@ -38,7 +48,10 @@ struct RayInit { // not yet aligned, only do once all information is inside
 };
 
 void main() {
+    const float epsilon = uintBitsToFloat((127 - VoxelDepth) << 23);
+
     const uvec2 size = cst.siz;
+
     const uint pixels = size.x * size.y;
 
     const vec4 camFrame = vec4(cst.fov, cst.fov * (size.y / float(size.x)), cst.fov * 2.0f / float(size.x - 1), cst.fov * (size.y / float(size.x)) * 2.0f / float(size.y - 1));
@@ -51,6 +64,8 @@ void main() {
     if (pixIdx >= pixels) {
         atomicCompSwap(rayQueue.pixels, pixIdx, 0);
     }
+
+    VoxelStack stack[VoxelDepth];
 
     RayInit ray;
 
@@ -74,22 +89,158 @@ void main() {
             atomicExchange(hdrImage.data[pixIdx | 0x01], 0x00);
         }
 
-        {
-            if (false) { // If child is to be visited (even if unloaded)
-                uint parent = 0x00; // parent address
+        vec3 pixel = vec3(0.0f, 0.0f, 0.0f);
 
-                atomicOr(visibility.mask[parent >> 5], 0x80000000 >> (parent & 0x0000001F));
+        {
+            vec3 norPos = ray.pos;
+            vec3 dir = ray.dir;
+            vec3 fac = ray.fac;
+
+            if (abs(dir.x) < epsilon) dir.x = uintBitsToFloat(floatBitsToUint(epsilon) ^ (floatBitsToUint(dir.x) & 0x80000000));
+		    if (abs(dir.y) < epsilon) dir.y = uintBitsToFloat(floatBitsToUint(epsilon) ^ (floatBitsToUint(dir.y) & 0x80000000));
+            if (abs(dir.z) < epsilon) dir.z = uintBitsToFloat(floatBitsToUint(epsilon) ^ (floatBitsToUint(dir.z) & 0x80000000));
+
+            uint octant_mask = 0x00;
+
+		    if (dir.x > 0.0f) { octant_mask ^= 1; norPos.x = 3.0f - norPos.x; }
+		    if (dir.y > 0.0f) { octant_mask ^= 2; norPos.y = 3.0f - norPos.y; }
+            if (dir.z > 0.0f) { octant_mask ^= 4; norPos.z = 3.0f - norPos.z; }
+
+            vec3 t_coef = vec3(1.0f / -abs(dir.x), 1.0f / -abs(dir.y), 1.0f / -abs(dir.z));
+		    vec3 t_bias = norPos * t_coef;
+
+		    float t_min = max(max(2.0f * t_coef.x - t_bias.x, 2.0f * t_coef.y - t_bias.y), 2.0f * t_coef.z - t_bias.z);
+		    float t_max = min(min(t_coef.x - t_bias.x, t_coef.y - t_bias.y), t_coef.z - t_bias.z);
+		
+		    float h = t_max;
+
+		    t_min = max(t_min, 0.0f);
+            t_max = min(t_max, 1.0f);
+
+            uvec4 parent = uvec4(0, 0, 0, 0);
+            uint voxel = 0x00;
+
+            uint idx = 0x00;
+
+            vec3 pos = vec3(1.0f, 1.0f, 1.0f);
+
+            uint scale = VoxelDepth - 1;
+            float scaExp2 = 0.5f;
+
+            if ((norPos.x - 1.5f) > t_min) { idx ^= 1; pos.x = 1.5f; }
+		    if ((norPos.y - 1.5f) > t_min) { idx ^= 2; pos.y = 1.5f; }
+            if ((norPos.z - 1.5f) > t_min) { idx ^= 4; pos.z = 1.5f; }
+
+            while (scale < VoxelDepth) {
+                if (voxel == 0x00) {
+                    voxel = imageLoad(voxStr, ivec3(parent.xyz)).x;
+                }
+
+                vec3 t_corner = pos * t_coef - t_bias;
+
+                float tc_max = min(min(t_corner.x, t_corner.y), t_corner.z);
+
+                uint cidx = idx ^ octant_mask;
+
+                bool shouldRender = (voxel & 0xFF) == 0x00;
+
+                if (!shouldRender && ((voxel & (0x80 >> cidx)) != 0x00) && (t_min <= t_max)) {
+                    atomicOr(visibility.mask[parent.w >> 5], 0x80000000 >> (parent.w & 0x0000001F));
+
+                    if ((voxel & 0x80000000) != 0x00) {
+                        shouldRender = true;
+                    }
+                    else {
+                        if (tc_max < h) {
+                            stack[scale].idx = parent.w;
+                            stack[scale].tax = t_max;
+                        }
+
+                        stack[scale].das = floatBitsToUint((tc_max - t_min) / scaExp2);
+                        stack[scale].tin = t_min;
+
+                        h = tc_max;
+
+                        parent.w = (voxel >> 8) & 0x001FFFFF;
+
+                        parent.x = ((parent.w << 1) & 0xFE) | (cidx & 0x01);
+                        parent.y = ((parent.w >> 6) & 0xFE) | ((cidx >> 1) & 0x01);
+                        parent.z = ((parent.w >> 13) & 0xFE) | ((cidx >> 2) & 0x01);
+                        parent.w = (parent.w << 3) | cidx;
+
+                        idx = 0x00;
+
+                        scale--;
+                        scaExp2 *= 0.5f;
+
+                        if ((scaExp2 * t_coef.x + t_corner.x) > t_min) { idx ^= 1; pos.x += scaExp2; }
+					    if ((scaExp2 * t_coef.y + t_corner.y) > t_min) { idx ^= 2; pos.y += scaExp2; }
+                        if ((scaExp2 * t_coef.z + t_corner.z) > t_min) { idx ^= 4; pos.z += scaExp2; }
+
+                        t_max = min(t_max, tc_max);
+                        
+                        voxel = 0x00;
+
+                        continue;
+                    }
+                }
+
+                uint step_mask = 0x00;
+
+                if (t_corner.x <= tc_max) { step_mask ^= 1; pos.x -= scaExp2; }
+			    if (t_corner.y <= tc_max) { step_mask ^= 2; pos.y -= scaExp2; }
+			    if (t_corner.z <= tc_max) { step_mask ^= 4; pos.z -= scaExp2; }
+
+			    idx ^= step_mask;
+                t_min = tc_max;
+
+                if ((idx & step_mask) != 0x00) {
+                    if (shouldRender) {
+                        pixel = vec3(stack[scale + 1].tin * VoxelToUnit);
+
+                        break;
+                    }
+
+                    uint difBits = 0x00;
+
+                    if ((step_mask & 0x01) != 0x00) difBits |= floatBitsToUint(pos.x) ^ floatBitsToUint(pos.x + scaExp2);
+                    if ((step_mask & 0x02) != 0x00) difBits |= floatBitsToUint(pos.y) ^ floatBitsToUint(pos.y + scaExp2);
+                    if ((step_mask & 0x04) != 0x00) difBits |= floatBitsToUint(pos.z) ^ floatBitsToUint(pos.z + scaExp2);
+
+                    scale = (floatBitsToUint(float(difBits)) >> 23) - 127;
+                    scaExp2 = uintBitsToFloat((127 - (VoxelDepth - scale)) << 23);
+
+                    uvec3 sh = uvec3(floatBitsToUint(pos.x) >> scale, floatBitsToUint(pos.y) >> scale, floatBitsToUint(pos.z) >> scale);
+
+                    pos.x = uintBitsToFloat(sh.x << scale);
+                    pos.y = uintBitsToFloat(sh.y << scale);
+                    pos.z = uintBitsToFloat(sh.z << scale);
+
+                    idx = (sh.x & 0x01) | ((sh.y & 0x01) << 1) | ((sh.z & 0x01) << 2);
+
+                    parent.w = (voxel >> 8) & 0x001FFFFF;
+
+                    parent.x = ((parent.w << 1) & 0xFE) | (cidx & 0x01);
+                    parent.y = ((parent.w >> 6) & 0xFE) | ((cidx >> 1) & 0x01);
+                    parent.z = ((parent.w >> 13) & 0xFE) | ((cidx >> 2) & 0x01);
+                    parent.w = (parent.w << 3) | cidx;
+
+                    t_max = stack[scale].tax;
+
+                    h = 0.0f;
+                    voxel = 0x00;
+                }
             }
         }
 
-        vec4 pixel = vec4(ray.dir, 1.0f);
+        vec4 result = vec4(pixel, 1.0f);
 
         uint expected, latest = 0x00;
 
         do {
             expected = latest;
 
-            latest = atomicCompSwap(hdrImage.data[ray.dst], expected, packHalf2x16(pixel.xy + unpackHalf2x16(expected)));
+            latest = atomicCompSwap(hdrImage.data[ray.dst], expected, packHalf2x16(result.xy + unpackHalf2x16(expected)));
         } while (latest != expected);
 
         latest = 0x00;
@@ -97,7 +248,7 @@ void main() {
         do {
             expected = latest;
 
-            latest = atomicCompSwap(hdrImage.data[ray.dst | 0x01], expected, packHalf2x16(pixel.zw + unpackHalf2x16(expected)));
+            latest = atomicCompSwap(hdrImage.data[ray.dst | 0x01], expected, packHalf2x16(result.zw + unpackHalf2x16(expected)));
         } while (latest != expected);
     } while(true);
 

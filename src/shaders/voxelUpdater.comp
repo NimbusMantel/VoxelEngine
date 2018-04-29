@@ -8,7 +8,7 @@ layout(local_size_x = 32) in;
 
 layout(binding = 0, r32ui) uniform restrict writeonly uimage3D voxStr;
 
-#define VOX_STRUCTURE(children, mask) uint((uint(bool(children)) << 31) | ((children & 0x001FFFFF) << 8) | (mask & 0xFF))
+#define VOX_STRUCTURE(children, mask) uint((uint(!bool(children)) << 31) | ((children & 0x001FFFFF) << 8) | (mask & 0xFF))
 #define VOX_EMPTY 0x00
 
 const uint testData[136] = uint[136](
@@ -37,7 +37,7 @@ void main() {
     for (uint x = gl_GlobalInvocationID.x; x < 17; x += gl_WorkGroupSize.x) {
         uint idx = x << 3;
 
-        ivec3 pos = (ivec3(x, x >> 8, x >> 16) & 0xFF) << 1;
+        ivec3 pos = ivec3(x << 1, x >> 6, x >> 13) & 0xFE;
 
         imageStore(voxStr, pos + ivec3(0, 0, 0), uvec4(testData[idx + 0], 0, 0, 0));
         imageStore(voxStr, pos + ivec3(1, 0, 0), uvec4(testData[idx + 1], 0, 0, 0));
@@ -48,4 +48,6 @@ void main() {
         imageStore(voxStr, pos + ivec3(0, 1, 1), uvec4(testData[idx + 6], 0, 0, 0));
         imageStore(voxStr, pos + ivec3(1, 1, 1), uvec4(testData[idx + 7], 0, 0, 0));
     }
+
+	// NOT WORKING AT ALL
 }
