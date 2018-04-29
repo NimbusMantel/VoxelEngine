@@ -33,18 +33,20 @@ layout(push_constant) uniform Constants {
 } cst;
 
 struct VoxelStack {
-    uint idx;
-    float tax;
-    uint das;
-    float tin;
+    uint  idx; // offset: 0, alignment: 4
+    float tax; // offset: 4, alignment: 4
+    uint  das; // offset: 8, alignment: 4
+    float tin; // offset: 12, alignment: 4
+    vec3  pos; // offset: 16, alignment: 16
+    uint  vox; // offset: 28, alignment: 4
 };
 
-struct RayInit { // not yet aligned, only do once all information is inside
-    vec3 pos;
-    vec3 dir;
-    vec3 fac;
-    float dis;
-    uint dst;
+struct RayInit {
+    vec3  pos; // offset: 0, alignment: 16
+    float dis; // offset: 12, alignment: 4
+    vec3  dir; // offset: 16, alignment: 16
+    uint  dst; // offset: 28, alignment: 4
+    vec3  fac; // offset: 32, alignment: 16
 };
 
 void main() {
@@ -80,8 +82,8 @@ void main() {
                 break;
             }
 
-            ray = RayInit(camPos, camView * normalize(vec3((pixIdx % size.x) * camFrame.z - camFrame.x, (size.y - (pixIdx / size.x) - 1) * camFrame.w - camFrame.y, -1.0f)),
-            vec3(1.0f), 0.0f, pixIdx << 1);
+            ray = RayInit(camPos, 0.0f, camView * normalize(vec3((pixIdx % size.x) * camFrame.z - camFrame.x, (size.y - (pixIdx / size.x) - 1) * camFrame.w - camFrame.y, -1.0f)),
+            pixIdx << 1, vec3(1.0f));
 
             pixIdx <<= 1;
 
@@ -131,6 +133,8 @@ void main() {
 		    if ((norPos.y - 1.5f) > t_min) { idx ^= 2; pos.y = 1.5f; }
             if ((norPos.z - 1.5f) > t_min) { idx ^= 4; pos.z = 1.5f; }
 
+            uint step_mask = 0x00;
+
             while (scale < VoxelDepth) {
                 if (voxel == 0x00) {
                     voxel = imageLoad(voxStr, ivec3(parent.xyz)).x;
@@ -156,8 +160,10 @@ void main() {
                             stack[scale].tax = t_max;
                         }
 
-                        stack[scale].das = floatBitsToUint((tc_max - t_min) / scaExp2);
+                        stack[scale].das = (floatBitsToUint((tc_max - t_min) / scaExp2) & 0xFFFFFFF8) | (step_mask & 0x07);
                         stack[scale].tin = t_min;
+                        stack[scale].pos = pos;
+                        stack[scale].vox = voxel;
 
                         h = tc_max;
 
@@ -185,7 +191,7 @@ void main() {
                     }
                 }
 
-                uint step_mask = 0x00;
+                step_mask = 0x00;
 
                 if (t_corner.x <= tc_max) { step_mask ^= 1; pos.x -= scaExp2; }
 			    if (t_corner.y <= tc_max) { step_mask ^= 2; pos.y -= scaExp2; }
@@ -196,7 +202,14 @@ void main() {
 
                 if ((idx & step_mask) != 0x00) {
                     if (shouldRender) {
-                        pixel = vec3(stack[scale + 1].tin * VoxelToUnit);
+                        uint curr_side = (stack[scale + 1].das & 0x06) + uint(bool((octant_mask ^ 0x07) & stack[scale + 1].das));
+
+                        float curr_dist = (stack[scale + 1].tin + ray.dis) * VoxelToUnit;
+                        float curr_fallOff = 1.0f + curr_dist * curr_dist;
+
+                        float curr_depth = uintBitsToFloat(stack[scale + 1].das & 0xFFFFFFF8);
+
+                        pixel = vec3(0.0f, curr_depth * 0.5, 0.0f);
 
                         break;
                     }
@@ -218,17 +231,10 @@ void main() {
 
                     idx = (sh.x & 0x01) | ((sh.y & 0x01) << 1) | ((sh.z & 0x01) << 2);
 
-                    parent.w = (voxel >> 8) & 0x001FFFFF;
-
-                    parent.x = ((parent.w << 1) & 0xFE) | (cidx & 0x01);
-                    parent.y = ((parent.w >> 6) & 0xFE) | ((cidx >> 1) & 0x01);
-                    parent.z = ((parent.w >> 13) & 0xFE) | ((cidx >> 2) & 0x01);
-                    parent.w = (parent.w << 3) | cidx;
-
                     t_max = stack[scale].tax;
+                    voxel = stack[scale].vox;
 
                     h = 0.0f;
-                    voxel = 0x00;
                 }
             }
         }
