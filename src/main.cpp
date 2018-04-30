@@ -23,6 +23,8 @@ const uint16_t HEIGHT = 360;
 const uint8_t  FOV = 70;
 const float SCALE = *((float*)(&tmp));
 
+const bool VSYNC = true;
+
 #ifdef NDEBUG
 const std::vector<const char*> layers = {};
 #else
@@ -731,16 +733,18 @@ static void createSwapChain() {
 
 	vk::PresentModeKHR presentMode = vk::PresentModeKHR::eFifo;
 
-	for (const vk::PresentModeKHR mode : presentModes) {
-		if (mode == vk::PresentModeKHR::eMailbox) {
-			presentMode = mode;
+	if (!VSYNC) {
+		for (const vk::PresentModeKHR mode : presentModes) {
+			if (mode == vk::PresentModeKHR::eMailbox) {
+				presentMode = mode;
 
-			break;
-		}
-		else if (mode == vk::PresentModeKHR::eImmediate) {
-			presentMode = mode;
+				break;
+			}
+			else if (mode == vk::PresentModeKHR::eImmediate) {
+				presentMode = mode;
 
-			break;
+				break;
+			}
 		}
 	}
 
@@ -1239,7 +1243,7 @@ static void recordRenderCommandBuffer() {
 	offscreenPass.buffer.dispatch(1, 1, 1);
 
 	offscreenPass.buffer.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, {},
-		{ vk::BufferMemoryBarrier(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eShaderRead, queueIndices.computeFamily, queueIndices.computeFamily,
+		{ vk::BufferMemoryBarrier(vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eShaderRead, queueIndices.computeFamily, queueIndices.computeFamily,
 			offscreenPass.hdrImage.image, 0, offscreenPass.hdrImage.size) }, {});
 
 	offscreenPass.buffer.bindPipeline(vk::PipelineBindPoint::eCompute, offscreenPass.toneMapper.pipeline);
