@@ -25,18 +25,6 @@ const float SCALE = *((float*)(&tmp));
 
 const bool VSYNC = true;
 
-#ifdef NDEBUG
-const std::vector<const char*> layers = {};
-#else
-const std::vector<const char*> layers = {
-	"VK_LAYER_LUNARG_standard_validation"
-};
-#endif
-
-const std::vector<const char*> devExt = {
-	VK_KHR_SWAPCHAIN_EXTENSION_NAME
-};
-
 SDL_Window* window;
 
 bool isFullscreen = false;
@@ -47,52 +35,73 @@ struct Mouse {
 	bool isDragging;
 } mouse;
 
-vk::Instance instance;
-vk::DebugReportCallbackEXT callback;
+struct Vulkan {
+	vk::Instance instance;
+	vk::DebugReportCallbackEXT callback;
 
-vk::SurfaceKHR surface;
+	vk::SurfaceKHR surface;
 
-vk::PhysicalDevice physical;
-
-struct QueueFamilies {
-	uint32_t computeFamily;
-	uint32_t transferFamily;
-	uint32_t presentFamily;
+	vk::PhysicalDevice physical;
+	vk::Device device;
 
 	std::set<uint32_t> uniqueFamilies;
-} queueIndices;
 
-vk::Device device;
+	vk::PhysicalDeviceMemoryProperties memoryProps;
 
-vk::PhysicalDeviceMemoryProperties memoryProps;
+#ifdef NDEBUG
+	const std::vector<const char*> layers = {};
+#else
+	const std::vector<const char*> layers = {
+		"VK_LAYER_LUNARG_standard_validation"
+	};
+#endif
 
-vk::Queue computeQueue;
-vk::Queue transferQueue;
-vk::Queue presentationQueue;
+	const std::vector<const char*> extensions = {
+		VK_KHR_SWAPCHAIN_EXTENSION_NAME
+	};
+} vulkan;
 
-vk::SwapchainKHR swapChain;
+struct FeedbackPass {
+	uint32_t family;
+	vk::Queue queue;
 
-std::vector<vk::Image> swapChainImages;
-
-vk::Format swapChainFormat;
-vk::Extent2D swapChainExtent;
-
-vk::Viewport viewport;
-
-vk::Semaphore imageAvailable;
-vk::Semaphore renderFinished;
-
-struct OffscreenPass {
 	vk::CommandPool pool;
-	vk::CommandBuffer buffer;
+	std::array<vk::CommandBuffer, 2> primary;
 
-	vk::Semaphore semaphore;
+	vk::Event update;
+	vk::Semaphore upload;
+	vk::Fence download;
+
+	struct CPUStaging {
+		vk::Buffer buffer;
+		vk::DeviceMemory memory;
+	} cpuStaging;
+
+	struct GPUStaging {
+		vk::DeviceSize size = sizeof(uint8_t) << 21;
+
+		vk::Buffer buffer;
+		vk::DeviceMemory memory;
+	} gpuStaging;
+} feedbackPass;
+
+struct RenderPass {
+	uint32_t family;
+	vk::Queue queue;
+
+	vk::CommandPool pool;
+	std::array<vk::CommandBuffer, 2> primary;
+
+	vk::Semaphore render;
+	vk::Semaphore finished;
 
 	struct HDRImage {
+		vk::Format format = vk::Format::eR16G16B16A16Sfloat;
 		vk::DeviceSize size = sizeof(glm::i16vec4) * WIDTH * HEIGHT;
 
 		vk::Buffer image;
 		vk::DeviceMemory memory;
+		vk::BufferView view;
 	} hdrImage;
 
 	struct LDRImage {
@@ -108,6 +117,8 @@ struct OffscreenPass {
 		vk::PipelineLayout layout;
 		vk::Pipeline pipeline;
 
+		vk::CommandBuffer secondary;
+
 		struct Descriptor {
 			vk::DescriptorPool pool;
 			vk::DescriptorSetLayout layout;
@@ -118,6 +129,8 @@ struct OffscreenPass {
 	struct RayTracer {
 		vk::PipelineLayout layout;
 		vk::Pipeline pipeline;
+
+		vk::CommandBuffer secondary;
 
 		struct Descriptor {
 			vk::DescriptorPool pool;
@@ -132,13 +145,6 @@ struct OffscreenPass {
 			vk::DeviceMemory memory;
 		} queue;
 
-		struct Visibility {
-			vk::DeviceSize size = sizeof(uint8_t) << 21;
-
-			vk::Buffer buffer;
-			vk::DeviceMemory memory;
-		} visibility;
-
 		struct Constants {
 			glm::mat3  rot = glm::mat3(1.0f);
 			glm::vec3  pos = glm::vec3(0.0f, 1.0f, 0.0f);
@@ -151,27 +157,48 @@ struct OffscreenPass {
 		vk::PipelineLayout layout;
 		vk::Pipeline pipeline;
 
+		vk::CommandBuffer secondary;
+
 		struct Descriptor {
 			vk::DescriptorPool pool;
 			vk::DescriptorSetLayout layout;
 			vk::DescriptorSet set;
 		} descriptor;
 	} toneMapper;
-} offscreenPass;
+} renderPass;
 
-struct TransferPass {
+struct PresentationPass {
+	uint32_t family;
+	vk::Queue queue;
+
 	vk::CommandPool pool;
-	std::vector<vk::CommandBuffer> buffers;
-} transferPass;
+	std::vector<vk::CommandBuffer> primary;
+
+	vk::Semaphore available;
+
+	struct SwapChain {
+		vk::SwapchainKHR queue;
+
+		std::vector<vk::Image> images;
+
+		vk::Format format;
+		vk::Extent2D extent;
+
+		vk::Viewport viewport;
+	} swapChain;
+} presentationPass;
 
 struct VoxelBuffer {
 	vk::Extent3D extent = vk::Extent3D(256, 256, 256);
 
 	vk::DeviceMemory memory;
 
-	vk::Format strFormat = vk::Format::eR32Uint;
-	vk::Image strImage;
-	vk::ImageView strView;
+	struct Structure {
+		vk::Format format = vk::Format::eR32Uint;
+
+		vk::Image image;
+		vk::ImageView view;
+	} structure;
 } voxelBuffer;
 
 #ifndef NDEBUG
@@ -221,17 +248,21 @@ static void createSwapChain();
 static void createImages();
 static void createImageViews();
 static void createBuffers();
+static void createBufferViews();
 
 static void createDescriptorPools();
 static void createDescriptorSets();
-static void createOffscreenPipeline();
-
-static void createCommandPools();
-static void createRenderCommandBuffer();
-static void recordRenderCommandBuffer();
-static void createTransferCommandBuffers();
+static void createRenderPipelines();
 
 static void createSemaphores();
+static void createEvents();
+static void createFences();
+
+static void createCommandPools();
+static void createFeedbackCommandBuffer();
+static void createRenderCommandBuffers();
+static void recordRenderCommandBuffers(bool voxelUpdater, bool rayTracer);
+static void createPresentationCommandBuffers();
 
 static void recreateSwapChain();
 static void cleanupSwapChain();
@@ -287,21 +318,25 @@ static void initVulkan() {
 	createLogicalDevice();
 
 	createSwapChain();
+
 	createImages();
 	createImageViews();
-
 	createBuffers();
+	createBufferViews();
 
 	createDescriptorPools();
 	createDescriptorSets();
-	createOffscreenPipeline();
-
-	createCommandPools();
-	createRenderCommandBuffer();
-	recordRenderCommandBuffer();
-	createTransferCommandBuffers();
+	createRenderPipelines();
 
 	createSemaphores();
+	createEvents();
+	createFences();
+
+	createCommandPools();
+	createFeedbackCommandBuffer();
+	createRenderCommandBuffers();
+	recordRenderCommandBuffers(true, true);
+	createPresentationCommandBuffers();
 }
 
 static void update() {
@@ -320,13 +355,13 @@ static void update() {
 				quit = true;
 			}
 			else if (event.type == SDL_WINDOWEVENT) {
-				vk::SurfaceCapabilitiesKHR surfaceCapabilities = physical.getSurfaceCapabilitiesKHR(surface);
+				vk::SurfaceCapabilitiesKHR surfaceCapabilities = vulkan.physical.getSurfaceCapabilitiesKHR(vulkan.surface);
 
 				if (surfaceCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max() && surfaceCapabilities.currentExtent.height != std::numeric_limits<uint32_t>::max()) {
-					swapChainExtent = surfaceCapabilities.currentExtent;
+					presentationPass.swapChain.extent = surfaceCapabilities.currentExtent;
 				}
 				else {
-					swapChainExtent = vk::Extent2D(std::max(surfaceCapabilities.minImageExtent.width, std::min(surfaceCapabilities.maxImageExtent.width, width)),
+					presentationPass.swapChain.extent = vk::Extent2D(std::max(surfaceCapabilities.minImageExtent.width, std::min(surfaceCapabilities.maxImageExtent.width, width)),
 						std::max(surfaceCapabilities.minImageExtent.height, std::min(surfaceCapabilities.maxImageExtent.height, height)));
 				}
 			}
@@ -369,65 +404,76 @@ static void update() {
 			}
 		}
 
-		if (swapChainExtent.width > 0 && swapChainExtent.height > 0) {
+		if (presentationPass.swapChain.extent.width > 0 && presentationPass.swapChain.extent.height > 0) {
 			updateState();
 
 			drawFrame();
 		}
 	}
 
-	device.waitIdle();
+	vulkan.device.waitIdle();
 }
 
 static void cleanup() {
-	device.destroySemaphore(imageAvailable, nullptr);
-	device.destroySemaphore(renderFinished, nullptr);
-	device.destroySemaphore(offscreenPass.semaphore, nullptr);
+	vulkan.device.destroySemaphore(feedbackPass.upload, nullptr);
+	vulkan.device.destroySemaphore(renderPass.render, nullptr);
+	vulkan.device.destroySemaphore(renderPass.finished, nullptr);
+	vulkan.device.destroySemaphore(presentationPass.available, nullptr);
 
-	device.freeCommandBuffers(offscreenPass.pool, { offscreenPass.buffer });
-	device.destroyCommandPool(offscreenPass.pool, nullptr);
-	device.freeCommandBuffers(transferPass.pool, transferPass.buffers);
-	device.destroyCommandPool(transferPass.pool, nullptr);
+	vulkan.device.destroyEvent(feedbackPass.update, nullptr);
 
-	device.destroyPipeline(offscreenPass.voxelUpdater.pipeline, nullptr);
-	device.destroyPipelineLayout(offscreenPass.voxelUpdater.layout, nullptr);
-	device.destroyPipeline(offscreenPass.rayTracer.pipeline, nullptr);
-	device.destroyPipelineLayout(offscreenPass.rayTracer.layout, nullptr);
-	device.destroyPipeline(offscreenPass.toneMapper.pipeline, nullptr);
-	device.destroyPipelineLayout(offscreenPass.toneMapper.layout, nullptr);
+	vulkan.device.destroyFence(feedbackPass.download, nullptr);
 
-	device.destroyDescriptorSetLayout(offscreenPass.voxelUpdater.descriptor.layout, nullptr);
-	device.destroyDescriptorPool(offscreenPass.voxelUpdater.descriptor.pool, nullptr);
-	device.destroyDescriptorSetLayout(offscreenPass.rayTracer.descriptor.layout, nullptr);
-	device.destroyDescriptorPool(offscreenPass.rayTracer.descriptor.pool, nullptr);
-	device.destroyDescriptorSetLayout(offscreenPass.toneMapper.descriptor.layout, nullptr);
-	device.destroyDescriptorPool(offscreenPass.toneMapper.descriptor.pool, nullptr);
+	vulkan.device.freeCommandBuffers(feedbackPass.pool, { feedbackPass.primary });
+	vulkan.device.destroyCommandPool(feedbackPass.pool, nullptr);
+	vulkan.device.freeCommandBuffers(renderPass.pool, {
+		renderPass.primary[0], renderPass.voxelUpdater.secondary, renderPass.rayTracer.secondary,
+		renderPass.primary[1], renderPass.toneMapper.secondary
+	});
+	vulkan.device.destroyCommandPool(renderPass.pool, nullptr);
+	vulkan.device.freeCommandBuffers(presentationPass.pool, presentationPass.primary);
+	vulkan.device.destroyCommandPool(presentationPass.pool, nullptr);
 
-	device.destroyBuffer(offscreenPass.rayTracer.queue.buffer, nullptr);
-	device.freeMemory(offscreenPass.rayTracer.queue.memory, nullptr);
-	device.destroyBuffer(offscreenPass.rayTracer.visibility.buffer, nullptr);
-	device.freeMemory(offscreenPass.rayTracer.visibility.memory, nullptr);
-	device.destroyBuffer(offscreenPass.hdrImage.image, nullptr);
-	device.freeMemory(offscreenPass.hdrImage.memory, nullptr);
+	vulkan.device.destroyPipeline(renderPass.voxelUpdater.pipeline, nullptr);
+	vulkan.device.destroyPipelineLayout(renderPass.voxelUpdater.layout, nullptr);
+	vulkan.device.destroyPipeline(renderPass.rayTracer.pipeline, nullptr);
+	vulkan.device.destroyPipelineLayout(renderPass.rayTracer.layout, nullptr);
+	vulkan.device.destroyPipeline(renderPass.toneMapper.pipeline, nullptr);
+	vulkan.device.destroyPipelineLayout(renderPass.toneMapper.layout, nullptr);
 
-	device.destroyImageView(offscreenPass.ldrImage.view, nullptr);
-	device.destroyImage(offscreenPass.ldrImage.image, nullptr);
-	device.freeMemory(offscreenPass.ldrImage.memory, nullptr);
+	vulkan.device.destroyDescriptorSetLayout(renderPass.voxelUpdater.descriptor.layout, nullptr);
+	vulkan.device.destroyDescriptorPool(renderPass.voxelUpdater.descriptor.pool, nullptr);
+	vulkan.device.destroyDescriptorSetLayout(renderPass.rayTracer.descriptor.layout, nullptr);
+	vulkan.device.destroyDescriptorPool(renderPass.rayTracer.descriptor.pool, nullptr);
+	vulkan.device.destroyDescriptorSetLayout(renderPass.toneMapper.descriptor.layout, nullptr);
+	vulkan.device.destroyDescriptorPool(renderPass.toneMapper.descriptor.pool, nullptr);
 
-	device.destroyImageView(voxelBuffer.strView, nullptr);
-	device.destroyImage(voxelBuffer.strImage, nullptr);
-	device.freeMemory(voxelBuffer.memory, nullptr);
+	vulkan.device.destroyBuffer(feedbackPass.cpuStaging.buffer, nullptr);
+	vulkan.device.freeMemory(feedbackPass.cpuStaging.memory, nullptr);
+	vulkan.device.destroyBuffer(feedbackPass.gpuStaging.buffer, nullptr);
+	vulkan.device.freeMemory(feedbackPass.gpuStaging.memory, nullptr);
+	vulkan.device.destroyBuffer(renderPass.hdrImage.image, nullptr);
+	vulkan.device.freeMemory(renderPass.hdrImage.memory, nullptr);
+	vulkan.device.destroyBuffer(renderPass.rayTracer.queue.buffer, nullptr);
+	vulkan.device.freeMemory(renderPass.rayTracer.queue.memory, nullptr);
 
-	device.destroySwapchainKHR(swapChain, nullptr);
+	vulkan.device.destroyImageView(renderPass.ldrImage.view, nullptr);
+	vulkan.device.destroyImage(renderPass.ldrImage.image, nullptr);
+	vulkan.device.freeMemory(renderPass.ldrImage.memory, nullptr);
+	vulkan.device.destroyImageView(voxelBuffer.structure.view, nullptr);
+	vulkan.device.destroyImage(voxelBuffer.structure.image, nullptr);
+	vulkan.device.freeMemory(voxelBuffer.memory, nullptr);
 
-	device.destroy();
+	vulkan.device.destroySwapchainKHR(presentationPass.swapChain.queue, nullptr);
+
+	vulkan.device.destroy();
 
 #ifndef NDEBUG
-	((PFN_vkDestroyDebugReportCallbackEXT)instance.getProcAddr("vkDestroyDebugReportCallbackEXT"))(instance, static_cast<VkDebugReportCallbackEXT>(callback), nullptr);
+	((PFN_vkDestroyDebugReportCallbackEXT)vulkan.instance.getProcAddr("vkDestroyDebugReportCallbackEXT"))(vulkan.instance, static_cast<VkDebugReportCallbackEXT>(vulkan.callback), nullptr);
 #endif
 
-	instance.destroySurfaceKHR(surface);
-	instance.destroy();
+	vulkan.instance.destroySurfaceKHR(vulkan.surface);
+	vulkan.instance.destroy();
 
 	SDL_DestroyWindow(window);
 	SDL_Quit();
@@ -437,17 +483,19 @@ static void initState() {
 	camera::mov(glm::vec3(0.5f, 0.5f, -0.5f));
 	camera::rad(10.0f);
 
-	camera::upd(offscreenPass.rayTracer.constants.pos, offscreenPass.rayTracer.constants.rot);
+	camera::upd(renderPass.rayTracer.constants.pos, renderPass.rayTracer.constants.rot);
 
-	offscreenPass.rayTracer.constants.pos = offscreenPass.rayTracer.constants.pos * SCALE + 1.5f;
+	renderPass.rayTracer.constants.pos = renderPass.rayTracer.constants.pos * SCALE + 1.5f;
 }
 
 static void updateState() {
-	if (camera::upd(offscreenPass.rayTracer.constants.pos, offscreenPass.rayTracer.constants.rot)) {
-		offscreenPass.rayTracer.constants.pos = offscreenPass.rayTracer.constants.pos * SCALE + 1.5f;
+	if (camera::upd(renderPass.rayTracer.constants.pos, renderPass.rayTracer.constants.rot)) {
+		renderPass.rayTracer.constants.pos = renderPass.rayTracer.constants.pos * SCALE + 1.5f;
 
-		recordRenderCommandBuffer();
+		recordRenderCommandBuffers(false, true);
 	}
+
+	vulkan.device.setEvent(feedbackPass.update);
 }
 
 static void changeFullscreen(bool fullscreen) {
@@ -463,11 +511,11 @@ static void changeFullscreen(bool fullscreen) {
 }
 
 static void drawFrame() {
-	presentationQueue.waitIdle();
+	presentationPass.queue.waitIdle();
 
 	uint32_t imageIndex;
 
-	vk::Result res = device.acquireNextImageKHR(swapChain, std::numeric_limits<uint64_t>::max(), imageAvailable, nullptr, &imageIndex);
+	vk::Result res = vulkan.device.acquireNextImageKHR(presentationPass.swapChain.queue, std::numeric_limits<uint64_t>::max(), presentationPass.available, nullptr, &imageIndex);
 
 	if (res == vk::Result::eErrorOutOfDateKHR) {
 		recreateSwapChain();
@@ -478,31 +526,48 @@ static void drawFrame() {
 		throw std::runtime_error(std::string("VK_AcquireNextImageKHR Error: ") + vk::to_string(res));
 	}
 
-	vk::PipelineStageFlags waitStages[] = {
-		vk::PipelineStageFlagBits::eTopOfPipe
+	std::array<vk::SubmitInfo, 2> submitInfos;
+	
+	submitInfos[0] = vk::SubmitInfo(0, nullptr, nullptr, 1, &feedbackPass.primary[0], 1, &feedbackPass.upload);
+
+	res = feedbackPass.queue.submit(1, &submitInfos[1], nullptr);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_QueueSubmit Error: ") + vk::to_string(res));
+	}
+
+	std::array<vk::Semaphore, 2> semaphores;
+
+	vk::PipelineStageFlags waitStage = vk::PipelineStageFlagBits::eComputeShader;
+
+	semaphores = { feedbackPass.upload, renderPass.render };
+
+	submitInfos = {
+		vk::SubmitInfo(1, &semaphores[0], &waitStage, 1, &renderPass.primary[0], 1, &renderPass.render),
+		vk::SubmitInfo(1, &semaphores[1], &waitStage, 1, &renderPass.primary[1], 1, &renderPass.finished)
 	};
 
-	vk::SubmitInfo submitInfo(1, &imageAvailable, waitStages, 1, &offscreenPass.buffer, 1, &offscreenPass.semaphore);
-
-	res = computeQueue.submit(1, &submitInfo, nullptr);
+	res = renderPass.queue.submit(2, submitInfos.data(), nullptr);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_QueueSubmit Error: ") + vk::to_string(res));
 	}
 
-	waitStages[0] = vk::PipelineStageFlagBits::eComputeShader;
+	waitStage = vk::PipelineStageFlagBits::eTopOfPipe;
 
-	submitInfo = vk::SubmitInfo(1, &offscreenPass.semaphore, waitStages, 1, &transferPass.buffers[imageIndex], 1, &renderFinished);
+	submitInfos[1] = vk::SubmitInfo(1, &renderPass.render, &waitStage, 1, &feedbackPass.primary[1], 0, nullptr);
 
-	res = transferQueue.submit(1, &submitInfo, nullptr);
+	res = feedbackPass.queue.submit(1, &submitInfos[1], feedbackPass.download);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_QueueSubmit Error: ") + vk::to_string(res));
 	}
 
-	vk::PresentInfoKHR presentInfo = vk::PresentInfoKHR(1, &renderFinished, 1, &swapChain, &imageIndex, nullptr);
+	semaphores = { presentationPass.available, renderPass.finished };
 
-	res = presentationQueue.presentKHR(&presentInfo);
+	vk::PresentInfoKHR presentInfo = vk::PresentInfoKHR(2, semaphores.data(), 1, &presentationPass.swapChain.queue, &imageIndex, nullptr);
+
+	res = presentationPass.queue.presentKHR(&presentInfo);
 
 	if (res == vk::Result::eErrorOutOfDateKHR || res == vk::Result::eSuboptimalKHR) {
 		recreateSwapChain();
@@ -511,7 +576,7 @@ static void drawFrame() {
 		throw std::runtime_error(std::string("VK_QueuePresentKHR Error: ") + vk::to_string(res));
 	}
 
-	presentationQueue.waitIdle();
+	presentationPass.queue.waitIdle();
 }
 
 static void createInstance() {
@@ -533,9 +598,9 @@ static void createInstance() {
 	instExt.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
 #endif
 
-	vk::InstanceCreateInfo instanceInfo(vk::InstanceCreateFlags(), &appInfo, static_cast<uint32_t>(layers.size()), layers.data(), static_cast<uint32_t>(instExt.size()), instExt.data());
+	vk::InstanceCreateInfo instanceInfo(vk::InstanceCreateFlags(), &appInfo, static_cast<uint32_t>(vulkan.layers.size()), vulkan.layers.data(), static_cast<uint32_t>(instExt.size()), instExt.data());
 
-	vk::Result res = vk::createInstance(&instanceInfo, nullptr, &instance);
+	vk::Result res = vk::createInstance(&instanceInfo, nullptr, &vulkan.instance);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateInstance Error: ") + vk::to_string(res));
@@ -546,8 +611,8 @@ static void createDebugCallback() {
 #ifndef NDEBUG
 	vk::DebugReportCallbackCreateInfoEXT callInfo(vk::DebugReportFlagBitsEXT::eError | vk::DebugReportFlagBitsEXT::eWarning, debugCallback);
 
-	vk::Result res = vk::Result(((PFN_vkCreateDebugReportCallbackEXT)instance.getProcAddr("vkCreateDebugReportCallbackEXT"))(instance,
-		reinterpret_cast<const VkDebugReportCallbackCreateInfoEXT*>(&callInfo), nullptr, reinterpret_cast<VkDebugReportCallbackEXT*>(&callback)));
+	vk::Result res = vk::Result(((PFN_vkCreateDebugReportCallbackEXT)vulkan.instance.getProcAddr("vkCreateDebugReportCallbackEXT"))(vulkan.instance,
+		reinterpret_cast<const VkDebugReportCallbackCreateInfoEXT*>(&callInfo), nullptr, reinterpret_cast<VkDebugReportCallbackEXT*>(&vulkan.callback)));
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateDebugReportCallbackEXT Error: ") + vk::to_string(res));
@@ -556,13 +621,13 @@ static void createDebugCallback() {
 }
 
 static void createSurface() {
-	if (SDL_Vulkan_CreateSurface(window, instance, reinterpret_cast<VkSurfaceKHR*>(&surface)) != SDL_TRUE) {
+	if (SDL_Vulkan_CreateSurface(window, vulkan.instance, reinterpret_cast<VkSurfaceKHR*>(&vulkan.surface)) != SDL_TRUE) {
 		throw std::runtime_error(std::string("SDL_Vulkan_CreateSurface Error: ") + SDL_GetError());
 	}
 }
 
 static void pickPhysicalDevice() {
-	std::vector<vk::PhysicalDevice> physDevs = instance.enumeratePhysicalDevices();
+	std::vector<vk::PhysicalDevice> physDevs = vulkan.instance.enumeratePhysicalDevices();
 
 	if (physDevs.size() == 0) {
 		throw std::runtime_error(std::string("VK_EnumeratePhysicalDevices Error: ") + "VulkanGPUNotPresent");
@@ -612,18 +677,12 @@ static void pickPhysicalDevice() {
 			if (queFamily.queueCount > 0) {
 				if ((queFamily.queueFlags & vk::QueueFlagBits::eCompute) == vk::QueueFlagBits::eCompute) {
 					comQueIdx = tmp;
-				}
 
-				if (((queFamily.queueFlags & vk::QueueFlagBits::eTransfer) == vk::QueueFlagBits::eTransfer) && ((queFamily.queueFlags & vk::QueueFlagBits::eGraphics) == vk::QueueFlagBits::eGraphics)) {
+					prsQueIdx = dev.getSurfaceSupportKHR(tmp, vulkan.surface) ? tmp : -1;
+				}
+				
+				if ((queFamily.queueFlags & vk::QueueFlagBits::eTransfer) == vk::QueueFlagBits::eTransfer) {
 					traQueIdx = tmp;
-
-					gpuScore += (traQueIdx == comQueIdx) << 5;
-				}
-
-				if (dev.getSurfaceSupportKHR(tmp, surface)) {
-					prsQueIdx = tmp;
-
-					gpuScore += (prsQueIdx == comQueIdx) << 5;
 				}
 			}
 
@@ -636,7 +695,7 @@ static void pickPhysicalDevice() {
 
 		avaExt = dev.enumerateDeviceExtensionProperties(nullptr);
 
-		reqExt = std::set<std::string>(devExt.begin(), devExt.end());
+		reqExt = std::set<std::string>(vulkan.extensions.begin(), vulkan.extensions.end());
 
 		for (const vk::ExtensionProperties ext : avaExt) {
 			reqExt.erase(ext.extensionName);
@@ -646,11 +705,11 @@ static void pickPhysicalDevice() {
 			continue;
 		}
 
-		if (dev.getSurfaceFormatsKHR(surface).empty() || dev.getSurfacePresentModesKHR(surface).empty()) {
+		if (dev.getSurfaceFormatsKHR(vulkan.surface).empty() || dev.getSurfacePresentModesKHR(vulkan.surface).empty()) {
 			continue;
 		}
 
-		if ((dev.getSurfaceCapabilitiesKHR(surface).supportedUsageFlags & vk::ImageUsageFlagBits::eTransferDst) != vk::ImageUsageFlagBits::eTransferDst) {
+		if ((dev.getSurfaceCapabilitiesKHR(vulkan.surface).supportedUsageFlags & vk::ImageUsageFlagBits::eTransferDst) != vk::ImageUsageFlagBits::eTransferDst) {
 			continue;
 		}
 
@@ -669,15 +728,15 @@ static void pickPhysicalDevice() {
 		throw std::runtime_error(std::string("VK_EnumeratePhysicalDevices Error: ") + "SuitableGPUNotAvailable");
 	}
 
-	physical = selDev;
+	vulkan.physical = selDev;
 
-	physical.getMemoryProperties(&memoryProps);
+	vulkan.physical.getMemoryProperties(&vulkan.memoryProps);
 
-	queueIndices.computeFamily = computeQueueIndex;
-	queueIndices.transferFamily = transferQueueIndex;
-	queueIndices.presentFamily = presentationQueueIndex;
+	feedbackPass.family = transferQueueIndex;
+	renderPass.family = computeQueueIndex;
+	presentationPass.family = presentationQueueIndex;
 
-	queueIndices.uniqueFamilies = { queueIndices.computeFamily, queueIndices.transferFamily, queueIndices.presentFamily };
+	vulkan.uniqueFamilies = { computeQueueIndex, transferQueueIndex, presentationQueueIndex };
 }
 
 static void createLogicalDevice() {
@@ -685,7 +744,7 @@ static void createLogicalDevice() {
 
 	float queuePriority = 1.0f;
 
-	for (const uint32_t queFam : queueIndices.uniqueFamilies) {
+	for (const uint32_t queFam : vulkan.uniqueFamilies) {
 		queueInfos.push_back(vk::DeviceQueueCreateInfo(vk::DeviceQueueCreateFlags(), queFam, 1, &queuePriority));
 	}
 
@@ -693,24 +752,24 @@ static void createLogicalDevice() {
 	deviceFeatures.shaderStorageImageExtendedFormats = true;
 	deviceFeatures.shaderInt64 = true;
 
-	vk::DeviceCreateInfo deviceInfo(vk::DeviceCreateFlags(), static_cast<uint32_t>(queueInfos.size()), queueInfos.data(),
-		static_cast<uint32_t>(layers.size()), layers.data(), static_cast<uint32_t>(devExt.size()), devExt.data(), &deviceFeatures);
+	vk::DeviceCreateInfo deviceInfo(vk::DeviceCreateFlags(), static_cast<uint32_t>(queueInfos.size()), queueInfos.data(), static_cast<uint32_t>(vulkan.layers.size()),
+		vulkan.layers.data(), static_cast<uint32_t>(vulkan.extensions.size()), vulkan.extensions.data(), &deviceFeatures);
 
-	vk::Result res = physical.createDevice(&deviceInfo, nullptr, &device);
+	vk::Result res = vulkan.physical.createDevice(&deviceInfo, nullptr, &vulkan.device);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateDevice Error: ") + vk::to_string(res));
 	}
 
-	computeQueue = device.getQueue(queueIndices.computeFamily, 0);
-	transferQueue = device.getQueue(queueIndices.transferFamily, 0);
-	presentationQueue = device.getQueue(queueIndices.presentFamily, 0);
+	feedbackPass.queue = vulkan.device.getQueue(feedbackPass.family, 0);
+	renderPass.queue = vulkan.device.getQueue(renderPass.family, 0);
+	presentationPass.queue = vulkan.device.getQueue(presentationPass.family, 0);
 }
 
 static void createSwapChain() {
-	vk::SurfaceCapabilitiesKHR surfaceCapabilities = physical.getSurfaceCapabilitiesKHR(surface);
-	std::vector<vk::SurfaceFormatKHR> surfaceFormats = physical.getSurfaceFormatsKHR(surface);
-	std::vector<vk::PresentModeKHR> presentModes = physical.getSurfacePresentModesKHR(surface);
+	vk::SurfaceCapabilitiesKHR surfaceCapabilities = vulkan.physical.getSurfaceCapabilitiesKHR(vulkan.surface);
+	std::vector<vk::SurfaceFormatKHR> surfaceFormats = vulkan.physical.getSurfaceFormatsKHR(vulkan.surface);
+	std::vector<vk::PresentModeKHR> presentModes = vulkan.physical.getSurfacePresentModesKHR(vulkan.surface);
 
 	vk::SurfaceFormatKHR surfaceFormat;
 
@@ -729,7 +788,7 @@ static void createSwapChain() {
 		}
 	}
 
-	swapChainFormat = surfaceFormat.format;
+	presentationPass.swapChain.format = surfaceFormat.format;
 
 	vk::PresentModeKHR presentMode = vk::PresentModeKHR::eFifo;
 
@@ -749,14 +808,14 @@ static void createSwapChain() {
 	}
 
 	if (surfaceCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max() && surfaceCapabilities.currentExtent.height != std::numeric_limits<uint32_t>::max()) {
-		swapChainExtent = surfaceCapabilities.currentExtent;
+		presentationPass.swapChain.extent = surfaceCapabilities.currentExtent;
 	}
 	else {
 		uint32_t width, height;
 
 		SDL_GetWindowSize(window, (int*)&width, (int*)&height);
 
-		swapChainExtent = vk::Extent2D(std::max(surfaceCapabilities.minImageExtent.width, std::min(surfaceCapabilities.maxImageExtent.width, width)),
+		presentationPass.swapChain.extent = vk::Extent2D(std::max(surfaceCapabilities.minImageExtent.width, std::min(surfaceCapabilities.maxImageExtent.width, width)),
 			std::max(surfaceCapabilities.minImageExtent.height, std::min(surfaceCapabilities.maxImageExtent.height, height)));
 	}
 
@@ -767,50 +826,37 @@ static void createSwapChain() {
 	}
 
 	vk::SwapchainCreateInfoKHR swapInfo;
-	swapInfo.surface = surface;
+	swapInfo.surface = vulkan.surface;
 	swapInfo.minImageCount = imageCount;
 	swapInfo.imageFormat = surfaceFormat.format;
 	swapInfo.imageColorSpace = surfaceFormat.colorSpace;
-	swapInfo.imageExtent = swapChainExtent;
+	swapInfo.imageExtent = presentationPass.swapChain.extent;
 	swapInfo.imageArrayLayers = 1;
 	swapInfo.imageUsage = vk::ImageUsageFlagBits::eTransferDst;
-
-	std::vector<uint32_t> queueIndicesData(queueIndices.uniqueFamilies.size());
-
-	queueIndicesData.assign(queueIndices.uniqueFamilies.begin(), queueIndices.uniqueFamilies.end());
-
-	if (queueIndices.uniqueFamilies.size() > 1) {
-		swapInfo.imageSharingMode = vk::SharingMode::eConcurrent;
-		swapInfo.queueFamilyIndexCount = static_cast<uint32_t>(queueIndicesData.size());
-		swapInfo.pQueueFamilyIndices = queueIndicesData.data();
-	}
-	else {
-		swapInfo.imageSharingMode = vk::SharingMode::eExclusive;
-		swapInfo.queueFamilyIndexCount = 0;
-		swapInfo.pQueueFamilyIndices = nullptr;
-	}
-
+	swapInfo.imageSharingMode = vk::SharingMode::eExclusive;
+	swapInfo.queueFamilyIndexCount = 0;
+	swapInfo.pQueueFamilyIndices = nullptr;
 	swapInfo.preTransform = vk::SurfaceTransformFlagBitsKHR::eIdentity;
 	swapInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
 	swapInfo.presentMode = presentMode;
 	swapInfo.clipped = false;
 	swapInfo.oldSwapchain = nullptr;
 
-	vk::Result res = device.createSwapchainKHR(&swapInfo, nullptr, &swapChain);
+	vk::Result res = vulkan.device.createSwapchainKHR(&swapInfo, nullptr, &presentationPass.swapChain.queue);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateSwapchainKHR Error: ") + vk::to_string(res));
 	}
 
-	swapChainImages = device.getSwapchainImagesKHR(swapChain);
+	presentationPass.swapChain.images = vulkan.device.getSwapchainImagesKHR(presentationPass.swapChain.queue);
 }
 
 static uint32_t getMemoryTypeIndex(uint32_t typeBits, vk::MemoryPropertyFlags flags) {
 	uint32_t index = -1;
 
-	for (uint32_t i = 0; i < memoryProps.memoryTypeCount; i++) {
+	for (uint32_t i = 0; i < vulkan.memoryProps.memoryTypeCount; i++) {
 		if ((typeBits & 0x01) == 0x01) {
-			if ((memoryProps.memoryTypes[i].propertyFlags & flags) == flags) {
+			if ((vulkan.memoryProps.memoryTypes[i].propertyFlags & flags) == flags) {
 				index = i;
 
 				break;
@@ -830,58 +876,58 @@ static uint32_t getMemoryTypeIndex(uint32_t typeBits, vk::MemoryPropertyFlags fl
 static void createImages() {
 	// LDR Image
 
-	vk::ImageCreateInfo imageInfo(vk::ImageCreateFlags(), vk::ImageType::e2D, offscreenPass.ldrImage.format, offscreenPass.ldrImage.extent, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal,
-		vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc, vk::SharingMode::eExclusive, 1, &queueIndices.computeFamily, vk::ImageLayout::eUndefined);
+	vk::ImageCreateInfo imageInfo(vk::ImageCreateFlags(), vk::ImageType::e2D, renderPass.ldrImage.format, renderPass.ldrImage.extent, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal,
+		vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferSrc, vk::SharingMode::eExclusive, 0, nullptr, vk::ImageLayout::eUndefined);
 
-	vk::Result res = device.createImage(&imageInfo, nullptr, &offscreenPass.ldrImage.image);
+	vk::Result res = vulkan.device.createImage(&imageInfo, nullptr, &renderPass.ldrImage.image);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateImage Error: ") + vk::to_string(res));
 	}
 
-	vk::MemoryRequirements memReqs = device.getImageMemoryRequirements(offscreenPass.ldrImage.image);
+	vk::MemoryRequirements memReqs = vulkan.device.getImageMemoryRequirements(renderPass.ldrImage.image);
 
 	vk::MemoryAllocateInfo allocInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
 
-	res = device.allocateMemory(&allocInfo, nullptr, &offscreenPass.ldrImage.memory);
+	res = vulkan.device.allocateMemory(&allocInfo, nullptr, &renderPass.ldrImage.memory);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
 	}
 
-	device.bindImageMemory(offscreenPass.ldrImage.image, offscreenPass.ldrImage.memory, 0);
+	vulkan.device.bindImageMemory(renderPass.ldrImage.image, renderPass.ldrImage.memory, 0);
 
 	// Voxel structure
 
-	imageInfo = vk::ImageCreateInfo(vk::ImageCreateFlags(), vk::ImageType::e3D, voxelBuffer.strFormat, voxelBuffer.extent, 1, 1, vk::SampleCountFlagBits::e1, vk::ImageTiling::eOptimal,
-		vk::ImageUsageFlagBits::eStorage, vk::SharingMode::eExclusive, 1, &queueIndices.computeFamily, vk::ImageLayout::eUndefined);
+	imageInfo = vk::ImageCreateInfo(vk::ImageCreateFlags(), vk::ImageType::e3D, voxelBuffer.structure.format, voxelBuffer.extent, 1, 1, vk::SampleCountFlagBits::e1,
+		vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eStorage, vk::SharingMode::eExclusive, 0, nullptr, vk::ImageLayout::eUndefined);
 
-	res = device.createImage(&imageInfo, nullptr, &voxelBuffer.strImage);
+	res = vulkan.device.createImage(&imageInfo, nullptr, &voxelBuffer.structure.image);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateImage Error: ") + vk::to_string(res));
 	}
 
-	memReqs = device.getImageMemoryRequirements(voxelBuffer.strImage);
+	memReqs = vulkan.device.getImageMemoryRequirements(voxelBuffer.structure.image);
 
 	allocInfo = vk::MemoryAllocateInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
 
-	res = device.allocateMemory(&allocInfo, nullptr, &voxelBuffer.memory);
+	res = vulkan.device.allocateMemory(&allocInfo, nullptr, &voxelBuffer.memory);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
 	}
 
-	device.bindImageMemory(voxelBuffer.strImage, voxelBuffer.memory, 0);
+	vulkan.device.bindImageMemory(voxelBuffer.structure.image, voxelBuffer.memory, 0);
 }
 
 static void createImageViews() {
 	// LDR Image
 
-	vk::ImageViewCreateInfo viewInfo(vk::ImageViewCreateFlags(), offscreenPass.ldrImage.image, vk::ImageViewType::e2D, offscreenPass.ldrImage.format, vk::ComponentMapping(vk::ComponentSwizzle::eIdentity,
+	vk::ImageViewCreateInfo viewInfo(vk::ImageViewCreateFlags(), renderPass.ldrImage.image, vk::ImageViewType::e2D, renderPass.ldrImage.format, vk::ComponentMapping(vk::ComponentSwizzle::eIdentity,
 		vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity), vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
 
-	vk::Result res = device.createImageView(&viewInfo, nullptr, &offscreenPass.ldrImage.view);
+	vk::Result res = vulkan.device.createImageView(&viewInfo, nullptr, &renderPass.ldrImage.view);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateImageView Error: ") + vk::to_string(res));
@@ -889,10 +935,10 @@ static void createImageViews() {
 
 	// Voxel structure
 
-	viewInfo = vk::ImageViewCreateInfo(vk::ImageViewCreateFlags(), voxelBuffer.strImage, vk::ImageViewType::e3D, voxelBuffer.strFormat, vk::ComponentMapping(vk::ComponentSwizzle::eIdentity,
+	viewInfo = vk::ImageViewCreateInfo(vk::ImageViewCreateFlags(), voxelBuffer.structure.image, vk::ImageViewType::e3D, voxelBuffer.structure.format, vk::ComponentMapping(vk::ComponentSwizzle::eIdentity,
 		vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity), vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
 
-	res = device.createImageView(&viewInfo, nullptr, &voxelBuffer.strView);
+	res = vulkan.device.createImageView(&viewInfo, nullptr, &voxelBuffer.structure.view);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateImageView Error: ") + vk::to_string(res));
@@ -900,72 +946,108 @@ static void createImageViews() {
 }
 
 static void createBuffers() {
-	// Ray Queue
+	// CPU Staging
 
-	vk::BufferCreateInfo bufferInfo(vk::BufferCreateFlags(), offscreenPass.rayTracer.queue.size, vk::BufferUsageFlagBits::eStorageBuffer, vk::SharingMode::eExclusive, 1, &queueIndices.computeFamily);
+	vk::BufferCreateInfo bufferInfo(vk::BufferCreateFlags(), feedbackPass.gpuStaging.size, vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eStorageBuffer |
+		vk::BufferUsageFlagBits::eTransferDst, vk::SharingMode::eExclusive, 0, nullptr);
 
-	vk::Result res = device.createBuffer(&bufferInfo, nullptr, &offscreenPass.rayTracer.queue.buffer);
+	vk::Result res = vulkan.device.createBuffer(&bufferInfo, nullptr, &feedbackPass.cpuStaging.buffer);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateBuffer Error: ") + vk::to_string(res));
 	}
 
-	vk::MemoryRequirements memReqs = device.getBufferMemoryRequirements(offscreenPass.rayTracer.queue.buffer);
+	vk::MemoryRequirements memReqs = vulkan.device.getBufferMemoryRequirements(feedbackPass.cpuStaging.buffer);
 
-	vk::MemoryAllocateInfo allocInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
+	vk::MemoryAllocateInfo allocInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent));
 
-	res = device.allocateMemory(&allocInfo, nullptr, &offscreenPass.rayTracer.queue.memory);
+	res = vulkan.device.allocateMemory(&allocInfo, nullptr, &feedbackPass.cpuStaging.memory);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
 	}
 
-	device.bindBufferMemory(offscreenPass.rayTracer.queue.buffer, offscreenPass.rayTracer.queue.memory, 0);
+	vulkan.device.bindBufferMemory(feedbackPass.cpuStaging.buffer, feedbackPass.cpuStaging.memory, 0);
 
-	// Visibility bitmask
+	// GPU Staging
 
-	bufferInfo = vk::BufferCreateInfo(vk::BufferCreateFlags(), offscreenPass.rayTracer.visibility.size, vk::BufferUsageFlagBits::eStorageBuffer, vk::SharingMode::eExclusive, 1, &queueIndices.computeFamily);
+	bufferInfo = vk::BufferCreateInfo(vk::BufferCreateFlags(), feedbackPass.gpuStaging.size, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer |
+		vk::BufferUsageFlagBits::eTransferSrc, vk::SharingMode::eExclusive, 0, nullptr);
 
-	res = device.createBuffer(&bufferInfo, nullptr, &offscreenPass.rayTracer.visibility.buffer);
-
-	if (res != vk::Result::eSuccess) {
-		throw std::runtime_error(std::string("VK_CreateBuffer Error: ") + vk::to_string(res));
-	}
-
-	memReqs = device.getBufferMemoryRequirements(offscreenPass.rayTracer.visibility.buffer);
-
-	allocInfo = vk::MemoryAllocateInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent |
-		vk::MemoryPropertyFlagBits::eHostCached));
-
-	res = device.allocateMemory(&allocInfo, nullptr, &offscreenPass.rayTracer.visibility.memory);
-
-	if (res != vk::Result::eSuccess) {
-		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
-	}
-
-	device.bindBufferMemory(offscreenPass.rayTracer.visibility.buffer, offscreenPass.rayTracer.visibility.memory, 0);
-
-	// HDR Image
-
-	bufferInfo = vk::BufferCreateInfo(vk::BufferCreateFlags(), offscreenPass.hdrImage.size, vk::BufferUsageFlagBits::eStorageBuffer, vk::SharingMode::eExclusive, 1, &queueIndices.computeFamily);
-
-	res = device.createBuffer(&bufferInfo, nullptr, &offscreenPass.hdrImage.image);
+	res = vulkan.device.createBuffer(&bufferInfo, nullptr, &feedbackPass.gpuStaging.buffer);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateBuffer Error: ") + vk::to_string(res));
 	}
 
-	memReqs = device.getBufferMemoryRequirements(offscreenPass.hdrImage.image);
+	memReqs = vulkan.device.getBufferMemoryRequirements(feedbackPass.gpuStaging.buffer);
 
 	allocInfo = vk::MemoryAllocateInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
 
-	res = device.allocateMemory(&allocInfo, nullptr, &offscreenPass.hdrImage.memory);
+	res = vulkan.device.allocateMemory(&allocInfo, nullptr, &feedbackPass.gpuStaging.memory);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
 	}
 
-	device.bindBufferMemory(offscreenPass.hdrImage.image, offscreenPass.hdrImage.memory, 0);
+	vulkan.device.bindBufferMemory(feedbackPass.gpuStaging.buffer, feedbackPass.gpuStaging.memory, 0);
+
+	// HDR Image
+
+	bufferInfo = vk::BufferCreateInfo(vk::BufferCreateFlags(), renderPass.hdrImage.size, vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eStorageTexelBuffer,
+		vk::SharingMode::eExclusive, 0, nullptr);
+
+	res = vulkan.device.createBuffer(&bufferInfo, nullptr, &renderPass.hdrImage.image);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateBuffer Error: ") + vk::to_string(res));
+	}
+
+	memReqs = vulkan.device.getBufferMemoryRequirements(renderPass.hdrImage.image);
+
+	allocInfo = vk::MemoryAllocateInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
+
+	res = vulkan.device.allocateMemory(&allocInfo, nullptr, &renderPass.hdrImage.memory);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
+	}
+
+	vulkan.device.bindBufferMemory(renderPass.hdrImage.image, renderPass.hdrImage.memory, 0);
+
+	// Ray Queue
+
+	bufferInfo = vk::BufferCreateInfo(vk::BufferCreateFlags(), renderPass.rayTracer.queue.size, vk::BufferUsageFlagBits::eStorageBuffer, vk::SharingMode::eExclusive, 0, nullptr);
+
+	res = vulkan.device.createBuffer(&bufferInfo, nullptr, &renderPass.rayTracer.queue.buffer);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateBuffer Error: ") + vk::to_string(res));
+	}
+
+	memReqs = vulkan.device.getBufferMemoryRequirements(renderPass.rayTracer.queue.buffer);
+
+	allocInfo = vk::MemoryAllocateInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
+
+	res = vulkan.device.allocateMemory(&allocInfo, nullptr, &renderPass.rayTracer.queue.memory);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
+	}
+
+	vulkan.device.bindBufferMemory(renderPass.rayTracer.queue.buffer, renderPass.rayTracer.queue.memory, 0);
+}
+
+static void createBufferViews() {
+	// HDR Image
+
+	vk::BufferViewCreateInfo viewInfo(vk::BufferViewCreateFlags(), renderPass.hdrImage.image, renderPass.hdrImage.format, 0, renderPass.hdrImage.size);
+
+	vk::Result res = vulkan.device.createBufferView(&viewInfo, nullptr, &renderPass.hdrImage.view);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateBufferView Error: ") + vk::to_string(res));
+	}
 }
 
 static void createDescriptorPools() {
@@ -977,7 +1059,7 @@ static void createDescriptorPools() {
 
 	vk::DescriptorPoolCreateInfo poolInfo(vk::DescriptorPoolCreateFlags(), 1, static_cast<uint32_t>(poolSizes.size()), poolSizes.data());
 
-	vk::Result res = device.createDescriptorPool(&poolInfo, nullptr, &offscreenPass.voxelUpdater.descriptor.pool);
+	vk::Result res = vulkan.device.createDescriptorPool(&poolInfo, nullptr, &renderPass.voxelUpdater.descriptor.pool);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateDescriptorPool Error: ") + vk::to_string(res));
@@ -992,7 +1074,7 @@ static void createDescriptorPools() {
 
 	poolInfo = vk::DescriptorPoolCreateInfo(vk::DescriptorPoolCreateFlags(), 1, static_cast<uint32_t>(poolSizes.size()), poolSizes.data());
 
-	res = device.createDescriptorPool(&poolInfo, nullptr, &offscreenPass.rayTracer.descriptor.pool);
+	res = vulkan.device.createDescriptorPool(&poolInfo, nullptr, &renderPass.rayTracer.descriptor.pool);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateDescriptorPool Error: ") + vk::to_string(res));
@@ -1002,12 +1084,12 @@ static void createDescriptorPools() {
 
 	poolSizes = {
 		vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage, 1),
-		vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 1)
+		vk::DescriptorPoolSize(vk::DescriptorType::eStorageTexelBuffer, 1)
 	};
 
 	poolInfo = vk::DescriptorPoolCreateInfo(vk::DescriptorPoolCreateFlags(), 1, static_cast<uint32_t>(poolSizes.size()), poolSizes.data());
 
-	res = device.createDescriptorPool(&poolInfo, nullptr, &offscreenPass.toneMapper.descriptor.pool);
+	res = vulkan.device.createDescriptorPool(&poolInfo, nullptr, &renderPass.toneMapper.descriptor.pool);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateDescriptorPool Error: ") + vk::to_string(res));
@@ -1023,15 +1105,15 @@ static void createDescriptorSets() {
 
 	vk::DescriptorSetLayoutCreateInfo layoutInfo(vk::DescriptorSetLayoutCreateFlags(), static_cast<uint32_t>(bindings.size()), bindings.data());
 
-	vk::Result res = device.createDescriptorSetLayout(&layoutInfo, nullptr, &offscreenPass.voxelUpdater.descriptor.layout);
+	vk::Result res = vulkan.device.createDescriptorSetLayout(&layoutInfo, nullptr, &renderPass.voxelUpdater.descriptor.layout);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateDescriptorSetLayout Error: ") + vk::to_string(res));
 	}
 
-	vk::DescriptorSetAllocateInfo allocInfo(offscreenPass.voxelUpdater.descriptor.pool, 1, &offscreenPass.voxelUpdater.descriptor.layout);
+	vk::DescriptorSetAllocateInfo allocInfo(renderPass.voxelUpdater.descriptor.pool, 1, &renderPass.voxelUpdater.descriptor.layout);
 
-	res = device.allocateDescriptorSets(&allocInfo, &offscreenPass.voxelUpdater.descriptor.set);
+	res = vulkan.device.allocateDescriptorSets(&allocInfo, &renderPass.voxelUpdater.descriptor.set);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateDescriptorSets Error: ") + vk::to_string(res));
@@ -1048,15 +1130,15 @@ static void createDescriptorSets() {
 
 	layoutInfo = vk::DescriptorSetLayoutCreateInfo(vk::DescriptorSetLayoutCreateFlags(), static_cast<uint32_t>(bindings.size()), bindings.data());
 
-	res = device.createDescriptorSetLayout(&layoutInfo, nullptr, &offscreenPass.rayTracer.descriptor.layout);
+	res = vulkan.device.createDescriptorSetLayout(&layoutInfo, nullptr, &renderPass.rayTracer.descriptor.layout);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateDescriptorSetLayout Error: ") + vk::to_string(res));
 	}
 
-	allocInfo = vk::DescriptorSetAllocateInfo(offscreenPass.rayTracer.descriptor.pool, 1, &offscreenPass.rayTracer.descriptor.layout);
+	allocInfo = vk::DescriptorSetAllocateInfo(renderPass.rayTracer.descriptor.pool, 1, &renderPass.rayTracer.descriptor.layout);
 
-	res = device.allocateDescriptorSets(&allocInfo, &offscreenPass.rayTracer.descriptor.set);
+	res = vulkan.device.allocateDescriptorSets(&allocInfo, &renderPass.rayTracer.descriptor.set);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateDescriptorSets Error: ") + vk::to_string(res));
@@ -1065,21 +1147,21 @@ static void createDescriptorSets() {
 	// Tone Mapper
 
 	bindings = {
-		vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
+		vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eStorageTexelBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
 		vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute, nullptr)
 	};
 
 	layoutInfo = vk::DescriptorSetLayoutCreateInfo(vk::DescriptorSetLayoutCreateFlags(), static_cast<uint32_t>(bindings.size()), bindings.data());
 
-	res = device.createDescriptorSetLayout(&layoutInfo, nullptr, &offscreenPass.toneMapper.descriptor.layout);
+	res = vulkan.device.createDescriptorSetLayout(&layoutInfo, nullptr, &renderPass.toneMapper.descriptor.layout);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateDescriptorSetLayout Error: ") + vk::to_string(res));
 	}
 
-	allocInfo = vk::DescriptorSetAllocateInfo(offscreenPass.toneMapper.descriptor.pool, 1, &offscreenPass.toneMapper.descriptor.layout);
+	allocInfo = vk::DescriptorSetAllocateInfo(renderPass.toneMapper.descriptor.pool, 1, &renderPass.toneMapper.descriptor.layout);
 
-	res = device.allocateDescriptorSets(&allocInfo, &offscreenPass.toneMapper.descriptor.set);
+	res = vulkan.device.allocateDescriptorSets(&allocInfo, &renderPass.toneMapper.descriptor.set);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateDescriptorSets Error: ") + vk::to_string(res));
@@ -1087,23 +1169,23 @@ static void createDescriptorSets() {
 
 	// Write all bindings
 
-	vk::DescriptorImageInfo strInfo(nullptr, voxelBuffer.strView, vk::ImageLayout::eGeneral);
-	vk::DescriptorBufferInfo rayInfo(offscreenPass.rayTracer.queue.buffer, 0, offscreenPass.rayTracer.queue.size);
-	vk::DescriptorBufferInfo visInfo(offscreenPass.rayTracer.visibility.buffer, 0, offscreenPass.rayTracer.visibility.size);
-	vk::DescriptorBufferInfo hdrInfo(offscreenPass.hdrImage.image, 0, offscreenPass.hdrImage.size);
-	vk::DescriptorImageInfo ldrInfo(nullptr, offscreenPass.ldrImage.view, vk::ImageLayout::eGeneral);
+	vk::DescriptorImageInfo strInfo(nullptr, voxelBuffer.structure.view, vk::ImageLayout::eGeneral);
+	vk::DescriptorBufferInfo rayInfo(renderPass.rayTracer.queue.buffer, 0, renderPass.rayTracer.queue.size);
+	vk::DescriptorBufferInfo visInfo(feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size);
+	vk::DescriptorBufferInfo hdrInfo(renderPass.hdrImage.image, 0, renderPass.hdrImage.size);
+	vk::DescriptorImageInfo ldrInfo(nullptr, renderPass.ldrImage.view, vk::ImageLayout::eGeneral);
 
 	std::vector<vk::WriteDescriptorSet> descriptorWrites = {
-		vk::WriteDescriptorSet(offscreenPass.voxelUpdater.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageImage, &strInfo, nullptr, nullptr),
-		vk::WriteDescriptorSet(offscreenPass.rayTracer.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageImage, &strInfo, nullptr, nullptr),
-		vk::WriteDescriptorSet(offscreenPass.rayTracer.descriptor.set, 1, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &rayInfo, nullptr),
-		vk::WriteDescriptorSet(offscreenPass.rayTracer.descriptor.set, 2, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &visInfo, nullptr),
-		vk::WriteDescriptorSet(offscreenPass.rayTracer.descriptor.set, 3, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &hdrInfo, nullptr),
-		vk::WriteDescriptorSet(offscreenPass.toneMapper.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &hdrInfo, nullptr),
-		vk::WriteDescriptorSet(offscreenPass.toneMapper.descriptor.set, 1, 0, 1, vk::DescriptorType::eStorageImage, &ldrInfo, nullptr, nullptr)
+		vk::WriteDescriptorSet(renderPass.voxelUpdater.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageImage, &strInfo, nullptr, nullptr),
+		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageImage, &strInfo, nullptr, nullptr),
+		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 1, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &rayInfo, nullptr),
+		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 2, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &visInfo, nullptr),
+		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 3, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &hdrInfo, nullptr),
+		vk::WriteDescriptorSet(renderPass.toneMapper.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageTexelBuffer, nullptr, nullptr, &renderPass.hdrImage.view),
+		vk::WriteDescriptorSet(renderPass.toneMapper.descriptor.set, 1, 0, 1, vk::DescriptorType::eStorageImage, &ldrInfo, nullptr, nullptr)
 	};
 
-	device.updateDescriptorSets(descriptorWrites, nullptr);
+	vulkan.device.updateDescriptorSets(descriptorWrites, nullptr);
 }
 
 static vk::ShaderModule createShaderModule(const std::vector<char>& code) {
@@ -1111,7 +1193,7 @@ static vk::ShaderModule createShaderModule(const std::vector<char>& code) {
 
 	vk::ShaderModule shaderModule;
 
-	vk::Result res = device.createShaderModule(&moduleInfo, nullptr, &shaderModule);
+	vk::Result res = vulkan.device.createShaderModule(&moduleInfo, nullptr, &shaderModule);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateShaderModule Error: ") + vk::to_string(res));
@@ -1120,12 +1202,12 @@ static vk::ShaderModule createShaderModule(const std::vector<char>& code) {
 	return shaderModule;
 }
 
-static void createOffscreenPipeline() {
+static void createRenderPipelines() {
 	// Voxel Updater
 
-	vk::PipelineLayoutCreateInfo layoutInfo(vk::PipelineLayoutCreateFlags(), 1, &offscreenPass.voxelUpdater.descriptor.layout, 0, nullptr);
+	vk::PipelineLayoutCreateInfo layoutInfo(vk::PipelineLayoutCreateFlags(), 1, &renderPass.voxelUpdater.descriptor.layout, 0, nullptr);
 
-	vk::Result res = device.createPipelineLayout(&layoutInfo, nullptr, &offscreenPass.voxelUpdater.layout);
+	vk::Result res = vulkan.device.createPipelineLayout(&layoutInfo, nullptr, &renderPass.voxelUpdater.layout);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreatePipelineLayout Error: ") + vk::to_string(res));
@@ -1135,23 +1217,23 @@ static void createOffscreenPipeline() {
 	vk::ShaderModule compShaderModule = createShaderModule(compShaderCode);
 	vk::PipelineShaderStageCreateInfo compStageInfo(vk::PipelineShaderStageCreateFlags(), vk::ShaderStageFlagBits::eCompute, compShaderModule, "main", nullptr);
 
-	vk::ComputePipelineCreateInfo pipelineInfo(vk::PipelineCreateFlags(), compStageInfo, offscreenPass.voxelUpdater.layout, nullptr, -1);
+	vk::ComputePipelineCreateInfo pipelineInfo(vk::PipelineCreateFlags(), compStageInfo, renderPass.voxelUpdater.layout, nullptr, -1);
 
-	res = device.createComputePipelines(nullptr, 1, &pipelineInfo, nullptr, &offscreenPass.voxelUpdater.pipeline);
+	res = vulkan.device.createComputePipelines(nullptr, 1, &pipelineInfo, nullptr, &renderPass.voxelUpdater.pipeline);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateComputePipelines Error: ") + vk::to_string(res));
 	}
 
-	device.destroyShaderModule(compShaderModule, nullptr);
+	vulkan.device.destroyShaderModule(compShaderModule, nullptr);
 
 	// Ray Tracer
 
-	vk::PushConstantRange constantRange(vk::ShaderStageFlagBits::eCompute, 0, sizeof(offscreenPass.rayTracer.constants));
+	vk::PushConstantRange constantRange(vk::ShaderStageFlagBits::eCompute, 0, sizeof(renderPass.rayTracer.constants));
 	
-	layoutInfo = vk::PipelineLayoutCreateInfo(vk::PipelineLayoutCreateFlags(), 1, &offscreenPass.rayTracer.descriptor.layout, 1, &constantRange);
+	layoutInfo = vk::PipelineLayoutCreateInfo(vk::PipelineLayoutCreateFlags(), 1, &renderPass.rayTracer.descriptor.layout, 1, &constantRange);
 
-	res = device.createPipelineLayout(&layoutInfo, nullptr, &offscreenPass.rayTracer.layout);
+	res = vulkan.device.createPipelineLayout(&layoutInfo, nullptr, &renderPass.rayTracer.layout);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreatePipelineLayout Error: ") + vk::to_string(res));
@@ -1161,21 +1243,21 @@ static void createOffscreenPipeline() {
 	compShaderModule = createShaderModule(compShaderCode);
 	compStageInfo = vk::PipelineShaderStageCreateInfo(vk::PipelineShaderStageCreateFlags(), vk::ShaderStageFlagBits::eCompute, compShaderModule, "main", nullptr);
 
-	pipelineInfo = vk::ComputePipelineCreateInfo(vk::PipelineCreateFlags(), compStageInfo, offscreenPass.rayTracer.layout, nullptr, -1);
+	pipelineInfo = vk::ComputePipelineCreateInfo(vk::PipelineCreateFlags(), compStageInfo, renderPass.rayTracer.layout, nullptr, -1);
 
-	res = device.createComputePipelines(nullptr, 1, &pipelineInfo, nullptr, &offscreenPass.rayTracer.pipeline);
+	res = vulkan.device.createComputePipelines(nullptr, 1, &pipelineInfo, nullptr, &renderPass.rayTracer.pipeline);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateComputePipelines Error: ") + vk::to_string(res));
 	}
 
-	device.destroyShaderModule(compShaderModule, nullptr);
+	vulkan.device.destroyShaderModule(compShaderModule, nullptr);
 
 	// Toner Mapper
 
-	layoutInfo = vk::PipelineLayoutCreateInfo(vk::PipelineLayoutCreateFlags(), 1, &offscreenPass.toneMapper.descriptor.layout, 0, nullptr);
+	layoutInfo = vk::PipelineLayoutCreateInfo(vk::PipelineLayoutCreateFlags(), 1, &renderPass.toneMapper.descriptor.layout, 0, nullptr);
 
-	res = device.createPipelineLayout(&layoutInfo, nullptr, &offscreenPass.toneMapper.layout);
+	res = vulkan.device.createPipelineLayout(&layoutInfo, nullptr, &renderPass.toneMapper.layout);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreatePipelineLayout Error: ") + vk::to_string(res));
@@ -1185,146 +1267,251 @@ static void createOffscreenPipeline() {
 	compShaderModule = createShaderModule(compShaderCode);
 	compStageInfo = vk::PipelineShaderStageCreateInfo(vk::PipelineShaderStageCreateFlags(), vk::ShaderStageFlagBits::eCompute, compShaderModule, "main", nullptr);
 
-	pipelineInfo = vk::ComputePipelineCreateInfo(vk::PipelineCreateFlags(), compStageInfo, offscreenPass.toneMapper.layout, nullptr, -1);
+	pipelineInfo = vk::ComputePipelineCreateInfo(vk::PipelineCreateFlags(), compStageInfo, renderPass.toneMapper.layout, nullptr, -1);
 
-	res = device.createComputePipelines(nullptr, 1, &pipelineInfo, nullptr, &offscreenPass.toneMapper.pipeline);
+	res = vulkan.device.createComputePipelines(nullptr, 1, &pipelineInfo, nullptr, &renderPass.toneMapper.pipeline);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateComputePipelines Error: ") + vk::to_string(res));
 	}
 
-	device.destroyShaderModule(compShaderModule, nullptr);
-}
-
-static void createCommandPools() {
-	// Offscreen Pass
-
-	vk::CommandPoolCreateInfo poolInfo(vk::CommandPoolCreateFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer), queueIndices.computeFamily);
-
-	vk::Result res = device.createCommandPool(&poolInfo, nullptr, &offscreenPass.pool);
-
-	if (res != vk::Result::eSuccess) {
-		throw std::runtime_error(std::string("VK_CreateCommandPool Error: ") + vk::to_string(res));
-	}
-
-	// Transfer Pass
-
-	poolInfo = vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlags(vk::CommandPoolCreateFlagBits(0)), queueIndices.transferFamily);
-
-	res = device.createCommandPool(&poolInfo, nullptr, &transferPass.pool);
-
-	if (res != vk::Result::eSuccess) {
-		throw std::runtime_error(std::string("VK_CreateCommandPool Error: ") + vk::to_string(res));
-	}
-}
-
-static void createRenderCommandBuffer() {
-	vk::CommandBufferAllocateInfo allocInfo = vk::CommandBufferAllocateInfo(offscreenPass.pool, vk::CommandBufferLevel::ePrimary, 1);
-
-	vk::Result res = device.allocateCommandBuffers(&allocInfo, &offscreenPass.buffer);
-
-	if (res != vk::Result::eSuccess) {
-		throw std::runtime_error(std::string("VK_AllocateCommandBuffers Error: ") + vk::to_string(res));
-	}
-}
-
-static void recordRenderCommandBuffer() {
-	vk::CommandBufferBeginInfo commandBeginInfo(vk::CommandBufferUsageFlagBits::eSimultaneousUse, nullptr);
-
-	offscreenPass.buffer.begin(&commandBeginInfo);
-
-	offscreenPass.buffer.bindPipeline(vk::PipelineBindPoint::eCompute, offscreenPass.voxelUpdater.pipeline);
-	offscreenPass.buffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, offscreenPass.voxelUpdater.layout, 0, 1, &offscreenPass.voxelUpdater.descriptor.set, 0, nullptr);
-	offscreenPass.buffer.dispatch(1, 1, 1);
-
-	offscreenPass.buffer.bindPipeline(vk::PipelineBindPoint::eCompute, offscreenPass.rayTracer.pipeline);
-	offscreenPass.buffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, offscreenPass.rayTracer.layout, 0, 1, &offscreenPass.rayTracer.descriptor.set, 0, nullptr);
-	offscreenPass.buffer.pushConstants(offscreenPass.rayTracer.layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(offscreenPass.rayTracer.constants), &offscreenPass.rayTracer.constants);
-	offscreenPass.buffer.dispatch(1, 1, 1);
-
-	offscreenPass.buffer.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlagBits::eByRegion, {},
-		{ vk::BufferMemoryBarrier(vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eShaderRead, queueIndices.computeFamily, queueIndices.computeFamily,
-			offscreenPass.hdrImage.image, 0, offscreenPass.hdrImage.size) }, {});
-
-	offscreenPass.buffer.bindPipeline(vk::PipelineBindPoint::eCompute, offscreenPass.toneMapper.pipeline);
-	offscreenPass.buffer.bindDescriptorSets(vk::PipelineBindPoint::eCompute, offscreenPass.toneMapper.layout, 0, 1, &offscreenPass.toneMapper.descriptor.set, 0, nullptr);
-	offscreenPass.buffer.dispatch(1, 1, 1);
-
-	vk::Result res = vk::Result(vkEndCommandBuffer(offscreenPass.buffer)); // use C API to get result value
-
-	if (res != vk::Result::eSuccess) {
-		throw std::runtime_error(std::string("VK_EndCommandBuffer Error: ") + vk::to_string(res));
-	}
-}
-
-static void createTransferCommandBuffers() {
-	transferPass.buffers.resize(swapChainImages.size());
-
-	vk::CommandBufferAllocateInfo allocInfo(transferPass.pool, vk::CommandBufferLevel::ePrimary, static_cast<uint32_t>(transferPass.buffers.size()));
-
-	vk::Result res = device.allocateCommandBuffers(&allocInfo, transferPass.buffers.data());
-
-	if (res != vk::Result::eSuccess) {
-		throw std::runtime_error(std::string("VK_AllocateCommandBuffers Error: ") + vk::to_string(res));
-	}
-
-	vk::CommandBufferBeginInfo commandBeginInfo;
-
-	vk::ImageSubresourceLayers offsetLayer(vk::ImageAspectFlagBits::eColor, 0, 0, 1);
-	std::array<vk::Offset3D, 2> offsetExtent = { vk::Offset3D(0, 0, 0), vk::Offset3D(offscreenPass.ldrImage.extent.width, offscreenPass.ldrImage.extent.height, 1) };
-
-	for (size_t i = 0; i < transferPass.buffers.size(); i++) {
-		commandBeginInfo = vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlagBits::eSimultaneousUse, nullptr);
-		transferPass.buffers[i].begin(&commandBeginInfo);
-
-		transferPass.buffers[i].pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion, {}, {},
-			{ vk::ImageMemoryBarrier(vk::AccessFlagBits::eColorAttachmentRead, vk::AccessFlagBits::eTransferWrite, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
-				queueIndices.presentFamily, queueIndices.transferFamily, swapChainImages[i], vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1)) });
-
-		vk::ImageSubresourceLayers imageLayer = vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1);
-		std::array<vk::Offset3D, 2> imageExtent = { vk::Offset3D(0, 0, 0), vk::Offset3D(swapChainExtent.width, swapChainExtent.height, 1) };
-
-		transferPass.buffers[i].blitImage(offscreenPass.ldrImage.image, vk::ImageLayout::eTransferSrcOptimal, swapChainImages[i], vk::ImageLayout::eTransferDstOptimal,
-			std::array<vk::ImageBlit, 1>({ vk::ImageBlit(offsetLayer, offsetExtent, imageLayer, imageExtent) }), vk::Filter::eNearest);
-
-		transferPass.buffers[i].pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAllCommands, vk::DependencyFlagBits::eByRegion, {}, {},
-			{ vk::ImageMemoryBarrier(vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eColorAttachmentRead, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR,
-				queueIndices.transferFamily, queueIndices.presentFamily, swapChainImages[i], vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1)) });
-
-		res = vk::Result(vkEndCommandBuffer(transferPass.buffers[i])); // use C API to get result value
-
-		if (res != vk::Result::eSuccess) {
-			throw std::runtime_error(std::string("VK_EndCommandBuffer Error: ") + vk::to_string(res));
-		}
-	}
+	vulkan.device.destroyShaderModule(compShaderModule, nullptr);
 }
 
 static void createSemaphores() {
 	vk::SemaphoreCreateInfo semaphoreInfo = vk::SemaphoreCreateInfo(vk::SemaphoreCreateFlags());
 
-	vk::Result res = device.createSemaphore(&semaphoreInfo, nullptr, &imageAvailable);
+	vk::Result res = vulkan.device.createSemaphore(&semaphoreInfo, nullptr, &feedbackPass.upload);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateSemaphore Error: ") + vk::to_string(res));
 	}
 
-	res = device.createSemaphore(&semaphoreInfo, nullptr, &renderFinished);
+	res = vulkan.device.createSemaphore(&semaphoreInfo, nullptr, &renderPass.finished);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateSemaphore Error: ") + vk::to_string(res));
 	}
 
-	res = device.createSemaphore(&semaphoreInfo, nullptr, &offscreenPass.semaphore);
+	res = vulkan.device.createSemaphore(&semaphoreInfo, nullptr, &presentationPass.available);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateSemaphore Error: ") + vk::to_string(res));
 	}
 }
 
-static void recreateSwapChain() {
-	device.waitIdle();
+static void createEvents() {
+	vk::EventCreateInfo eventInfo = vk::EventCreateInfo(vk::EventCreateFlags());
 
-	vk::SurfaceCapabilitiesKHR surfaceCapabilities = physical.getSurfaceCapabilitiesKHR(surface);
+	vk::Result res = vulkan.device.createEvent(&eventInfo, nullptr, &feedbackPass.update);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateEvent Error: ") + vk::to_string(res));
+	}
+}
+
+static void createFences() {
+	vk::FenceCreateInfo fenceInfo = vk::FenceCreateInfo(vk::FenceCreateFlags());
+
+	vk::Result res = vulkan.device.createFence(&fenceInfo, nullptr, &feedbackPass.download);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateFence Error: ") + vk::to_string(res));
+	}
+}
+
+static void createCommandPools() {
+	// Feedback Pass
+
+	vk::CommandPoolCreateInfo poolInfo(vk::CommandPoolCreateFlags(), feedbackPass.family);
+
+	vk::Result res = vulkan.device.createCommandPool(&poolInfo, nullptr, &feedbackPass.pool);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateCommandPool Error: ") + vk::to_string(res));
+	}
+
+	// Render Pass
+
+	poolInfo = vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, renderPass.family);
+
+	res = vulkan.device.createCommandPool(&poolInfo, nullptr, &renderPass.pool);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateCommandPool Error: ") + vk::to_string(res));
+	}
+
+	// Presentation Pass
+
+	poolInfo = vk::CommandPoolCreateInfo(vk::CommandPoolCreateFlags(), presentationPass.family);
+
+	res = vulkan.device.createCommandPool(&poolInfo, nullptr, &presentationPass.pool);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateCommandPool Error: ") + vk::to_string(res));
+	}
+}
+
+static void createFeedbackCommandBuffer() {
+	vk::CommandBufferAllocateInfo allocInfo(feedbackPass.pool, vk::CommandBufferLevel::ePrimary, 2);
+
+	vk::Result res = vulkan.device.allocateCommandBuffers(&allocInfo, feedbackPass.primary.data());
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_AllocateCommandBuffers Error: ") + vk::to_string(res));
+	}
+
+	vk::CommandBufferBeginInfo beginInfo(vk::CommandBufferUsageFlags(), nullptr);
+
+	feedbackPass.primary[0].begin(&beginInfo);
+
+	feedbackPass.primary[0].waitEvents({ feedbackPass.update }, vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer, {}, {}, {});
+
+	feedbackPass.primary[0].resetEvent(feedbackPass.update, vk::PipelineStageFlagBits::eTopOfPipe);
+	feedbackPass.primary[0].copyBuffer(feedbackPass.cpuStaging.buffer, feedbackPass.gpuStaging.buffer, { vk::BufferCopy(0, 0, feedbackPass.gpuStaging.size) });
+
+	feedbackPass.primary[0].pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eBottomOfPipe, vk::DependencyFlags(), {}, {
+		vk::BufferMemoryBarrier(vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite, feedbackPass.family, renderPass.family,
+			feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size)
+	}, {});
+
+	feedbackPass.primary[0].end();
+
+	feedbackPass.primary[1].begin(&beginInfo);
+
+	feedbackPass.primary[1].pipelineBarrier(vk::PipelineStageFlagBits::eBottomOfPipe, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlags(), {}, {
+		vk::BufferMemoryBarrier(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferRead, renderPass.family, feedbackPass.family,
+			feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size)
+	}, {});
+
+	feedbackPass.primary[1].copyBuffer(feedbackPass.gpuStaging.buffer, feedbackPass.cpuStaging.buffer, { vk::BufferCopy(0, 0, feedbackPass.gpuStaging.size) });
+
+	feedbackPass.primary[1].end();
+}
+
+static void createRenderCommandBuffers() {
+	vk::CommandBufferAllocateInfo allocInfo(renderPass.pool, vk::CommandBufferLevel::ePrimary, 2);
+
+	vk::Result res = vulkan.device.allocateCommandBuffers(&allocInfo, renderPass.primary.data());
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_AllocateCommandBuffers Error: ") + vk::to_string(res));
+	}
+
+	allocInfo = vk::CommandBufferAllocateInfo(renderPass.pool, vk::CommandBufferLevel::eSecondary, 3);
+
+	std::array<vk::CommandBuffer, 3> buffers;
+
+	res = vulkan.device.allocateCommandBuffers(&allocInfo, buffers.data());
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_AllocateCommandBuffers Error: ") + vk::to_string(res));
+	}
+
+	renderPass.voxelUpdater.secondary = buffers[0];
+	renderPass.rayTracer.secondary = buffers[1];
+	renderPass.toneMapper.secondary = buffers[2];
+
+	vk::CommandBufferBeginInfo beginInfo(vk::CommandBufferUsageFlags(), nullptr);
+
+	renderPass.toneMapper.secondary.begin(&beginInfo);
+
+	renderPass.toneMapper.secondary.bindPipeline(vk::PipelineBindPoint::eCompute, renderPass.toneMapper.pipeline);
+	renderPass.toneMapper.secondary.bindDescriptorSets(vk::PipelineBindPoint::eCompute, renderPass.toneMapper.layout, 0, 1, &renderPass.toneMapper.descriptor.set, 0, nullptr);
+	renderPass.toneMapper.secondary.dispatch(1, 1, 1);
+
+	renderPass.toneMapper.secondary.end();
+
+	renderPass.primary[1].begin(&beginInfo);
+	renderPass.primary[1].executeCommands({ renderPass.toneMapper.secondary });
+	renderPass.primary[1].end();
+}
+
+static void recordRenderCommandBuffers(bool voxelUpdater, bool rayTracer) {
+	vk::CommandBufferBeginInfo beginInfo(vk::CommandBufferUsageFlags(), nullptr);
+
+	if (voxelUpdater) {
+		renderPass.voxelUpdater.secondary.begin(&beginInfo);
+
+		renderPass.voxelUpdater.secondary.bindPipeline(vk::PipelineBindPoint::eCompute, renderPass.voxelUpdater.pipeline);
+		renderPass.voxelUpdater.secondary.bindDescriptorSets(vk::PipelineBindPoint::eCompute, renderPass.voxelUpdater.layout, 0, 1, &renderPass.voxelUpdater.descriptor.set, 0, nullptr);
+		renderPass.voxelUpdater.secondary.dispatch(1, 1, 1);
+
+		renderPass.voxelUpdater.secondary.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlags(), {}, {
+			vk::BufferMemoryBarrier(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferWrite, renderPass.family, renderPass.family,
+				feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size)
+		}, {});
+
+		renderPass.voxelUpdater.secondary.fillBuffer(feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size, 0x00);
+
+		renderPass.voxelUpdater.secondary.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags(), {}, {}, {
+			vk::ImageMemoryBarrier(vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eShaderRead, vk::ImageLayout::eUndefined, vk::ImageLayout::eShaderReadOnlyOptimal,
+				renderPass.family, renderPass.family, voxelBuffer.structure.image, vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1))
+		});
+
+		renderPass.voxelUpdater.secondary.end();
+	}
+
+	if (rayTracer) {
+		renderPass.rayTracer.secondary.begin(&beginInfo);
+
+		renderPass.rayTracer.secondary.bindPipeline(vk::PipelineBindPoint::eCompute, renderPass.rayTracer.pipeline);
+		renderPass.rayTracer.secondary.bindDescriptorSets(vk::PipelineBindPoint::eCompute, renderPass.rayTracer.layout, 0, 1, &renderPass.rayTracer.descriptor.set, 0, nullptr);
+		renderPass.rayTracer.secondary.pushConstants(renderPass.rayTracer.layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(renderPass.rayTracer.constants), &renderPass.rayTracer.constants);
+		renderPass.rayTracer.secondary.dispatch(1, 1, 1);
+
+		renderPass.rayTracer.secondary.end();
+	}
+
+	renderPass.primary[0].begin(&beginInfo);
+	renderPass.primary[0].executeCommands({ renderPass.voxelUpdater.secondary, renderPass.rayTracer.secondary });
+	renderPass.primary[0].end();
+}
+
+static void createPresentationCommandBuffers() {
+	presentationPass.primary.resize(presentationPass.swapChain.images.size());
+
+	vk::CommandBufferAllocateInfo allocInfo(presentationPass.pool, vk::CommandBufferLevel::ePrimary, static_cast<uint32_t>(presentationPass.primary.size()));
+
+	vk::Result res = vulkan.device.allocateCommandBuffers(&allocInfo, presentationPass.primary.data());
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_AllocateCommandBuffers Error: ") + vk::to_string(res));
+	}
+
+	vk::CommandBufferBeginInfo beginInfo;
+
+	for (size_t i = 0; i < presentationPass.primary.size(); i++) {
+		beginInfo = vk::CommandBufferBeginInfo(vk::CommandBufferUsageFlags(), nullptr);
+		presentationPass.primary[i].begin(&beginInfo);
+
+		presentationPass.primary[i].pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlags(), {}, {}, {
+			vk::ImageMemoryBarrier(vk::AccessFlagBits::eColorAttachmentRead, vk::AccessFlagBits::eTransferWrite, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal,
+				presentationPass.family, presentationPass.family, presentationPass.swapChain.images[i], vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1)),
+			vk::ImageMemoryBarrier(vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferRead, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferSrcOptimal,
+				renderPass.family, renderPass.family, renderPass.ldrImage.image, vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1))
+		});
+
+		presentationPass.primary[i].blitImage(renderPass.ldrImage.image, vk::ImageLayout::eTransferSrcOptimal, presentationPass.swapChain.images[i], vk::ImageLayout::eTransferDstOptimal,
+			{ vk::ImageBlit(vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1), { vk::Offset3D(0, 0, 0), vk::Offset3D(renderPass.ldrImage.extent.width,
+				renderPass.ldrImage.extent.height, 1) }, vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1), { vk::Offset3D(0, 0, 0), vk::Offset3D(
+					presentationPass.swapChain.extent.width, presentationPass.swapChain.extent.height, 1) }) }, vk::Filter::eNearest);
+
+		presentationPass.primary[i].pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAllCommands, vk::DependencyFlags(), {}, {}, {
+			vk::ImageMemoryBarrier(vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eColorAttachmentRead, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR,
+				presentationPass.family, presentationPass.family, presentationPass.swapChain.images[i], vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1)),
+			vk::ImageMemoryBarrier(vk::AccessFlagBits::eTransferRead, vk::AccessFlagBits::eShaderWrite, vk::ImageLayout::eTransferSrcOptimal, vk::ImageLayout::eGeneral,
+				presentationPass.family, renderPass.family, renderPass.ldrImage.image, vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1))
+		});
+
+		presentationPass.primary[i].end();
+	}
+}
+
+static void recreateSwapChain() {
+	vulkan.device.waitIdle();
+
+	vk::SurfaceCapabilitiesKHR surfaceCapabilities = vulkan.physical.getSurfaceCapabilitiesKHR(vulkan.surface);
 
 	if (surfaceCapabilities.currentExtent.width == 0 || surfaceCapabilities.currentExtent.height == 0) {
 		return;
@@ -1334,11 +1521,11 @@ static void recreateSwapChain() {
 
 	createSwapChain();
 
-	createTransferCommandBuffers();
+	createPresentationCommandBuffers();
 }
 
 static void cleanupSwapChain() {
-	device.freeCommandBuffers(transferPass.pool, transferPass.buffers);
+	vulkan.device.freeCommandBuffers(presentationPass.pool, presentationPass.primary);
 
-	device.destroySwapchainKHR(swapChain, nullptr);
+	vulkan.device.destroySwapchainKHR(presentationPass.swapChain.queue, nullptr);
 }
