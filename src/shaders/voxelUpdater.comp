@@ -6,7 +6,11 @@
 
 layout(local_size_x = 32) in;
 
-layout(binding = 0, r32ui) uniform restrict writeonly uimage3D voxStr;
+layout(binding = 0) buffer restrict UpdateData {
+    uint[] data;
+} update;
+
+layout(binding = 1, r32ui) uniform restrict writeonly uimage3D voxStr;
 
 #define VOX_STRUCTURE(children, mask) uint((uint(!bool(children)) << 31) | ((children & 0x001FFFFF) << 8) | (mask & 0xFF))
 #define VOX_EMPTY 0x00

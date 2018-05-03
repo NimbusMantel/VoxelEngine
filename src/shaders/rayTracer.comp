@@ -15,7 +15,7 @@ layout(binding = 1) buffer restrict RayQueue {
     uint pixels;
 } rayQueue;
 
-layout(binding = 2) buffer restrict Visibiliy {
+layout(binding = 2) buffer restrict VisibiliyMask {
     uint[] mask;
 } visibility;
 

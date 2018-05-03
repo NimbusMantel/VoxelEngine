@@ -14,6 +14,13 @@
 
 #include "camera.hpp"
 
+/*
+
+TO DO:
+- reorder feedback to work entirely during post processing
+
+*/
+
 #define VOXEL_DEPTH 16
 
 uint32_t tmp = (127 - VOXEL_DEPTH) << 23;
@@ -92,7 +99,7 @@ struct RenderPass {
 	vk::CommandPool pool;
 	std::array<vk::CommandBuffer, 2> primary;
 
-	vk::Semaphore render;
+	std::array<vk::Semaphore, 2> render;
 	vk::Semaphore finished;
 
 	struct HDRImage {
@@ -175,6 +182,7 @@ struct PresentationPass {
 	std::vector<vk::CommandBuffer> primary;
 
 	vk::Semaphore available;
+	vk::Semaphore finished;
 
 	struct SwapChain {
 		vk::SwapchainKHR queue;
@@ -416,9 +424,11 @@ static void update() {
 
 static void cleanup() {
 	vulkan.device.destroySemaphore(feedbackPass.upload, nullptr);
-	vulkan.device.destroySemaphore(renderPass.render, nullptr);
+	vulkan.device.destroySemaphore(renderPass.render[0], nullptr);
+	vulkan.device.destroySemaphore(renderPass.render[1], nullptr);
 	vulkan.device.destroySemaphore(renderPass.finished, nullptr);
 	vulkan.device.destroySemaphore(presentationPass.available, nullptr);
+	vulkan.device.destroySemaphore(presentationPass.finished, nullptr);
 
 	vulkan.device.destroyEvent(feedbackPass.update, nullptr);
 
@@ -511,8 +521,6 @@ static void changeFullscreen(bool fullscreen) {
 }
 
 static void drawFrame() {
-	presentationPass.queue.waitIdle();
-
 	uint32_t imageIndex;
 
 	vk::Result res = vulkan.device.acquireNextImageKHR(presentationPass.swapChain.queue, std::numeric_limits<uint64_t>::max(), presentationPass.available, nullptr, &imageIndex);
@@ -530,20 +538,18 @@ static void drawFrame() {
 	
 	submitInfos[0] = vk::SubmitInfo(0, nullptr, nullptr, 1, &feedbackPass.primary[0], 1, &feedbackPass.upload);
 
-	res = feedbackPass.queue.submit(1, &submitInfos[1], nullptr);
+	res = feedbackPass.queue.submit(1, &submitInfos[0], nullptr);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_QueueSubmit Error: ") + vk::to_string(res));
 	}
 
-	std::array<vk::Semaphore, 2> semaphores;
+	std::array<vk::Semaphore, 2> semaphores = { feedbackPass.upload, renderPass.render[0] };
 
-	vk::PipelineStageFlags waitStage = vk::PipelineStageFlagBits::eComputeShader;
-
-	semaphores = { feedbackPass.upload, renderPass.render };
+	vk::PipelineStageFlags waitStage = vk::PipelineStageFlagBits::eTopOfPipe;
 
 	submitInfos = {
-		vk::SubmitInfo(1, &semaphores[0], &waitStage, 1, &renderPass.primary[0], 1, &renderPass.render),
+		vk::SubmitInfo(1, &semaphores[0], &waitStage, 1, &renderPass.primary[0], 2, renderPass.render.data()),
 		vk::SubmitInfo(1, &semaphores[1], &waitStage, 1, &renderPass.primary[1], 1, &renderPass.finished)
 	};
 
@@ -553,9 +559,7 @@ static void drawFrame() {
 		throw std::runtime_error(std::string("VK_QueueSubmit Error: ") + vk::to_string(res));
 	}
 
-	waitStage = vk::PipelineStageFlagBits::eTopOfPipe;
-
-	submitInfos[1] = vk::SubmitInfo(1, &renderPass.render, &waitStage, 1, &feedbackPass.primary[1], 0, nullptr);
+	submitInfos[1] = vk::SubmitInfo(1, &renderPass.render[1], &waitStage, 1, &feedbackPass.primary[1], 0, nullptr);
 
 	res = feedbackPass.queue.submit(1, &submitInfos[1], feedbackPass.download);
 
@@ -565,7 +569,15 @@ static void drawFrame() {
 
 	semaphores = { presentationPass.available, renderPass.finished };
 
-	vk::PresentInfoKHR presentInfo = vk::PresentInfoKHR(2, semaphores.data(), 1, &presentationPass.swapChain.queue, &imageIndex, nullptr);
+	submitInfos[1] = vk::SubmitInfo(2, semaphores.data(), &waitStage, 1, &presentationPass.primary[imageIndex], 1, &presentationPass.finished);
+
+	res = presentationPass.queue.submit(1, &submitInfos[1], nullptr);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_QueueSubmit Error: ") + vk::to_string(res));
+	}
+
+	vk::PresentInfoKHR presentInfo = vk::PresentInfoKHR(1, &presentationPass.finished, 1, &presentationPass.swapChain.queue, &imageIndex, nullptr);
 
 	res = presentationPass.queue.presentKHR(&presentInfo);
 
@@ -575,6 +587,10 @@ static void drawFrame() {
 	else if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_QueuePresentKHR Error: ") + vk::to_string(res));
 	}
+
+	vulkan.device.waitForFences(1, &feedbackPass.download, true, std::numeric_limits<uint64_t>::max());
+
+	// Visibility mask has arrived
 
 	presentationPass.queue.waitIdle();
 }
@@ -1100,7 +1116,8 @@ static void createDescriptorSets() {
 	// Voxel Updater
 
 	std::vector<vk::DescriptorSetLayoutBinding> bindings = {
-		vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute, nullptr)
+		vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
+		vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute, nullptr)
 	};
 
 	vk::DescriptorSetLayoutCreateInfo layoutInfo(vk::DescriptorSetLayoutCreateFlags(), static_cast<uint32_t>(bindings.size()), bindings.data());
@@ -1169,17 +1186,18 @@ static void createDescriptorSets() {
 
 	// Write all bindings
 
+	vk::DescriptorBufferInfo fedInfo(feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size);
 	vk::DescriptorImageInfo strInfo(nullptr, voxelBuffer.structure.view, vk::ImageLayout::eGeneral);
 	vk::DescriptorBufferInfo rayInfo(renderPass.rayTracer.queue.buffer, 0, renderPass.rayTracer.queue.size);
-	vk::DescriptorBufferInfo visInfo(feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size);
 	vk::DescriptorBufferInfo hdrInfo(renderPass.hdrImage.image, 0, renderPass.hdrImage.size);
 	vk::DescriptorImageInfo ldrInfo(nullptr, renderPass.ldrImage.view, vk::ImageLayout::eGeneral);
 
 	std::vector<vk::WriteDescriptorSet> descriptorWrites = {
-		vk::WriteDescriptorSet(renderPass.voxelUpdater.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageImage, &strInfo, nullptr, nullptr),
+		vk::WriteDescriptorSet(renderPass.voxelUpdater.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &fedInfo, nullptr),
+		vk::WriteDescriptorSet(renderPass.voxelUpdater.descriptor.set, 1, 0, 1, vk::DescriptorType::eStorageImage, &strInfo, nullptr, nullptr),
 		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageImage, &strInfo, nullptr, nullptr),
 		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 1, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &rayInfo, nullptr),
-		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 2, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &visInfo, nullptr),
+		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 2, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &fedInfo, nullptr),
 		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 3, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &hdrInfo, nullptr),
 		vk::WriteDescriptorSet(renderPass.toneMapper.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageTexelBuffer, nullptr, nullptr, &renderPass.hdrImage.view),
 		vk::WriteDescriptorSet(renderPass.toneMapper.descriptor.set, 1, 0, 1, vk::DescriptorType::eStorageImage, &ldrInfo, nullptr, nullptr)
@@ -1281,22 +1299,18 @@ static void createRenderPipelines() {
 static void createSemaphores() {
 	vk::SemaphoreCreateInfo semaphoreInfo = vk::SemaphoreCreateInfo(vk::SemaphoreCreateFlags());
 
-	vk::Result res = vulkan.device.createSemaphore(&semaphoreInfo, nullptr, &feedbackPass.upload);
+	vk::Result res;
+	
+	std::vector<vk::Semaphore*> semaphores = {
+		&feedbackPass.upload, &renderPass.render[0], &renderPass.render[1], &renderPass.finished, &presentationPass.available, &presentationPass.finished
+	};
 
-	if (res != vk::Result::eSuccess) {
-		throw std::runtime_error(std::string("VK_CreateSemaphore Error: ") + vk::to_string(res));
-	}
+	for (vk::Semaphore* sem : semaphores) {
+		res = vulkan.device.createSemaphore(&semaphoreInfo, nullptr, sem);
 
-	res = vulkan.device.createSemaphore(&semaphoreInfo, nullptr, &renderPass.finished);
-
-	if (res != vk::Result::eSuccess) {
-		throw std::runtime_error(std::string("VK_CreateSemaphore Error: ") + vk::to_string(res));
-	}
-
-	res = vulkan.device.createSemaphore(&semaphoreInfo, nullptr, &presentationPass.available);
-
-	if (res != vk::Result::eSuccess) {
-		throw std::runtime_error(std::string("VK_CreateSemaphore Error: ") + vk::to_string(res));
+		if (res != vk::Result::eSuccess) {
+			throw std::runtime_error(std::string("VK_CreateSemaphore Error: ") + vk::to_string(res));
+		}
 	}
 }
 
@@ -1365,26 +1379,26 @@ static void createFeedbackCommandBuffer() {
 
 	feedbackPass.primary[0].begin(&beginInfo);
 
-	feedbackPass.primary[0].waitEvents({ feedbackPass.update }, vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer, {}, {}, {});
+	feedbackPass.primary[0].waitEvents({ feedbackPass.update }, vk::PipelineStageFlagBits::eHost, vk::PipelineStageFlagBits::eTransfer, {}, {}, {});
 
-	feedbackPass.primary[0].resetEvent(feedbackPass.update, vk::PipelineStageFlagBits::eTopOfPipe);
 	feedbackPass.primary[0].copyBuffer(feedbackPass.cpuStaging.buffer, feedbackPass.gpuStaging.buffer, { vk::BufferCopy(0, 0, feedbackPass.gpuStaging.size) });
 
 	feedbackPass.primary[0].pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eBottomOfPipe, vk::DependencyFlags(), {}, {
-		vk::BufferMemoryBarrier(vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite, feedbackPass.family, renderPass.family,
-			feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size)
+		vk::BufferMemoryBarrier(vk::AccessFlagBits::eTransferWrite, vk::AccessFlags(), feedbackPass.family, renderPass.family, feedbackPass.gpuStaging.buffer,
+			0, feedbackPass.gpuStaging.size)
 	}, {});
 
 	feedbackPass.primary[0].end();
 
 	feedbackPass.primary[1].begin(&beginInfo);
 
-	feedbackPass.primary[1].pipelineBarrier(vk::PipelineStageFlagBits::eBottomOfPipe, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlags(), {}, {
-		vk::BufferMemoryBarrier(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferRead, renderPass.family, feedbackPass.family,
-			feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size)
+	feedbackPass.primary[1].pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlags(), {}, {
+		vk::BufferMemoryBarrier(vk::AccessFlags(), vk::AccessFlagBits::eTransferRead, renderPass.family, feedbackPass.family, feedbackPass.gpuStaging.buffer,
+			0, feedbackPass.gpuStaging.size)
 	}, {});
 
 	feedbackPass.primary[1].copyBuffer(feedbackPass.gpuStaging.buffer, feedbackPass.cpuStaging.buffer, { vk::BufferCopy(0, 0, feedbackPass.gpuStaging.size) });
+	feedbackPass.primary[1].resetEvent(feedbackPass.update, vk::PipelineStageFlagBits::eTransfer);
 
 	feedbackPass.primary[1].end();
 }
@@ -1433,6 +1447,11 @@ static void recordRenderCommandBuffers(bool voxelUpdater, bool rayTracer) {
 	if (voxelUpdater) {
 		renderPass.voxelUpdater.secondary.begin(&beginInfo);
 
+		renderPass.voxelUpdater.secondary.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags(), {}, {
+			vk::BufferMemoryBarrier(vk::AccessFlags(), vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite, feedbackPass.family, renderPass.family,
+				feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size)
+		}, {});
+
 		renderPass.voxelUpdater.secondary.bindPipeline(vk::PipelineBindPoint::eCompute, renderPass.voxelUpdater.pipeline);
 		renderPass.voxelUpdater.secondary.bindDescriptorSets(vk::PipelineBindPoint::eCompute, renderPass.voxelUpdater.layout, 0, 1, &renderPass.voxelUpdater.descriptor.set, 0, nullptr);
 		renderPass.voxelUpdater.secondary.dispatch(1, 1, 1);
@@ -1444,7 +1463,10 @@ static void recordRenderCommandBuffers(bool voxelUpdater, bool rayTracer) {
 
 		renderPass.voxelUpdater.secondary.fillBuffer(feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size, 0x00);
 
-		renderPass.voxelUpdater.secondary.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags(), {}, {}, {
+		renderPass.voxelUpdater.secondary.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags(), {}, {
+			vk::BufferMemoryBarrier(vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite, renderPass.family, renderPass.family,
+				feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size)
+		}, {
 			vk::ImageMemoryBarrier(vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eShaderRead, vk::ImageLayout::eUndefined, vk::ImageLayout::eShaderReadOnlyOptimal,
 				renderPass.family, renderPass.family, voxelBuffer.structure.image, vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1))
 		});
@@ -1459,6 +1481,11 @@ static void recordRenderCommandBuffers(bool voxelUpdater, bool rayTracer) {
 		renderPass.rayTracer.secondary.bindDescriptorSets(vk::PipelineBindPoint::eCompute, renderPass.rayTracer.layout, 0, 1, &renderPass.rayTracer.descriptor.set, 0, nullptr);
 		renderPass.rayTracer.secondary.pushConstants(renderPass.rayTracer.layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(renderPass.rayTracer.constants), &renderPass.rayTracer.constants);
 		renderPass.rayTracer.secondary.dispatch(1, 1, 1);
+
+		renderPass.rayTracer.secondary.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eBottomOfPipe, vk::DependencyFlags(), {}, {
+			vk::BufferMemoryBarrier(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite, vk::AccessFlags(), renderPass.family, feedbackPass.family,
+				feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size)
+		}, {});
 
 		renderPass.rayTracer.secondary.end();
 	}
