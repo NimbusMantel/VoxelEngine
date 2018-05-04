@@ -14,14 +14,8 @@
 
 #include "camera.hpp"
 
-/*
-
-TO DO:
-- reorder feedback to work entirely during post processing
-
-*/
-
 #define VOXEL_DEPTH 16
+#define BUFFER_SIZE sizeof(uint8_t) << 21
 
 uint32_t tmp = (127 - VOXEL_DEPTH) << 23;
 
@@ -73,23 +67,28 @@ struct FeedbackPass {
 	vk::Queue queue;
 
 	vk::CommandPool pool;
-	std::array<vk::CommandBuffer, 2> primary;
+	std::pair<vk::CommandBuffer, vk::CommandBuffer> primary;
 
-	vk::Event update;
-	vk::Semaphore upload;
-	vk::Fence download;
+	std::pair<vk::Fence, vk::Semaphore> download;
+
+	vk::DeviceSize size = BUFFER_SIZE;
 
 	struct CPUStaging {
 		vk::Buffer buffer;
 		vk::DeviceMemory memory;
+
+		uint8_t* temporary;
 	} cpuStaging;
 
 	struct GPUStaging {
-		vk::DeviceSize size = sizeof(uint8_t) << 21;
-
 		vk::Buffer buffer;
 		vk::DeviceMemory memory;
 	} gpuStaging;
+
+	struct WorkingSet {
+		uint8_t update[BUFFER_SIZE];
+		uint8_t visibility[BUFFER_SIZE];
+	} workingSet;
 } feedbackPass;
 
 struct RenderPass {
@@ -97,9 +96,9 @@ struct RenderPass {
 	vk::Queue queue;
 
 	vk::CommandPool pool;
-	std::array<vk::CommandBuffer, 2> primary;
+	std::pair<vk::CommandBuffer, vk::CommandBuffer> primary;
 
-	std::array<vk::Semaphore, 2> render;
+	std::pair<vk::Semaphore, vk::Semaphore> render;
 	vk::Semaphore finished;
 
 	struct HDRImage {
@@ -242,6 +241,7 @@ static void cleanup();
 
 static void initState();
 static void updateState();
+static void initRenderer();
 static void changeFullscreen(bool fullscreen);
 static void drawFrame();
 
@@ -263,7 +263,6 @@ static void createDescriptorSets();
 static void createRenderPipelines();
 
 static void createSemaphores();
-static void createEvents();
 static void createFences();
 
 static void createCommandPools();
@@ -282,6 +281,8 @@ int SDL_main(int argc, char* argv[]) {
 		initSDL();
 
 		initVulkan();
+
+		initRenderer();
 
 		update();
 	}
@@ -337,7 +338,6 @@ static void initVulkan() {
 	createRenderPipelines();
 
 	createSemaphores();
-	createEvents();
 	createFences();
 
 	createCommandPools();
@@ -351,18 +351,17 @@ static void update() {
 	uint32_t width, height, size;
 
 	SDL_Event event;
-
-	bool quit = false;
 	
-	while (!quit) {
+	while (true) {
 		SDL_GetWindowSize(window, (int*)&width, (int*)&height);
 		size = height ^ ((width ^ height) & -(width < height));
 
 		while (SDL_PollEvent(&event)) {
 			if (event.type == SDL_QUIT) {
-				quit = true;
+				return;
 			}
-			else if (event.type == SDL_WINDOWEVENT) {
+			
+			if (event.type == SDL_WINDOWEVENT) {
 				vk::SurfaceCapabilitiesKHR surfaceCapabilities = vulkan.physical.getSurfaceCapabilitiesKHR(vulkan.surface);
 
 				if (surfaceCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max() && surfaceCapabilities.currentExtent.height != std::numeric_limits<uint32_t>::max()) {
@@ -375,12 +374,11 @@ static void update() {
 			}
 			else if (event.type == SDL_KEYDOWN) {
 				if (event.key.keysym.sym == SDLK_ESCAPE) {
-					if (isFullscreen) {
-						changeFullscreen(false);
+					if (!isFullscreen) {
+						return;
 					}
-					else {
-						quit = true;
-					}
+					
+					changeFullscreen(false);
 				}
 				else if (event.key.keysym.sym == SDLK_f) {
 					changeFullscreen(!isFullscreen);
@@ -418,27 +416,25 @@ static void update() {
 			drawFrame();
 		}
 	}
-
-	vulkan.device.waitIdle();
 }
 
 static void cleanup() {
-	vulkan.device.destroySemaphore(feedbackPass.upload, nullptr);
-	vulkan.device.destroySemaphore(renderPass.render[0], nullptr);
-	vulkan.device.destroySemaphore(renderPass.render[1], nullptr);
+	vulkan.device.waitIdle();
+
+	vulkan.device.destroySemaphore(feedbackPass.download.second, nullptr);
+	vulkan.device.destroySemaphore(renderPass.render.first, nullptr);
+	vulkan.device.destroySemaphore(renderPass.render.second, nullptr);
 	vulkan.device.destroySemaphore(renderPass.finished, nullptr);
 	vulkan.device.destroySemaphore(presentationPass.available, nullptr);
 	vulkan.device.destroySemaphore(presentationPass.finished, nullptr);
 
-	vulkan.device.destroyEvent(feedbackPass.update, nullptr);
+	vulkan.device.destroyFence(feedbackPass.download.first, nullptr);
 
-	vulkan.device.destroyFence(feedbackPass.download, nullptr);
-
-	vulkan.device.freeCommandBuffers(feedbackPass.pool, { feedbackPass.primary });
+	vulkan.device.freeCommandBuffers(feedbackPass.pool, { feedbackPass.primary.first, feedbackPass.primary.second });
 	vulkan.device.destroyCommandPool(feedbackPass.pool, nullptr);
 	vulkan.device.freeCommandBuffers(renderPass.pool, {
-		renderPass.primary[0], renderPass.voxelUpdater.secondary, renderPass.rayTracer.secondary,
-		renderPass.primary[1], renderPass.toneMapper.secondary
+		renderPass.primary.first, renderPass.voxelUpdater.secondary, renderPass.rayTracer.secondary,
+		renderPass.primary.second, renderPass.toneMapper.secondary
 	});
 	vulkan.device.destroyCommandPool(renderPass.pool, nullptr);
 	vulkan.device.freeCommandBuffers(presentationPass.pool, presentationPass.primary);
@@ -457,6 +453,8 @@ static void cleanup() {
 	vulkan.device.destroyDescriptorPool(renderPass.rayTracer.descriptor.pool, nullptr);
 	vulkan.device.destroyDescriptorSetLayout(renderPass.toneMapper.descriptor.layout, nullptr);
 	vulkan.device.destroyDescriptorPool(renderPass.toneMapper.descriptor.pool, nullptr);
+
+	vulkan.device.unmapMemory(feedbackPass.cpuStaging.memory);
 
 	vulkan.device.destroyBuffer(feedbackPass.cpuStaging.buffer, nullptr);
 	vulkan.device.freeMemory(feedbackPass.cpuStaging.memory, nullptr);
@@ -504,8 +502,18 @@ static void updateState() {
 
 		recordRenderCommandBuffers(false, true);
 	}
+}
 
-	vulkan.device.setEvent(feedbackPass.update);
+static void initRenderer() {
+	memcpy(feedbackPass.cpuStaging.temporary, feedbackPass.workingSet.update, feedbackPass.size);
+
+	vk::SubmitInfo submitInfo(0, nullptr, nullptr, 1, &feedbackPass.primary.second, 0, nullptr);
+
+	vk::Result res = feedbackPass.queue.submit(1, &submitInfo, nullptr);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_QueueSubmit Error: ") + vk::to_string(res));
+	}
 }
 
 static void changeFullscreen(bool fullscreen) {
@@ -515,14 +523,17 @@ static void changeFullscreen(bool fullscreen) {
 
 	isFullscreen = fullscreen;
 
+	vulkan.device.waitIdle();
+
 	SDL_SetWindowFullscreen(window, isFullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
 
 	recreateSwapChain();
 }
 
 static void drawFrame() {
-	uint32_t imageIndex;
+	feedbackPass.queue.waitIdle();
 
+	uint32_t imageIndex;
 	vk::Result res = vulkan.device.acquireNextImageKHR(presentationPass.swapChain.queue, std::numeric_limits<uint64_t>::max(), presentationPass.available, nullptr, &imageIndex);
 
 	if (res == vk::Result::eErrorOutOfDateKHR) {
@@ -534,23 +545,13 @@ static void drawFrame() {
 		throw std::runtime_error(std::string("VK_AcquireNextImageKHR Error: ") + vk::to_string(res));
 	}
 
-	std::array<vk::SubmitInfo, 2> submitInfos;
-	
-	submitInfos[0] = vk::SubmitInfo(0, nullptr, nullptr, 1, &feedbackPass.primary[0], 1, &feedbackPass.upload);
-
-	res = feedbackPass.queue.submit(1, &submitInfos[0], nullptr);
-
-	if (res != vk::Result::eSuccess) {
-		throw std::runtime_error(std::string("VK_QueueSubmit Error: ") + vk::to_string(res));
-	}
-
-	std::array<vk::Semaphore, 2> semaphores = { feedbackPass.upload, renderPass.render[0] };
-
 	vk::PipelineStageFlags waitStage = vk::PipelineStageFlagBits::eTopOfPipe;
 
-	submitInfos = {
-		vk::SubmitInfo(1, &semaphores[0], &waitStage, 1, &renderPass.primary[0], 2, renderPass.render.data()),
-		vk::SubmitInfo(1, &semaphores[1], &waitStage, 1, &renderPass.primary[1], 1, &renderPass.finished)
+	std::array<vk::Semaphore, 2> semaphores = { renderPass.render.first, renderPass.render.second };
+
+	std::array<vk::SubmitInfo, 2> submitInfos = {
+		vk::SubmitInfo(0, nullptr, nullptr, 1, &renderPass.primary.first, 2, semaphores.data()),
+		vk::SubmitInfo(1, &renderPass.render.first, &waitStage, 1, &renderPass.primary.second, 1, &renderPass.finished)
 	};
 
 	res = renderPass.queue.submit(2, submitInfos.data(), nullptr);
@@ -559,17 +560,18 @@ static void drawFrame() {
 		throw std::runtime_error(std::string("VK_QueueSubmit Error: ") + vk::to_string(res));
 	}
 
-	submitInfos[1] = vk::SubmitInfo(1, &renderPass.render[1], &waitStage, 1, &feedbackPass.primary[1], 0, nullptr);
+	semaphores = { presentationPass.available, renderPass.finished };
 
-	res = feedbackPass.queue.submit(1, &submitInfos[1], feedbackPass.download);
+	submitInfos = {
+		vk::SubmitInfo(1, &renderPass.render.second, &waitStage, 1, &feedbackPass.primary.first, 1, &feedbackPass.download.second),
+		vk::SubmitInfo(2, semaphores.data(), &waitStage, 1, &presentationPass.primary[imageIndex], 1, &presentationPass.finished)
+	};
+
+	res = feedbackPass.queue.submit(1, &submitInfos[0], feedbackPass.download.first);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_QueueSubmit Error: ") + vk::to_string(res));
 	}
-
-	semaphores = { presentationPass.available, renderPass.finished };
-
-	submitInfos[1] = vk::SubmitInfo(2, semaphores.data(), &waitStage, 1, &presentationPass.primary[imageIndex], 1, &presentationPass.finished);
 
 	res = presentationPass.queue.submit(1, &submitInfos[1], nullptr);
 
@@ -588,9 +590,22 @@ static void drawFrame() {
 		throw std::runtime_error(std::string("VK_QueuePresentKHR Error: ") + vk::to_string(res));
 	}
 
-	vulkan.device.waitForFences(1, &feedbackPass.download, true, std::numeric_limits<uint64_t>::max());
+	vulkan.device.waitForFences(1, &feedbackPass.download.first, true, std::numeric_limits<uint64_t>::max());
 
-	// Visibility mask has arrived
+	//std::cout << "Visibility arrived";
+
+	memcpy(feedbackPass.workingSet.visibility, feedbackPass.cpuStaging.temporary, feedbackPass.size);
+	memcpy(feedbackPass.cpuStaging.temporary, feedbackPass.workingSet.update, feedbackPass.size);
+
+	submitInfos[1] = vk::SubmitInfo(1, &feedbackPass.download.second, &waitStage, 1, &feedbackPass.primary.second, 0, nullptr);
+
+	res = feedbackPass.queue.submit(1, &submitInfos[1], nullptr);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_QueueSubmit Error: ") + vk::to_string(res));
+	}
+
+	//std::cout << " - Updates send" << std::endl;
 
 	presentationPass.queue.waitIdle();
 }
@@ -964,7 +979,7 @@ static void createImageViews() {
 static void createBuffers() {
 	// CPU Staging
 
-	vk::BufferCreateInfo bufferInfo(vk::BufferCreateFlags(), feedbackPass.gpuStaging.size, vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eStorageBuffer |
+	vk::BufferCreateInfo bufferInfo(vk::BufferCreateFlags(), feedbackPass.size, vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eStorageBuffer |
 		vk::BufferUsageFlagBits::eTransferDst, vk::SharingMode::eExclusive, 0, nullptr);
 
 	vk::Result res = vulkan.device.createBuffer(&bufferInfo, nullptr, &feedbackPass.cpuStaging.buffer);
@@ -985,9 +1000,11 @@ static void createBuffers() {
 
 	vulkan.device.bindBufferMemory(feedbackPass.cpuStaging.buffer, feedbackPass.cpuStaging.memory, 0);
 
+	vulkan.device.mapMemory(feedbackPass.cpuStaging.memory, 0, feedbackPass.size, vk::MemoryMapFlags(), (void**)&feedbackPass.cpuStaging.temporary);
+
 	// GPU Staging
 
-	bufferInfo = vk::BufferCreateInfo(vk::BufferCreateFlags(), feedbackPass.gpuStaging.size, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer |
+	bufferInfo = vk::BufferCreateInfo(vk::BufferCreateFlags(), feedbackPass.size, vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer |
 		vk::BufferUsageFlagBits::eTransferSrc, vk::SharingMode::eExclusive, 0, nullptr);
 
 	res = vulkan.device.createBuffer(&bufferInfo, nullptr, &feedbackPass.gpuStaging.buffer);
@@ -1186,7 +1203,7 @@ static void createDescriptorSets() {
 
 	// Write all bindings
 
-	vk::DescriptorBufferInfo fedInfo(feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size);
+	vk::DescriptorBufferInfo fedInfo(feedbackPass.gpuStaging.buffer, 0, feedbackPass.size);
 	vk::DescriptorImageInfo strInfo(nullptr, voxelBuffer.structure.view, vk::ImageLayout::eGeneral);
 	vk::DescriptorBufferInfo rayInfo(renderPass.rayTracer.queue.buffer, 0, renderPass.rayTracer.queue.size);
 	vk::DescriptorBufferInfo hdrInfo(renderPass.hdrImage.image, 0, renderPass.hdrImage.size);
@@ -1302,7 +1319,7 @@ static void createSemaphores() {
 	vk::Result res;
 	
 	std::vector<vk::Semaphore*> semaphores = {
-		&feedbackPass.upload, &renderPass.render[0], &renderPass.render[1], &renderPass.finished, &presentationPass.available, &presentationPass.finished
+		&feedbackPass.download.second, &renderPass.render.first, &renderPass.render.second, &renderPass.finished, &presentationPass.available, &presentationPass.finished
 	};
 
 	for (vk::Semaphore* sem : semaphores) {
@@ -1314,20 +1331,10 @@ static void createSemaphores() {
 	}
 }
 
-static void createEvents() {
-	vk::EventCreateInfo eventInfo = vk::EventCreateInfo(vk::EventCreateFlags());
-
-	vk::Result res = vulkan.device.createEvent(&eventInfo, nullptr, &feedbackPass.update);
-
-	if (res != vk::Result::eSuccess) {
-		throw std::runtime_error(std::string("VK_CreateEvent Error: ") + vk::to_string(res));
-	}
-}
-
 static void createFences() {
 	vk::FenceCreateInfo fenceInfo = vk::FenceCreateInfo(vk::FenceCreateFlags());
 
-	vk::Result res = vulkan.device.createFence(&fenceInfo, nullptr, &feedbackPass.download);
+	vk::Result res = vulkan.device.createFence(&fenceInfo, nullptr, &feedbackPass.download.first);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateFence Error: ") + vk::to_string(res));
@@ -1367,64 +1374,85 @@ static void createCommandPools() {
 }
 
 static void createFeedbackCommandBuffer() {
-	vk::CommandBufferAllocateInfo allocInfo(feedbackPass.pool, vk::CommandBufferLevel::ePrimary, 2);
+	std::vector<vk::CommandBuffer*> buffers = {
+		&feedbackPass.primary.first, &feedbackPass.primary.second
+	};
 
-	vk::Result res = vulkan.device.allocateCommandBuffers(&allocInfo, feedbackPass.primary.data());
+	std::vector<vk::CommandBuffer> tmp(buffers.size());
+
+	vk::CommandBufferAllocateInfo allocInfo(feedbackPass.pool, vk::CommandBufferLevel::ePrimary, static_cast<uint32_t>(buffers.size()));
+
+	vk::Result res = vulkan.device.allocateCommandBuffers(&allocInfo, tmp.data());
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateCommandBuffers Error: ") + vk::to_string(res));
+	}
+
+	for (int i = 0; i < buffers.size(); i++) {
+		*buffers[i] = tmp[i];
 	}
 
 	vk::CommandBufferBeginInfo beginInfo(vk::CommandBufferUsageFlags(), nullptr);
 
-	feedbackPass.primary[0].begin(&beginInfo);
+	feedbackPass.primary.first.begin(&beginInfo);
 
-	feedbackPass.primary[0].waitEvents({ feedbackPass.update }, vk::PipelineStageFlagBits::eHost, vk::PipelineStageFlagBits::eTransfer, {}, {}, {});
-
-	feedbackPass.primary[0].copyBuffer(feedbackPass.cpuStaging.buffer, feedbackPass.gpuStaging.buffer, { vk::BufferCopy(0, 0, feedbackPass.gpuStaging.size) });
-
-	feedbackPass.primary[0].pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eBottomOfPipe, vk::DependencyFlags(), {}, {
-		vk::BufferMemoryBarrier(vk::AccessFlagBits::eTransferWrite, vk::AccessFlags(), feedbackPass.family, renderPass.family, feedbackPass.gpuStaging.buffer,
-			0, feedbackPass.gpuStaging.size)
-	}, {});
-
-	feedbackPass.primary[0].end();
-
-	feedbackPass.primary[1].begin(&beginInfo);
-
-	feedbackPass.primary[1].pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlags(), {}, {
+	feedbackPass.primary.first.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlags(), {}, {
 		vk::BufferMemoryBarrier(vk::AccessFlags(), vk::AccessFlagBits::eTransferRead, renderPass.family, feedbackPass.family, feedbackPass.gpuStaging.buffer,
-			0, feedbackPass.gpuStaging.size)
+		0, feedbackPass.size)
+		}, {});
+
+	feedbackPass.primary.first.copyBuffer(feedbackPass.gpuStaging.buffer, feedbackPass.cpuStaging.buffer, { vk::BufferCopy(0, 0, feedbackPass.size) });
+
+	feedbackPass.primary.first.end();
+
+	feedbackPass.primary.second.begin(&beginInfo);
+
+	feedbackPass.primary.second.copyBuffer(feedbackPass.cpuStaging.buffer, feedbackPass.gpuStaging.buffer, { vk::BufferCopy(0, 0, feedbackPass.size) });
+
+	feedbackPass.primary.second.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eBottomOfPipe, vk::DependencyFlags(), {}, {
+		vk::BufferMemoryBarrier(vk::AccessFlagBits::eTransferWrite, vk::AccessFlags(), feedbackPass.family, renderPass.family, feedbackPass.gpuStaging.buffer,
+			0, feedbackPass.size)
 	}, {});
 
-	feedbackPass.primary[1].copyBuffer(feedbackPass.gpuStaging.buffer, feedbackPass.cpuStaging.buffer, { vk::BufferCopy(0, 0, feedbackPass.gpuStaging.size) });
-	feedbackPass.primary[1].resetEvent(feedbackPass.update, vk::PipelineStageFlagBits::eTransfer);
-
-	feedbackPass.primary[1].end();
+	feedbackPass.primary.second.end();
 }
 
 static void createRenderCommandBuffers() {
-	vk::CommandBufferAllocateInfo allocInfo(renderPass.pool, vk::CommandBufferLevel::ePrimary, 2);
+	std::vector<vk::CommandBuffer*> buffers = {
+		&renderPass.primary.first, &renderPass.primary.second
+	};
 
-	vk::Result res = vulkan.device.allocateCommandBuffers(&allocInfo, renderPass.primary.data());
+	std::vector<vk::CommandBuffer> tmp(buffers.size());
 
-	if (res != vk::Result::eSuccess) {
-		throw std::runtime_error(std::string("VK_AllocateCommandBuffers Error: ") + vk::to_string(res));
-	}
+	vk::CommandBufferAllocateInfo allocInfo(renderPass.pool, vk::CommandBufferLevel::ePrimary, static_cast<uint32_t>(buffers.size()));
 
-	allocInfo = vk::CommandBufferAllocateInfo(renderPass.pool, vk::CommandBufferLevel::eSecondary, 3);
-
-	std::array<vk::CommandBuffer, 3> buffers;
-
-	res = vulkan.device.allocateCommandBuffers(&allocInfo, buffers.data());
+	vk::Result res = vulkan.device.allocateCommandBuffers(&allocInfo, tmp.data());
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateCommandBuffers Error: ") + vk::to_string(res));
 	}
 
-	renderPass.voxelUpdater.secondary = buffers[0];
-	renderPass.rayTracer.secondary = buffers[1];
-	renderPass.toneMapper.secondary = buffers[2];
+	for (int i = 0; i < buffers.size(); i++) {
+		*buffers[i] = tmp[i];
+	}
+
+	buffers = {
+		&renderPass.voxelUpdater.secondary, &renderPass.rayTracer.secondary, &renderPass.toneMapper.secondary
+	};
+
+	tmp.resize(buffers.size());
+
+	allocInfo = vk::CommandBufferAllocateInfo(renderPass.pool, vk::CommandBufferLevel::eSecondary, static_cast<uint32_t>(buffers.size()));
+
+	res = vulkan.device.allocateCommandBuffers(&allocInfo, tmp.data());
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_AllocateCommandBuffers Error: ") + vk::to_string(res));
+	}
+
+	for (int i = 0; i < buffers.size(); i++) {
+		*buffers[i] = tmp[i];
+	}
 
 	vk::CommandBufferBeginInfo beginInfo(vk::CommandBufferUsageFlags(), nullptr);
 
@@ -1436,9 +1464,9 @@ static void createRenderCommandBuffers() {
 
 	renderPass.toneMapper.secondary.end();
 
-	renderPass.primary[1].begin(&beginInfo);
-	renderPass.primary[1].executeCommands({ renderPass.toneMapper.secondary });
-	renderPass.primary[1].end();
+	renderPass.primary.second.begin(&beginInfo);
+	renderPass.primary.second.executeCommands({ renderPass.toneMapper.secondary });
+	renderPass.primary.second.end();
 }
 
 static void recordRenderCommandBuffers(bool voxelUpdater, bool rayTracer) {
@@ -1449,7 +1477,7 @@ static void recordRenderCommandBuffers(bool voxelUpdater, bool rayTracer) {
 
 		renderPass.voxelUpdater.secondary.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags(), {}, {
 			vk::BufferMemoryBarrier(vk::AccessFlags(), vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite, feedbackPass.family, renderPass.family,
-				feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size)
+				feedbackPass.gpuStaging.buffer, 0, feedbackPass.size)
 		}, {});
 
 		renderPass.voxelUpdater.secondary.bindPipeline(vk::PipelineBindPoint::eCompute, renderPass.voxelUpdater.pipeline);
@@ -1458,14 +1486,14 @@ static void recordRenderCommandBuffers(bool voxelUpdater, bool rayTracer) {
 
 		renderPass.voxelUpdater.secondary.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlags(), {}, {
 			vk::BufferMemoryBarrier(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eTransferWrite, renderPass.family, renderPass.family,
-				feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size)
+				feedbackPass.gpuStaging.buffer, 0, feedbackPass.size)
 		}, {});
 
-		renderPass.voxelUpdater.secondary.fillBuffer(feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size, 0x00);
+		renderPass.voxelUpdater.secondary.fillBuffer(feedbackPass.gpuStaging.buffer, 0, feedbackPass.size, 0x00);
 
 		renderPass.voxelUpdater.secondary.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader, vk::DependencyFlags(), {}, {
 			vk::BufferMemoryBarrier(vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite, renderPass.family, renderPass.family,
-				feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size)
+				feedbackPass.gpuStaging.buffer, 0, feedbackPass.size)
 		}, {
 			vk::ImageMemoryBarrier(vk::AccessFlagBits::eShaderWrite, vk::AccessFlagBits::eShaderRead, vk::ImageLayout::eUndefined, vk::ImageLayout::eShaderReadOnlyOptimal,
 				renderPass.family, renderPass.family, voxelBuffer.structure.image, vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1))
@@ -1484,15 +1512,15 @@ static void recordRenderCommandBuffers(bool voxelUpdater, bool rayTracer) {
 
 		renderPass.rayTracer.secondary.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eBottomOfPipe, vk::DependencyFlags(), {}, {
 			vk::BufferMemoryBarrier(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite, vk::AccessFlags(), renderPass.family, feedbackPass.family,
-				feedbackPass.gpuStaging.buffer, 0, feedbackPass.gpuStaging.size)
+				feedbackPass.gpuStaging.buffer, 0, feedbackPass.size)
 		}, {});
 
 		renderPass.rayTracer.secondary.end();
 	}
 
-	renderPass.primary[0].begin(&beginInfo);
-	renderPass.primary[0].executeCommands({ renderPass.voxelUpdater.secondary, renderPass.rayTracer.secondary });
-	renderPass.primary[0].end();
+	renderPass.primary.first.begin(&beginInfo);
+	renderPass.primary.first.executeCommands({ renderPass.voxelUpdater.secondary, renderPass.rayTracer.secondary });
+	renderPass.primary.first.end();
 }
 
 static void createPresentationCommandBuffers() {
