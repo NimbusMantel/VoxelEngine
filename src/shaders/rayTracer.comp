@@ -9,17 +9,18 @@
 
 layout(local_size_x = 32, local_size_y = 32) in;
 
-layout(binding = 0, r32ui) uniform restrict readonly uimage3D voxStr;
+layout(binding = 0, r32ui) uniform restrict readonly uimage3D structure;
+layout(binding = 1, rgba32ui) uniform restrict readonly uimage3D material;
 
-layout(binding = 1) buffer restrict RayQueue {
+layout(binding = 2) buffer restrict RayQueue {
     uint pixels;
 } rayQueue;
 
-layout(binding = 2) buffer restrict VisibiliyMask {
+layout(binding = 3) buffer restrict VisibiliyMask {
     uint[] mask;
 } visibility;
 
-layout(binding = 3) buffer restrict HDRImage {
+layout(binding = 4) buffer restrict HDRImage {
     uint[] data;
 } hdrImage;
 
@@ -70,7 +71,7 @@ void main() {
     VoxelStack stack[VoxelDepth];
 
     RayInit ray;
-
+    
     do {
         if (false) { // ray queue is non-empty
             // get ray from queue
@@ -95,20 +96,14 @@ void main() {
 
         {
             vec3 norPos = ray.pos;
-            vec3 dir = ray.dir;
-            vec3 fac = ray.fac;
-
-            if (abs(dir.x) < epsilon) dir.x = uintBitsToFloat(floatBitsToUint(epsilon) ^ (floatBitsToUint(dir.x) & 0x80000000));
-		    if (abs(dir.y) < epsilon) dir.y = uintBitsToFloat(floatBitsToUint(epsilon) ^ (floatBitsToUint(dir.y) & 0x80000000));
-            if (abs(dir.z) < epsilon) dir.z = uintBitsToFloat(floatBitsToUint(epsilon) ^ (floatBitsToUint(dir.z) & 0x80000000));
 
             uint octant_mask = 0x00;
 
-		    if (dir.x > 0.0f) { octant_mask ^= 1; norPos.x = 3.0f - norPos.x; }
-		    if (dir.y > 0.0f) { octant_mask ^= 2; norPos.y = 3.0f - norPos.y; }
-            if (dir.z > 0.0f) { octant_mask ^= 4; norPos.z = 3.0f - norPos.z; }
+		    if (ray.dir.x > 0.0f) { octant_mask |= 1; norPos.x = 3.0f - norPos.x; }
+		    if (ray.dir.y > 0.0f) { octant_mask |= 2; norPos.y = 3.0f - norPos.y; }
+            if (ray.dir.z > 0.0f) { octant_mask |= 4; norPos.z = 3.0f - norPos.z; }
 
-            vec3 t_coef = vec3(1.0f / -abs(dir.x), 1.0f / -abs(dir.y), 1.0f / -abs(dir.z));
+            vec3 t_coef = vec3(1.0f) / -max(abs(ray.dir), vec3(epsilon));
 		    vec3 t_bias = norPos * t_coef;
 
 		    float t_min = max(max(2.0f * t_coef.x - t_bias.x, 2.0f * t_coef.y - t_bias.y), 2.0f * t_coef.z - t_bias.z);
@@ -129,15 +124,15 @@ void main() {
             uint scale = VoxelDepth - 1;
             float scaExp2 = 0.5f;
 
-            if ((norPos.x - 1.5f) > t_min) { idx ^= 1; pos.x = 1.5f; }
-		    if ((norPos.y - 1.5f) > t_min) { idx ^= 2; pos.y = 1.5f; }
-            if ((norPos.z - 1.5f) > t_min) { idx ^= 4; pos.z = 1.5f; }
+            if ((norPos.x - 1.5f) > t_min) { idx |= 1; pos.x = 1.5f; }
+		    if ((norPos.y - 1.5f) > t_min) { idx |= 2; pos.y = 1.5f; }
+            if ((norPos.z - 1.5f) > t_min) { idx |= 4; pos.z = 1.5f; }
 
             uint step_mask = 0x00;
 
             while (scale < VoxelDepth) {
                 if (voxel == 0x00) {
-                    voxel = imageLoad(voxStr, ivec3(parent.xyz)).x;
+                    voxel = imageLoad(structure, ivec3(parent.xyz)).x;
                 }
 
                 vec3 t_corner = pos * t_coef - t_bias;
@@ -179,9 +174,9 @@ void main() {
                         scale--;
                         scaExp2 *= 0.5f;
 
-                        if ((scaExp2 * t_coef.x + t_corner.x) > t_min) { idx ^= 1; pos.x += scaExp2; }
-					    if ((scaExp2 * t_coef.y + t_corner.y) > t_min) { idx ^= 2; pos.y += scaExp2; }
-                        if ((scaExp2 * t_coef.z + t_corner.z) > t_min) { idx ^= 4; pos.z += scaExp2; }
+                        if ((scaExp2 * t_coef.x + t_corner.x) > t_min) { idx |= 1; pos.x += scaExp2; }
+					    if ((scaExp2 * t_coef.y + t_corner.y) > t_min) { idx |= 2; pos.y += scaExp2; }
+                        if ((scaExp2 * t_coef.z + t_corner.z) > t_min) { idx |= 4; pos.z += scaExp2; }
 
                         t_max = min(t_max, tc_max);
                         
@@ -193,9 +188,9 @@ void main() {
 
                 step_mask = 0x00;
 
-                if (t_corner.x <= tc_max) { step_mask ^= 1; pos.x -= scaExp2; }
-			    if (t_corner.y <= tc_max) { step_mask ^= 2; pos.y -= scaExp2; }
-			    if (t_corner.z <= tc_max) { step_mask ^= 4; pos.z -= scaExp2; }
+                if (t_corner.x <= tc_max) { step_mask |= 1; pos.x -= scaExp2; }
+			    if (t_corner.y <= tc_max) { step_mask |= 2; pos.y -= scaExp2; }
+			    if (t_corner.z <= tc_max) { step_mask |= 4; pos.z -= scaExp2; }
 
 			    idx ^= step_mask;
                 t_min = tc_max;
@@ -223,11 +218,9 @@ void main() {
                     scale = (floatBitsToUint(float(difBits)) >> 23) - 127;
                     scaExp2 = uintBitsToFloat((127 - (VoxelDepth - scale)) << 23);
 
-                    uvec3 sh = uvec3(floatBitsToUint(pos.x) >> scale, floatBitsToUint(pos.y) >> scale, floatBitsToUint(pos.z) >> scale);
+                    uvec3 sh = floatBitsToUint(pos) >> scale;
 
-                    pos.x = uintBitsToFloat(sh.x << scale);
-                    pos.y = uintBitsToFloat(sh.y << scale);
-                    pos.z = uintBitsToFloat(sh.z << scale);
+                    pos = uintBitsToFloat(sh << scale);
 
                     idx = (sh.x & 0x01) | ((sh.y & 0x01) << 1) | ((sh.z & 0x01) << 2);
 

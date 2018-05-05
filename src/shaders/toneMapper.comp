@@ -28,7 +28,7 @@ void main() {
 
             pixel.xyz *= (pixel.w / ((1.0f + pixel.w) * pixel.w)); // Median luminance still missing
 
-            pixel = vec4(pow(clamp(pixel.x, 0.0f, 1.0f), GammaInv), pow(clamp(pixel.y, 0.0f, 1.0f), GammaInv), pow(clamp(pixel.z, 0.0f, 1.0f), GammaInv), 1.0f);
+            pixel = vec4(pow(clamp(pixel.xyz, 0.0f, 1.0f), vec3(GammaInv)), 1.0f);
 
             if (x >= (center.x - 5) && x <= (center.x + 4) && y >= (center.y - 1) && y <= center.y) {
                 pixel = vec4(float(pixel.x < 0.5f), float(pixel.y < 0.5f), float(pixel.z < 0.5f), 1.0f);

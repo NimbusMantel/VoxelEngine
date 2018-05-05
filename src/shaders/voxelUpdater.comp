@@ -4,13 +4,17 @@
 
 #extension GL_ARB_separate_shader_objects : require
 
+#extension GL_ARB_shader_ballot : require //uint gl_SubGroupSizeARB; uint readInvocationARB(uint value, uint invocationIndex)
+#extension GL_ARB_shader_group_vote : require //bool anyInvocationARB(bool value)
+
 layout(local_size_x = 32) in;
 
 layout(binding = 0) buffer restrict UpdateData {
     uint[] data;
 } update;
 
-layout(binding = 1, r32ui) uniform restrict writeonly uimage3D voxStr;
+layout(binding = 1, r32ui) uniform restrict writeonly uimage3D structure;
+layout(binding = 2, rgba32ui) uniform restrict writeonly uimage3D material;
 
 #define VOX_STRUCTURE(children, mask) uint((uint(!bool(children)) << 31) | ((children & 0x001FFFFF) << 8) | (mask & 0xFF))
 #define VOX_EMPTY 0x00
@@ -43,14 +47,14 @@ void main() {
 
         ivec3 pos = ivec3(x << 1, x >> 6, x >> 13) & 0xFE;
 
-        imageStore(voxStr, pos + ivec3(0, 0, 0), uvec4(testData[idx + 0], 0, 0, 0));
-        imageStore(voxStr, pos + ivec3(1, 0, 0), uvec4(testData[idx + 1], 0, 0, 0));
-        imageStore(voxStr, pos + ivec3(0, 1, 0), uvec4(testData[idx + 2], 0, 0, 0));
-        imageStore(voxStr, pos + ivec3(1, 1, 0), uvec4(testData[idx + 3], 0, 0, 0));
-        imageStore(voxStr, pos + ivec3(0, 0, 1), uvec4(testData[idx + 4], 0, 0, 0));
-        imageStore(voxStr, pos + ivec3(1, 0, 1), uvec4(testData[idx + 5], 0, 0, 0));
-        imageStore(voxStr, pos + ivec3(0, 1, 1), uvec4(testData[idx + 6], 0, 0, 0));
-        imageStore(voxStr, pos + ivec3(1, 1, 1), uvec4(testData[idx + 7], 0, 0, 0));
+        imageStore(structure, pos + ivec3(0, 0, 0), uvec4(testData[idx + 0], 0, 0, 0));
+        imageStore(structure, pos + ivec3(1, 0, 0), uvec4(testData[idx + 1], 0, 0, 0));
+        imageStore(structure, pos + ivec3(0, 1, 0), uvec4(testData[idx + 2], 0, 0, 0));
+        imageStore(structure, pos + ivec3(1, 1, 0), uvec4(testData[idx + 3], 0, 0, 0));
+        imageStore(structure, pos + ivec3(0, 0, 1), uvec4(testData[idx + 4], 0, 0, 0));
+        imageStore(structure, pos + ivec3(1, 0, 1), uvec4(testData[idx + 5], 0, 0, 0));
+        imageStore(structure, pos + ivec3(0, 1, 1), uvec4(testData[idx + 6], 0, 0, 0));
+        imageStore(structure, pos + ivec3(1, 1, 1), uvec4(testData[idx + 7], 0, 0, 0));
     }
 
 	// NOT WORKING AT ALL
