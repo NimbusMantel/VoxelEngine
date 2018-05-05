@@ -130,6 +130,19 @@ struct RenderPass {
 			vk::DescriptorSetLayout layout;
 			vk::DescriptorSet set;
 		} descriptor;
+
+		struct InvocationQuery {
+			vk::DeviceSize size = sizeof(glm::uint);
+
+			vk::Buffer buffer;
+			vk::DeviceMemory memory;
+
+			uint32_t* result;
+		} invocation;
+
+		struct Constants {
+			glm::uint subGroupSize = 8;
+		} constants;
 	} voxelUpdater;
 
 	struct RayTracer {
@@ -145,7 +158,7 @@ struct RenderPass {
 		} descriptor;
 
 		struct Queue {
-			vk::DeviceSize size = sizeof(uint32_t);
+			vk::DeviceSize size = sizeof(glm::uint);
 
 			vk::Buffer buffer;
 			vk::DeviceMemory memory;
@@ -198,14 +211,21 @@ struct PresentationPass {
 struct VoxelBuffer {
 	vk::Extent3D extent = vk::Extent3D(256, 256, 256);
 
-	vk::DeviceMemory memory;
-
 	struct Structure {
 		vk::Format format = vk::Format::eR32Uint;
 
 		vk::Image image;
+		vk::DeviceMemory memory;
 		vk::ImageView view;
 	} structure;
+
+	struct Material {
+		vk::Format format = vk::Format::eR32G32B32A32Uint;
+
+		vk::Image image;
+		vk::DeviceMemory memory;
+		vk::ImageView view;
+	} material;
 } voxelBuffer;
 
 #ifndef NDEBUG
@@ -462,6 +482,8 @@ static void cleanup() {
 	vulkan.device.freeMemory(feedbackPass.gpuStaging.memory, nullptr);
 	vulkan.device.destroyBuffer(renderPass.hdrImage.image, nullptr);
 	vulkan.device.freeMemory(renderPass.hdrImage.memory, nullptr);
+	vulkan.device.destroyBuffer(renderPass.voxelUpdater.invocation.buffer, nullptr);
+	vulkan.device.freeMemory(renderPass.voxelUpdater.invocation.memory, nullptr);
 	vulkan.device.destroyBuffer(renderPass.rayTracer.queue.buffer, nullptr);
 	vulkan.device.freeMemory(renderPass.rayTracer.queue.memory, nullptr);
 
@@ -470,7 +492,10 @@ static void cleanup() {
 	vulkan.device.freeMemory(renderPass.ldrImage.memory, nullptr);
 	vulkan.device.destroyImageView(voxelBuffer.structure.view, nullptr);
 	vulkan.device.destroyImage(voxelBuffer.structure.image, nullptr);
-	vulkan.device.freeMemory(voxelBuffer.memory, nullptr);
+	vulkan.device.freeMemory(voxelBuffer.structure.memory, nullptr);
+	vulkan.device.destroyImageView(voxelBuffer.material.view, nullptr);
+	vulkan.device.destroyImage(voxelBuffer.material.image, nullptr);
+	vulkan.device.freeMemory(voxelBuffer.material.memory, nullptr);
 
 	vulkan.device.destroySwapchainKHR(presentationPass.swapChain.queue, nullptr);
 
@@ -497,11 +522,19 @@ static void initState() {
 }
 
 static void updateState() {
-	if (camera::upd(renderPass.rayTracer.constants.pos, renderPass.rayTracer.constants.rot)) {
-		renderPass.rayTracer.constants.pos = renderPass.rayTracer.constants.pos * SCALE + 1.5f;
+	bool voxelUpdater = (renderPass.voxelUpdater.invocation.result[0] > 0) && (renderPass.voxelUpdater.constants.subGroupSize !=
+		renderPass.voxelUpdater.invocation.result[0]);
+	bool rayCaster = camera::upd(renderPass.rayTracer.constants.pos, renderPass.rayTracer.constants.rot);
 
-		recordRenderCommandBuffers(false, true);
+	if (voxelUpdater) {
+		renderPass.voxelUpdater.constants.subGroupSize = renderPass.voxelUpdater.invocation.result[0];
 	}
+
+	if (rayCaster) {
+		renderPass.rayTracer.constants.pos = renderPass.rayTracer.constants.pos * SCALE + 1.5f;
+	}
+
+	recordRenderCommandBuffers(voxelUpdater, rayCaster);
 }
 
 static void initRenderer() {
@@ -940,16 +973,39 @@ static void createImages() {
 	}
 
 	memReqs = vulkan.device.getImageMemoryRequirements(voxelBuffer.structure.image);
-
+	
 	allocInfo = vk::MemoryAllocateInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
 
-	res = vulkan.device.allocateMemory(&allocInfo, nullptr, &voxelBuffer.memory);
+	res = vulkan.device.allocateMemory(&allocInfo, nullptr, &voxelBuffer.structure.memory);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
 	}
 
-	vulkan.device.bindImageMemory(voxelBuffer.structure.image, voxelBuffer.memory, 0);
+	vulkan.device.bindImageMemory(voxelBuffer.structure.image, voxelBuffer.structure.memory, 0);
+
+	// Voxel material
+
+	imageInfo = vk::ImageCreateInfo(vk::ImageCreateFlags(), vk::ImageType::e3D, voxelBuffer.material.format, voxelBuffer.extent, 1, 1, vk::SampleCountFlagBits::e1,
+		vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eStorage, vk::SharingMode::eExclusive, 0, nullptr, vk::ImageLayout::eUndefined);
+
+	res = vulkan.device.createImage(&imageInfo, nullptr, &voxelBuffer.material.image);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateImage Error: ") + vk::to_string(res));
+	}
+
+	memReqs = vulkan.device.getImageMemoryRequirements(voxelBuffer.material.image);
+
+	allocInfo = vk::MemoryAllocateInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
+
+	res = vulkan.device.allocateMemory(&allocInfo, nullptr, &voxelBuffer.material.memory);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
+	}
+
+	vulkan.device.bindImageMemory(voxelBuffer.material.image, voxelBuffer.material.memory, 0);
 }
 
 static void createImageViews() {
@@ -970,6 +1026,17 @@ static void createImageViews() {
 		vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity), vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
 
 	res = vulkan.device.createImageView(&viewInfo, nullptr, &voxelBuffer.structure.view);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateImageView Error: ") + vk::to_string(res));
+	}
+
+	// Voxel material
+
+	viewInfo = vk::ImageViewCreateInfo(vk::ImageViewCreateFlags(), voxelBuffer.material.image, vk::ImageViewType::e3D, voxelBuffer.material.format, vk::ComponentMapping(vk::ComponentSwizzle::eIdentity,
+		vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity), vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
+
+	res = vulkan.device.createImageView(&viewInfo, nullptr, &voxelBuffer.material.view);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateImageView Error: ") + vk::to_string(res));
@@ -999,7 +1066,6 @@ static void createBuffers() {
 	}
 
 	vulkan.device.bindBufferMemory(feedbackPass.cpuStaging.buffer, feedbackPass.cpuStaging.memory, 0);
-
 	vulkan.device.mapMemory(feedbackPass.cpuStaging.memory, 0, feedbackPass.size, vk::MemoryMapFlags(), (void**)&feedbackPass.cpuStaging.temporary);
 
 	// GPU Staging
@@ -1048,6 +1114,29 @@ static void createBuffers() {
 
 	vulkan.device.bindBufferMemory(renderPass.hdrImage.image, renderPass.hdrImage.memory, 0);
 
+	// Invocation Query
+
+	bufferInfo = vk::BufferCreateInfo(vk::BufferCreateFlags(), renderPass.voxelUpdater.invocation.size, vk::BufferUsageFlagBits::eStorageBuffer, vk::SharingMode::eExclusive, 0, nullptr);
+
+	res = vulkan.device.createBuffer(&bufferInfo, nullptr, &renderPass.voxelUpdater.invocation.buffer);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_CreateBuffer Error: ") + vk::to_string(res));
+	}
+
+	memReqs = vulkan.device.getBufferMemoryRequirements(renderPass.voxelUpdater.invocation.buffer);
+
+	allocInfo = vk::MemoryAllocateInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent));
+
+	res = vulkan.device.allocateMemory(&allocInfo, nullptr, &renderPass.voxelUpdater.invocation.memory);
+
+	if (res != vk::Result::eSuccess) {
+		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
+	}
+
+	vulkan.device.bindBufferMemory(renderPass.voxelUpdater.invocation.buffer, renderPass.voxelUpdater.invocation.memory, 0);
+	vulkan.device.mapMemory(renderPass.voxelUpdater.invocation.memory, 0, renderPass.voxelUpdater.invocation.size, vk::MemoryMapFlags(), (void**)&renderPass.voxelUpdater.invocation.result);
+
 	// Ray Queue
 
 	bufferInfo = vk::BufferCreateInfo(vk::BufferCreateFlags(), renderPass.rayTracer.queue.size, vk::BufferUsageFlagBits::eStorageBuffer, vk::SharingMode::eExclusive, 0, nullptr);
@@ -1087,7 +1176,7 @@ static void createDescriptorPools() {
 	// Voxel Updater
 
 	std::vector<vk::DescriptorPoolSize> poolSizes = {
-		vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage, 1)
+		vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage, 2)
 	};
 
 	vk::DescriptorPoolCreateInfo poolInfo(vk::DescriptorPoolCreateFlags(), 1, static_cast<uint32_t>(poolSizes.size()), poolSizes.data());
@@ -1101,7 +1190,7 @@ static void createDescriptorPools() {
 	// Ray Tracer
 
 	poolSizes = {
-		vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage, 1),
+		vk::DescriptorPoolSize(vk::DescriptorType::eStorageImage, 2),
 		vk::DescriptorPoolSize(vk::DescriptorType::eStorageBuffer, 3)
 	};
 
@@ -1134,7 +1223,9 @@ static void createDescriptorSets() {
 
 	std::vector<vk::DescriptorSetLayoutBinding> bindings = {
 		vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
-		vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute, nullptr)
+		vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
+		vk::DescriptorSetLayoutBinding(2, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
+		vk::DescriptorSetLayoutBinding(3, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr)
 	};
 
 	vk::DescriptorSetLayoutCreateInfo layoutInfo(vk::DescriptorSetLayoutCreateFlags(), static_cast<uint32_t>(bindings.size()), bindings.data());
@@ -1157,9 +1248,10 @@ static void createDescriptorSets() {
 
 	bindings = {
 		vk::DescriptorSetLayoutBinding(0, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
-		vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
+		vk::DescriptorSetLayoutBinding(1, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
 		vk::DescriptorSetLayoutBinding(2, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
-		vk::DescriptorSetLayoutBinding(3, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr)
+		vk::DescriptorSetLayoutBinding(3, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr),
+		vk::DescriptorSetLayoutBinding(4, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr)
 	};
 
 	layoutInfo = vk::DescriptorSetLayoutCreateInfo(vk::DescriptorSetLayoutCreateFlags(), static_cast<uint32_t>(bindings.size()), bindings.data());
@@ -1205,6 +1297,8 @@ static void createDescriptorSets() {
 
 	vk::DescriptorBufferInfo fedInfo(feedbackPass.gpuStaging.buffer, 0, feedbackPass.size);
 	vk::DescriptorImageInfo strInfo(nullptr, voxelBuffer.structure.view, vk::ImageLayout::eGeneral);
+	vk::DescriptorImageInfo matInfo(nullptr, voxelBuffer.material.view, vk::ImageLayout::eGeneral);
+	vk::DescriptorBufferInfo invInfo(renderPass.voxelUpdater.invocation.buffer, 0, renderPass.voxelUpdater.invocation.size);
 	vk::DescriptorBufferInfo rayInfo(renderPass.rayTracer.queue.buffer, 0, renderPass.rayTracer.queue.size);
 	vk::DescriptorBufferInfo hdrInfo(renderPass.hdrImage.image, 0, renderPass.hdrImage.size);
 	vk::DescriptorImageInfo ldrInfo(nullptr, renderPass.ldrImage.view, vk::ImageLayout::eGeneral);
@@ -1212,10 +1306,13 @@ static void createDescriptorSets() {
 	std::vector<vk::WriteDescriptorSet> descriptorWrites = {
 		vk::WriteDescriptorSet(renderPass.voxelUpdater.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &fedInfo, nullptr),
 		vk::WriteDescriptorSet(renderPass.voxelUpdater.descriptor.set, 1, 0, 1, vk::DescriptorType::eStorageImage, &strInfo, nullptr, nullptr),
+		vk::WriteDescriptorSet(renderPass.voxelUpdater.descriptor.set, 2, 0, 1, vk::DescriptorType::eStorageImage, &matInfo, nullptr, nullptr),
+		vk::WriteDescriptorSet(renderPass.voxelUpdater.descriptor.set, 3, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &invInfo, nullptr),
 		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageImage, &strInfo, nullptr, nullptr),
-		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 1, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &rayInfo, nullptr),
-		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 2, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &fedInfo, nullptr),
-		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 3, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &hdrInfo, nullptr),
+		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 1, 0, 1, vk::DescriptorType::eStorageImage, &matInfo, nullptr, nullptr),
+		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 2, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &rayInfo, nullptr),
+		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 3, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &fedInfo, nullptr),
+		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 4, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &hdrInfo, nullptr),
 		vk::WriteDescriptorSet(renderPass.toneMapper.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageTexelBuffer, nullptr, nullptr, &renderPass.hdrImage.view),
 		vk::WriteDescriptorSet(renderPass.toneMapper.descriptor.set, 1, 0, 1, vk::DescriptorType::eStorageImage, &ldrInfo, nullptr, nullptr)
 	};
@@ -1240,7 +1337,9 @@ static vk::ShaderModule createShaderModule(const std::vector<char>& code) {
 static void createRenderPipelines() {
 	// Voxel Updater
 
-	vk::PipelineLayoutCreateInfo layoutInfo(vk::PipelineLayoutCreateFlags(), 1, &renderPass.voxelUpdater.descriptor.layout, 0, nullptr);
+	vk::PushConstantRange constantRange(vk::ShaderStageFlagBits::eCompute, 0, sizeof(renderPass.voxelUpdater.constants));
+
+	vk::PipelineLayoutCreateInfo layoutInfo(vk::PipelineLayoutCreateFlags(), 1, &renderPass.voxelUpdater.descriptor.layout, 1, &constantRange);
 
 	vk::Result res = vulkan.device.createPipelineLayout(&layoutInfo, nullptr, &renderPass.voxelUpdater.layout);
 
@@ -1264,7 +1363,7 @@ static void createRenderPipelines() {
 
 	// Ray Tracer
 
-	vk::PushConstantRange constantRange(vk::ShaderStageFlagBits::eCompute, 0, sizeof(renderPass.rayTracer.constants));
+	constantRange = vk::PushConstantRange(vk::ShaderStageFlagBits::eCompute, 0, sizeof(renderPass.rayTracer.constants));
 	
 	layoutInfo = vk::PipelineLayoutCreateInfo(vk::PipelineLayoutCreateFlags(), 1, &renderPass.rayTracer.descriptor.layout, 1, &constantRange);
 
@@ -1470,6 +1569,10 @@ static void createRenderCommandBuffers() {
 }
 
 static void recordRenderCommandBuffers(bool voxelUpdater, bool rayTracer) {
+	if (!voxelUpdater && !rayTracer) {
+		return;
+	}
+
 	vk::CommandBufferBeginInfo beginInfo(vk::CommandBufferUsageFlags(), nullptr);
 
 	if (voxelUpdater) {
@@ -1482,6 +1585,7 @@ static void recordRenderCommandBuffers(bool voxelUpdater, bool rayTracer) {
 
 		renderPass.voxelUpdater.secondary.bindPipeline(vk::PipelineBindPoint::eCompute, renderPass.voxelUpdater.pipeline);
 		renderPass.voxelUpdater.secondary.bindDescriptorSets(vk::PipelineBindPoint::eCompute, renderPass.voxelUpdater.layout, 0, 1, &renderPass.voxelUpdater.descriptor.set, 0, nullptr);
+		renderPass.voxelUpdater.secondary.pushConstants(renderPass.voxelUpdater.layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(renderPass.voxelUpdater.constants), &renderPass.voxelUpdater.constants);
 		renderPass.voxelUpdater.secondary.dispatch(1, 1, 1);
 
 		renderPass.voxelUpdater.secondary.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlags(), {}, {
