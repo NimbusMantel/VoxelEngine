@@ -144,6 +144,7 @@
   <ItemGroup>
     <ClCompile Include="src\camera.cpp" />
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\operations.cpp" />
   </ItemGroup>
   <ItemGroup>
     <GLSLValidate Include="src\shaders\toneMapper.comp" />
@@ -152,6 +153,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\camera.hpp" />
+    <ClInclude Include="src\operations.hpp" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="Notebook.txt" />

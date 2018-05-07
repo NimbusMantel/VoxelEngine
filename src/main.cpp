@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <fstream>
 
+#include "operations.hpp"
 #include "camera.hpp"
 
 #define VOXEL_DEPTH 16
@@ -242,7 +243,7 @@ static std::vector<char> readFile(const std::string& filename) {
 	file.read(buffer.data(), fileSize);
 
 	file.close();
-
+	
 	return buffer;
 }
 
@@ -290,7 +291,7 @@ static void cleanupSwapChain();
 
 int SDL_main(int argc, char* argv[]) {
 	initState();
-
+	
 	try {
 		initSDL();
 
