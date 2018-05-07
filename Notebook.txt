@@ -38,19 +38,14 @@ Voxel Buffer Updates:
     N   : number of data sets per group, depends on sub group size (32/8 for NVIDIA, 64/8 for AMD)
     mask: which sub-data sets should be used
   Operations:
-    Organisation:
-      0000: end [mask: 0x00 | data: null]
-    Voxel loading:
-      0001: load siblings [data: 3B-address, 8 x (4B-structure, 16B-material)]
-    Voxel modification:
-      0010: change pointer+colour [data: 8 x (3B-address, 3B-pointer, 8B-colour)]
-      0011: copy voxel [data: 8 x (3B-from, 3B-to)]
-    Structure loading:
-      0100: load siblings [data: 3B-address, 8 x 4B-structure]
-      0101: load single [data: 8 x (3B-address, 4B-structure)]
-    Structure modification:
-      0110: change children [data: 8 x (3B-address, 1B-mask)]
-      0111: move children [data: 8 x (3B-address, 3B-pointer)]
-    Material loading:
-      1000: load siblings [data: 3B-address, 8 x (8B-colour, 4B-surface, 4B-light)]
-      1csl: load single [data: 8 x (3B-address, c ? 8B-colour, s ? 4B-surface, l ? 4B-light)]
+    0000: end of buffer [mask: 0x00 | data: null]
+	0001: change children (siblings) [data: 3B-address, 8 x 1B-children]
+	0010: copy voxel (siblings) [data: 3B-from, 8 x 3B-to]
+	0011: copy voxel (single) [data: 3B-from, 3B-to]
+	0100: load structure (siblings) [data: 3B-address, 8 x 4B-structure]
+	0101: change children (single) [data: 3B-address, 1B-children]
+	0110: change pointer (single) [data: 3B-address, 3B-pointer]
+	0111: load structure (single) [data: 3B-address, 1B-children]
+	1000: load material (siblings) [data: 3B-address, 8 x (8B-colour, 4B-surface, 4B-light)]
+	1csl: change material (single) [data: 3B-address, c ? 8B-colour, s ? 4B-surface, l ? 4B-light]
+	1111: load material (single) [data: 3B-address, 8B-colour, 4B-surface, 4B-light]
