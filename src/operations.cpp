@@ -2,6 +2,8 @@
 
 #include <cstdlib>
 
+#include <iostream>
+
 #define serialiseUint24(memory, offset, data, mask) memory[offset] = data >> 16; memory[offset + 1] = data >> 8; memory[offset + 2] = data & mask;
 #define serialiseUint32(memory, offset, data) memory[offset] = data >> 24;  memory[offset + 1] = data >> 16; memory[offset + 2] = data >> 8; memory[offset + 3] = data;
 
@@ -112,4 +114,8 @@ MAT_LOA_S::MAT_LOA_S(uint24_t address, uint32_t* colour, uint32_t surface, uint3
 	serialiseUint32(data, 7, colour[1]);
 	serialiseUint32(data, 11, surface);
 	serialiseUint32(data, 15, light);
+}
+
+void VoxelUpdateBuffer::__Interface::__submit(uint8_t opcode, size_t size, uint8_t amount, uint8_t* data) {
+	std::cout << "Operation with opcode " << uint32_t(opcode) << " submitted" << std::endl;
 }

@@ -506,6 +506,8 @@ static void cleanup() {
 }
 
 static void initState() {
+	VoxelUpdateBuffer::submit(BUF_END_S());
+	
 	camera::mov(glm::vec3(0.5f, 0.5f, -0.5f));
 	camera::rad(10.0f);
 
