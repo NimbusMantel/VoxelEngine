@@ -38,7 +38,7 @@ Voxel Buffer Updates:
     N   : number of data sets per group, depends on sub group size (32/8 for NVIDIA, 64/8 for AMD)
     mask: which sub-data sets should be used
   Operations:
-    0000: end of buffer [mask: 0x00 | data: null]
+    0000: end of buffer [mask: null | data: null]
 	0001: change children (siblings) [data: 3B-address, 8 x 1B-children]
 	0010: copy voxel (siblings) [data: 3B-from, 8 x 3B-to]
 	0011: copy voxel (single) [data: 3B-from, 3B-to]

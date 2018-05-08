@@ -19,7 +19,6 @@
 #include "camera.hpp"
 
 #define VOXEL_DEPTH 16
-#define BUFFER_SIZE sizeof(uint8_t) << 21
 
 uint32_t tmp = (127 - VOXEL_DEPTH) << 23;
 
@@ -79,7 +78,7 @@ struct FeedbackPass {
 
 	vk::Fence download;
 
-	vk::DeviceSize size = BUFFER_SIZE;
+	vk::DeviceSize size = voxels::size;
 
 	struct CPUStaging {
 		vk::Buffer buffer;
@@ -94,8 +93,8 @@ struct FeedbackPass {
 	} gpuStaging;
 
 	struct WorkingSet {
-		uint8_t update[BUFFER_SIZE];
-		uint8_t visibility[BUFFER_SIZE];
+		uint8_t* update = voxels::content;
+		uint8_t visibility[voxels::size];
 	} workingSet;
 } feedbackPass;
 
@@ -256,6 +255,7 @@ static void cleanup();
 
 static void initState();
 static void updateState();
+static void initVoxelBuffer();
 static void initRenderer();
 static void changeFullscreen(bool fullscreen);
 static void drawFrame();
@@ -294,9 +294,9 @@ int SDL_main(int argc, char* argv[]) {
 	
 	try {
 		initSDL();
-
 		initVulkan();
 
+		initVoxelBuffer();
 		initRenderer();
 
 		update();
@@ -506,8 +506,6 @@ static void cleanup() {
 }
 
 static void initState() {
-	VoxelUpdateBuffer::submit(BUF_END_S());
-	
 	camera::mov(glm::vec3(0.5f, 0.5f, -0.5f));
 	camera::rad(10.0f);
 
@@ -524,8 +522,18 @@ static void updateState() {
 	}
 }
 
+static void initVoxelBuffer() {
+	voxels::SubgroupSize = vulkan.subgroupProperties.subgroupSize;
+
+	voxels::reset();
+
+	voxels::submit(STR_LOA_S(0, 0x00));
+}
+
 static void initRenderer() {
 	memcpy(feedbackPass.cpuStaging.temporary, feedbackPass.workingSet.update, feedbackPass.size);
+
+	voxels::reset();
 
 	vk::SubmitInfo submitInfo(0, nullptr, nullptr, 1, &feedbackPass.primary.second, 0, nullptr);
 
@@ -620,6 +628,8 @@ static void drawFrame() {
 
 	memcpy(feedbackPass.workingSet.visibility, feedbackPass.cpuStaging.temporary, feedbackPass.size);
 	memcpy(feedbackPass.cpuStaging.temporary, feedbackPass.workingSet.update, feedbackPass.size);
+
+	voxels::reset();
 
 	submitInfos[1] = vk::SubmitInfo(0, nullptr, nullptr, 1, &feedbackPass.primary.second, 0, nullptr);
 

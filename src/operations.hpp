@@ -1,21 +1,31 @@
 #pragma once
 
 #include <cstdint>
-#include <limits>
 
 typedef uint32_t uint24_t;
 
-namespace VoxelUpdateBuffer {
+// TO DO: include modifiable mask for multi update operations
+
+namespace voxels {
+	static const size_t size = sizeof(uint8_t) << 21;
+	static uint8_t* const content = new uint8_t[size];
+
+	static size_t SubgroupSize;
+
+	void reset();
+
 	struct __Interface {
 		protected:
-			static void __submit(uint8_t opcode, size_t size, uint8_t amount, uint8_t* data);
+			static void submit(const uint8_t opcode, const size_t size, const uint8_t amount, uint8_t* data);
+
+			__Interface() = default;
 	};
 }
 
-template<uint8_t opcode, size_t size, uint8_t amount> struct VoxelUpdateOperation : VoxelUpdateBuffer::__Interface {
+template<uint8_t opcode, size_t size, uint8_t amount> struct VoxelUpdateOperation : private voxels::__Interface {
 	public:
 		friend void __submit(VoxelUpdateOperation<opcode, size, amount>& operation) {
-			VoxelUpdateBuffer::__Interface::__submit(opcode, size, amount, operation.data);
+			voxels::__Interface::submit(opcode, size, amount, operation.data);
 		}
 
 	protected:
@@ -24,15 +34,11 @@ template<uint8_t opcode, size_t size, uint8_t amount> struct VoxelUpdateOperatio
 		VoxelUpdateOperation() = default;
 };
 
-namespace VoxelUpdateBuffer {
+namespace voxels {
 	template<uint8_t opcode, size_t size, uint8_t amount> void submit(VoxelUpdateOperation<opcode, size, amount>& operation) {
 		__submit(operation);
 	}
 }
-
-struct BUF_END_S : VoxelUpdateOperation<0b0000, 0, std::numeric_limits<uint8_t>::max()> {
-	BUF_END_S();
-};
 
 struct STR_CLD_M : VoxelUpdateOperation<0b0001, 3 + 8 * 1, 8> {
 	STR_CLD_M(uint24_t address, uint8_t* masks);
