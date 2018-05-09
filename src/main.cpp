@@ -624,10 +624,29 @@ static void drawFrame() {
 	vulkan.device.waitForFences(1, &feedbackPass.download, true, std::numeric_limits<uint64_t>::max());
 	vulkan.device.resetFences(1, &feedbackPass.download);
 
-	//std::cout << "Visibility arrived";
-
 	memcpy(feedbackPass.workingSet.visibility, feedbackPass.cpuStaging.temporary, feedbackPass.size);
 	memcpy(feedbackPass.cpuStaging.temporary, feedbackPass.workingSet.update, feedbackPass.size);
+	
+	// DEBUG Begin
+
+	uint8_t* begin = feedbackPass.workingSet.visibility;
+	uint8_t* pointer = begin;
+	uint8_t* end = begin + feedbackPass.size;
+
+	std::cout << "Visible voxels: ";
+
+	while (pointer < end) {
+		if (*pointer != 0x00) {
+
+			printf("%u(0x%02X) ", uint32_t(pointer - begin), *pointer);
+		}
+
+		pointer++;
+	}
+
+	std::cout << std::endl;
+
+	// DEBUG End
 
 	voxels::reset();
 
@@ -638,8 +657,6 @@ static void drawFrame() {
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_QueueSubmit Error: ") + vk::to_string(res));
 	}
-
-	//std::cout << " - Updates send" << std::endl;
 
 	presentationPass.queue.waitIdle();
 }

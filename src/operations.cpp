@@ -1,19 +1,17 @@
 #include "operations.hpp"
 
-#include <cstdlib>
-
-#include <iostream>
+#include <cstring>
 
 #define serialiseUint24(memory, offset, data, mask) memory[offset] = data >> 16; memory[offset + 1] = data >> 8; memory[offset + 2] = data & mask;
 #define serialiseUint32(memory, offset, data) memory[offset] = data >> 24;  memory[offset + 1] = data >> 16; memory[offset + 2] = data >> 8; memory[offset + 3] = data;
 
-STR_CLD_M::STR_CLD_M(uint24_t address, uint8_t* masks) {
+STR_CLD_M::STR_CLD_M(uint24_t address, uint8_t* masks, uint8_t usage) : VoxelUpdateOperation(usage) {
 	serialiseUint24(data, 0, address, 0xF8);
 
 	memcpy(data + 3, masks, 8);
 }
 
-VOX_CPY_M::VOX_CPY_M(uint24_t address, uint24_t* destinations) {
+VOX_CPY_M::VOX_CPY_M(uint24_t address, uint24_t* destinations, uint8_t usage) : VoxelUpdateOperation(usage) {
 	serialiseUint24(data, 0, address, 0xF8);
 
 	for (int i = 0; i < 8; i++) {
@@ -27,7 +25,7 @@ VOX_CPY_S::VOX_CPY_S(uint24_t address, uint24_t destination) {
 	serialiseUint24(data, 3, destination, 0xFF);
 }
 
-STR_LOA_M::STR_LOA_M(uint24_t address, uint32_t* structures) {
+STR_LOA_M::STR_LOA_M(uint24_t address, uint32_t* structures, uint8_t usage) : VoxelUpdateOperation(usage) {
 	serialiseUint24(data, 0, address, 0xF8);
 
 	for (int i = 0; i < 8; i++) {
@@ -53,7 +51,7 @@ STR_LOA_S::STR_LOA_S(uint24_t address, uint32_t structure) {
 	serialiseUint32(data, 3, structure);
 }
 
-MAT_LOA_M::MAT_LOA_M(uint24_t address, uint32_t* materials) {
+MAT_LOA_M::MAT_LOA_M(uint24_t address, uint32_t* materials, uint8_t usage) : VoxelUpdateOperation(usage) {
 	serialiseUint24(data, 0, address, 0xF8);
 
 	for (int i = 0; i < 32; i++) {
@@ -130,7 +128,7 @@ namespace voxels {
 		content[0] = 0x00;
 	}
 
-	void __Interface::submit(const uint8_t opcode, const size_t size, const uint8_t amount, uint8_t* data) {
+	void __Interface::submit(const uint8_t opcode, const size_t size, const uint8_t amount, uint8_t* data, uint8_t usage) {
 		OperationGroup& group = groups[opcode];
 
 		if (group.index == 0) {
@@ -145,7 +143,7 @@ namespace voxels {
 			}
 		}
 
-		// TO DO: Update the usage mask
+		content[group.begin + 1 + group.index / 8 + (size * group.index / amount)] |= (usage >> (group.index & 0x07));
 
 		memcpy(content + group.begin + 1 + 1 + group.index / 8 + (size * group.index / amount), data, size);
 

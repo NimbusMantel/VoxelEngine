@@ -4,8 +4,6 @@
 
 typedef uint32_t uint24_t;
 
-// TO DO: include modifiable mask for multi update operations
-
 namespace voxels {
 	static const size_t size = sizeof(uint8_t) << 21;
 	static uint8_t* const content = new uint8_t[size];
@@ -16,7 +14,7 @@ namespace voxels {
 
 	struct __Interface {
 		protected:
-			static void submit(const uint8_t opcode, const size_t size, const uint8_t amount, uint8_t* data);
+			static void submit(const uint8_t opcode, const size_t size, const uint8_t amount, uint8_t* data, uint8_t usage);
 
 			__Interface() = default;
 	};
@@ -25,13 +23,14 @@ namespace voxels {
 template<uint8_t opcode, size_t size, uint8_t amount> struct VoxelUpdateOperation : private voxels::__Interface {
 	public:
 		friend void __submit(VoxelUpdateOperation<opcode, size, amount>& operation) {
-			voxels::__Interface::submit(opcode, size, amount, operation.data);
+			voxels::__Interface::submit(opcode, size, amount, operation.data, operation.usage);
 		}
 
 	protected:
 		uint8_t * const data = new uint8_t[size];
+		uint8_t const usage;
 
-		VoxelUpdateOperation() = default;
+		VoxelUpdateOperation(uint8_t usage = 0x80) : usage(usage) {};
 };
 
 namespace voxels {
@@ -41,11 +40,11 @@ namespace voxels {
 }
 
 struct STR_CLD_M : VoxelUpdateOperation<0b0001, 3 + 8 * 1, 8> {
-	STR_CLD_M(uint24_t address, uint8_t* masks);
+	STR_CLD_M(uint24_t address, uint8_t* masks, uint8_t usage);
 };
 
 struct VOX_CPY_M : VoxelUpdateOperation<0b0010, 3 + 8 * 3, 8> {
-	VOX_CPY_M(uint24_t address, uint24_t* destinations);
+	VOX_CPY_M(uint24_t address, uint24_t* destinations, uint8_t usage);
 };
 
 struct VOX_CPY_S : VoxelUpdateOperation<0b0011, 3 + 3, 1> {
@@ -53,7 +52,7 @@ struct VOX_CPY_S : VoxelUpdateOperation<0b0011, 3 + 3, 1> {
 };
 
 struct STR_LOA_M : VoxelUpdateOperation<0b0100, 3 + 8 * (3 + 1), 8> {
-	STR_LOA_M(uint24_t address, uint32_t* structures);
+	STR_LOA_M(uint24_t address, uint32_t* structures, uint8_t usage);
 };
 
 struct STR_CLD_S : VoxelUpdateOperation<0b0101, 3 + 1, 1> {
@@ -69,7 +68,7 @@ struct STR_LOA_S : VoxelUpdateOperation<0b0111, 3 + (3 + 1), 1> {
 };
 
 struct MAT_LOA_M : VoxelUpdateOperation<0b1000, 3 + 8 * (8 + 4 + 4), 8> {
-	MAT_LOA_M(uint24_t address, uint32_t* materials);
+	MAT_LOA_M(uint24_t address, uint32_t* materials, uint8_t usage);
 };
 
 struct MAT_xxL_S : VoxelUpdateOperation<0b1001, 3 + 4, 1> {

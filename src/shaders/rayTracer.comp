@@ -52,6 +52,7 @@ struct RayInit {
 
 void main() {
     const float epsilon = uintBitsToFloat((127 - VoxelDepth) << 23);
+    const uint endian = 0x18;
 
     const uvec2 size = cst.siz;
 
@@ -141,49 +142,44 @@ void main() {
 
                 uint cidx = idx ^ octant_mask;
 
-                bool shouldRender = (voxel & 0xFF) == 0x00;
+                bool shouldRender = ((voxel & 0xFF) == 0x00) || ((voxel & 0x80000000) != 0x00);
 
-                if (!shouldRender && ((voxel & (0x80 >> cidx)) != 0x00) && (t_min <= t_max)) {
-                    atomicOr(visibility.mask[parent.w >> 5], 0x80000000 >> (parent.w & 0x0000001F));
-
-                    if ((voxel & 0x80000000) != 0x00) {
-                        shouldRender = true;
+                if (!shouldRender && ((voxel & (0x80U >> cidx)) != 0x00) && (t_min <= t_max)) {
+                    atomicOr(visibility.mask[parent.w >> 5], 0x80000000U >> ((parent.w & 0x0000001F) ^ endian));
+                    
+                    if (tc_max < h) {
+                        stack[scale].idx = parent.w;
+                        stack[scale].tax = t_max;
                     }
-                    else {
-                        if (tc_max < h) {
-                            stack[scale].idx = parent.w;
-                            stack[scale].tax = t_max;
-                        }
 
-                        stack[scale].das = (floatBitsToUint((tc_max - t_min) / scaExp2) & 0xFFFFFFF8) | (step_mask & 0x07);
-                        stack[scale].tin = t_min;
-                        stack[scale].pos = pos;
-                        stack[scale].vox = voxel;
+                    stack[scale].das = (floatBitsToUint((tc_max - t_min) / scaExp2) & 0xFFFFFFF8) | (step_mask & 0x07);
+                    stack[scale].tin = t_min;
+                    stack[scale].pos = pos;
+                    stack[scale].vox = voxel;
 
-                        h = tc_max;
+                    h = tc_max;
 
-                        parent.w = (voxel >> 8) & 0x001FFFFF;
+                    parent.w = (voxel >> 8) & 0x001FFFFF;
 
-                        parent.x = ((parent.w << 1) & 0xFE) | (cidx & 0x01);
-                        parent.y = ((parent.w >> 6) & 0xFE) | ((cidx >> 1) & 0x01);
-                        parent.z = ((parent.w >> 13) & 0xFE) | ((cidx >> 2) & 0x01);
-                        parent.w = (parent.w << 3) | cidx;
+                    parent.x = ((parent.w << 1) & 0xFE) | (cidx & 0x01);
+                    parent.y = ((parent.w >> 6) & 0xFE) | ((cidx >> 1) & 0x01);
+                    parent.z = ((parent.w >> 13) & 0xFE) | ((cidx >> 2) & 0x01);
+                    parent.w = (parent.w << 3) | cidx;
 
-                        idx = 0x00;
+                    idx = 0x00;
 
-                        scale--;
-                        scaExp2 *= 0.5f;
+                    scale--;
+                    scaExp2 *= 0.5f;
 
-                        if ((scaExp2 * t_coef.x + t_corner.x) > t_min) { idx |= 1; pos.x += scaExp2; }
-					    if ((scaExp2 * t_coef.y + t_corner.y) > t_min) { idx |= 2; pos.y += scaExp2; }
-                        if ((scaExp2 * t_coef.z + t_corner.z) > t_min) { idx |= 4; pos.z += scaExp2; }
+                    if ((scaExp2 * t_coef.x + t_corner.x) > t_min) { idx |= 1; pos.x += scaExp2; }
+                    if ((scaExp2 * t_coef.y + t_corner.y) > t_min) { idx |= 2; pos.y += scaExp2; }
+                    if ((scaExp2 * t_coef.z + t_corner.z) > t_min) { idx |= 4; pos.z += scaExp2; }
 
-                        t_max = min(t_max, tc_max);
-                        
-                        voxel = 0x00;
+                    t_max = min(t_max, tc_max);
+                    
+                    voxel = 0x00;
 
-                        continue;
-                    }
+                    continue;
                 }
 
                 step_mask = 0x00;
@@ -197,6 +193,8 @@ void main() {
 
                 if ((idx & step_mask) != 0x00) {
                     if (shouldRender) {
+                        atomicOr(visibility.mask[parent.w >> 5], 0x80000000U >> ((parent.w & 0x0000001F) ^ endian));
+
                         uint curr_side = (stack[scale + 1].das & 0x06) + uint(bool((octant_mask ^ 0x07) & stack[scale + 1].das));
 
                         float curr_dist = (stack[scale + 1].tin + ray.dis) * VoxelToUnit;
