@@ -93,7 +93,7 @@ struct FeedbackPass {
 	} gpuStaging;
 
 	struct WorkingSet {
-		uint8_t* update = voxels::content;
+		uint8_t* update;
 		uint8_t visibility[voxels::size];
 	} workingSet;
 } feedbackPass;
@@ -107,6 +107,13 @@ struct RenderPass {
 
 	std::pair<vk::Semaphore, vk::Semaphore> render;
 	vk::Semaphore finished;
+
+	struct TaskQueue {
+		vk::DeviceSize size = sizeof(glm::uint);
+
+		vk::Buffer buffer;
+		vk::DeviceMemory memory;
+	} tasks;
 
 	struct HDRImage {
 		vk::Format format = vk::Format::eR16G16B16A16Sfloat;
@@ -150,13 +157,6 @@ struct RenderPass {
 			vk::DescriptorSetLayout layout;
 			vk::DescriptorSet set;
 		} descriptor;
-
-		struct Queue {
-			vk::DeviceSize size = sizeof(glm::uint);
-
-			vk::Buffer buffer;
-			vk::DeviceMemory memory;
-		} queue;
 
 		struct Constants {
 			glm::mat3  rot = glm::mat3(1.0f);
@@ -474,11 +474,11 @@ static void cleanup() {
 	vulkan.device.freeMemory(feedbackPass.cpuStaging.memory, nullptr);
 	vulkan.device.destroyBuffer(feedbackPass.gpuStaging.buffer, nullptr);
 	vulkan.device.freeMemory(feedbackPass.gpuStaging.memory, nullptr);
+	vulkan.device.destroyBuffer(renderPass.tasks.buffer, nullptr);
+	vulkan.device.freeMemory(renderPass.tasks.memory, nullptr);
 	vulkan.device.destroyBufferView(renderPass.hdrImage.view, nullptr);
 	vulkan.device.destroyBuffer(renderPass.hdrImage.image, nullptr);
 	vulkan.device.freeMemory(renderPass.hdrImage.memory, nullptr);
-	vulkan.device.destroyBuffer(renderPass.rayTracer.queue.buffer, nullptr);
-	vulkan.device.freeMemory(renderPass.rayTracer.queue.memory, nullptr);
 
 	vulkan.device.destroyImageView(renderPass.ldrImage.view, nullptr);
 	vulkan.device.destroyImage(renderPass.ldrImage.image, nullptr);
@@ -523,11 +523,22 @@ static void updateState() {
 }
 
 static void initVoxelBuffer() {
-	voxels::SubgroupSize = vulkan.subgroupProperties.subgroupSize;
+	feedbackPass.workingSet.update = voxels::init(vulkan.subgroupProperties.subgroupSize);
+
+	voxels::submit(STR_LOA_S(0, 0x00));
+
+	// static test data (normally not immediately loaded in):
 
 	voxels::reset();
 
-	voxels::submit(STR_LOA_S(0, 0x00));
+	voxels::submit(STR_LOA_S(0, VOX_STRUCTURE(1, 0x01)));
+	voxels::submit(STR_LOA_S(15, VOX_STRUCTURE(2, 0x80)));
+
+	for (uint32_t i = 2; i < 16; i++) {
+		voxels::submit(STR_LOA_S(i << 3, VOX_STRUCTURE(i + 1, 0x80)));
+	}
+
+	voxels::submit(STR_LOA_S(128, VOX_STRUCTURE(0x0, 0x0)));
 }
 
 static void initRenderer() {
@@ -629,7 +640,7 @@ static void drawFrame() {
 	
 	// DEBUG Begin
 
-	uint8_t* begin = feedbackPass.workingSet.visibility;
+	/*uint8_t* begin = feedbackPass.workingSet.visibility;
 	uint8_t* pointer = begin;
 	uint8_t* end = begin + feedbackPass.size;
 
@@ -644,7 +655,7 @@ static void drawFrame() {
 		pointer++;
 	}
 
-	std::cout << std::endl;
+	std::cout << std::endl;*/
 
 	// DEBUG End
 
@@ -1137,27 +1148,27 @@ static void createBuffers() {
 
 	vulkan.device.bindBufferMemory(renderPass.hdrImage.image, renderPass.hdrImage.memory, 0);
 
-	// Ray Queue
+	// Task Queue
 
-	bufferInfo = vk::BufferCreateInfo(vk::BufferCreateFlags(), renderPass.rayTracer.queue.size, vk::BufferUsageFlagBits::eStorageBuffer, vk::SharingMode::eExclusive, 0, nullptr);
+	bufferInfo = vk::BufferCreateInfo(vk::BufferCreateFlags(), renderPass.tasks.size, vk::BufferUsageFlagBits::eStorageBuffer, vk::SharingMode::eExclusive, 0, nullptr);
 
-	res = vulkan.device.createBuffer(&bufferInfo, nullptr, &renderPass.rayTracer.queue.buffer);
+	res = vulkan.device.createBuffer(&bufferInfo, nullptr, &renderPass.tasks.buffer);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_CreateBuffer Error: ") + vk::to_string(res));
 	}
 
-	memReqs = vulkan.device.getBufferMemoryRequirements(renderPass.rayTracer.queue.buffer);
+	memReqs = vulkan.device.getBufferMemoryRequirements(renderPass.tasks.buffer);
 
 	allocInfo = vk::MemoryAllocateInfo(memReqs.size, getMemoryTypeIndex(memReqs.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal));
 
-	res = vulkan.device.allocateMemory(&allocInfo, nullptr, &renderPass.rayTracer.queue.memory);
+	res = vulkan.device.allocateMemory(&allocInfo, nullptr, &renderPass.tasks.memory);
 
 	if (res != vk::Result::eSuccess) {
 		throw std::runtime_error(std::string("VK_AllocateMemory Error: ") + vk::to_string(res));
 	}
 
-	vulkan.device.bindBufferMemory(renderPass.rayTracer.queue.buffer, renderPass.rayTracer.queue.memory, 0);
+	vulkan.device.bindBufferMemory(renderPass.tasks.buffer, renderPass.tasks.memory, 0);
 }
 
 static void createBufferViews() {
@@ -1298,7 +1309,8 @@ static void createDescriptorSets() {
 	vk::DescriptorBufferInfo fedInfo(feedbackPass.gpuStaging.buffer, 0, feedbackPass.size);
 	vk::DescriptorImageInfo strInfo(nullptr, voxelBuffer.structure.view, vk::ImageLayout::eGeneral);
 	vk::DescriptorImageInfo matInfo(nullptr, voxelBuffer.material.view, vk::ImageLayout::eGeneral);
-	vk::DescriptorBufferInfo rayInfo(renderPass.rayTracer.queue.buffer, 0, renderPass.rayTracer.queue.size);
+	vk::DescriptorBufferInfo updInfo(renderPass.tasks.buffer, 0, sizeof(glm::uint));
+	vk::DescriptorBufferInfo rayInfo(renderPass.tasks.buffer, 0, renderPass.tasks.size);
 	vk::DescriptorBufferInfo hdrInfo(renderPass.hdrImage.image, 0, renderPass.hdrImage.size);
 	vk::DescriptorImageInfo ldrInfo(nullptr, renderPass.ldrImage.view, vk::ImageLayout::eGeneral);
 
@@ -1306,6 +1318,7 @@ static void createDescriptorSets() {
 		vk::WriteDescriptorSet(renderPass.voxelUpdater.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &fedInfo, nullptr),
 		vk::WriteDescriptorSet(renderPass.voxelUpdater.descriptor.set, 1, 0, 1, vk::DescriptorType::eStorageImage, &strInfo, nullptr, nullptr),
 		vk::WriteDescriptorSet(renderPass.voxelUpdater.descriptor.set, 2, 0, 1, vk::DescriptorType::eStorageImage, &matInfo, nullptr, nullptr),
+		vk::WriteDescriptorSet(renderPass.voxelUpdater.descriptor.set, 3, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &updInfo, nullptr),
 		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 0, 0, 1, vk::DescriptorType::eStorageImage, &strInfo, nullptr, nullptr),
 		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 1, 0, 1, vk::DescriptorType::eStorageImage, &matInfo, nullptr, nullptr),
 		vk::WriteDescriptorSet(renderPass.rayTracer.descriptor.set, 2, 0, 1, vk::DescriptorType::eStorageBuffer, nullptr, &rayInfo, nullptr),

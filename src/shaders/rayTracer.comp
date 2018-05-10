@@ -13,8 +13,8 @@ layout(binding = 0, r32ui) uniform restrict readonly uimage3D structure;
 layout(binding = 1, rgba32ui) uniform restrict readonly uimage3D material;
 
 layout(binding = 2) buffer restrict RayQueue {
-    uint pixels;
-} rayQueue;
+    uint pixel;
+} queue;
 
 layout(binding = 3) buffer restrict VisibiliyMask {
     uint[] mask;
@@ -63,22 +63,20 @@ void main() {
     const mat3 camView = mat3(cst.mat[0], cst.mat[1], cst.mat[2], cst.mat[3], cst.mat[4], cst.mat[5], cst.mat[6], cst.mat[7], cst.mat[8]);
     const vec3 camPos = vec3(cst.n_x, cst.n_y, cst.n_z);
 
-    uint pixIdx = atomicCompSwap(rayQueue.pixels, 0, 0);
-
-    if (pixIdx >= pixels) {
-        atomicCompSwap(rayQueue.pixels, pixIdx, 0);
-    }
-
     VoxelStack stack[VoxelDepth];
-
     RayInit ray;
+
+    uint pixIdx;
+
+    queue.pixel = 0;
+    barrier();
     
     do {
         if (false) { // ray queue is non-empty
             // get ray from queue
         }
         else {
-            pixIdx = atomicAdd(rayQueue.pixels, 1);
+            pixIdx = atomicAdd(queue.pixel, 1);
 
             if (pixIdx >= pixels) {
                 break;

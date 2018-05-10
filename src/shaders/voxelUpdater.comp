@@ -16,6 +16,29 @@ layout(binding = 0) buffer restrict UpdateData {
 layout(binding = 1, r32ui) uniform restrict writeonly uimage3D structure;
 layout(binding = 2, rgba32ui) uniform restrict writeonly uimage3D material;
 
+layout(binding = 3) buffer restrict UpdateQueue {
+    uint offset;
+} queue;
+
+const uint operationSizes[16] = uint[16](
+	0,                         // BUF_END
+	1 + (3 + 8 * 1),           // STR_CLD_M
+	1 + (3 + 8 * 3),           // VOX_CPY_M
+	1 + (3 + 3) * 8,           // VOX_CPY_S
+	1 + (3 + 8 * (3 + 1)),     // STR_LOA_M
+	1 + (3 + 1) * 8,           // STR_CLD_S
+	1 + (3 + 3) * 8,           // STR_PNT_S
+	1 + (3 + (3 + 1)) * 8,     // STR_LOA_S
+	1 + (3 + 8 * (8 + 4 + 4)), // MAT_LOA_M
+	1 + (3 + 4) * 8,           // MAT_xxL_S
+	1 + (3 + 4) * 8,           // MAT_xSx_S
+	1 + (3 + (4 + 4)) * 8,     // MAT_xSL_S
+	1 + (3 + 8) * 8,           // MAT_Cxx_S
+	1 + (3 + (8 + 4)) * 8,     // MAT_CxL_S
+	1 + (3 + (8 + 4)) * 8,     // MAT_CSx_S
+	1 + (3 + (8 + 4 + 4)) * 8  // MAT_LOA_S
+);
+
 #define VOX_STRUCTURE(children, mask) uint((uint(!bool(children)) << 31) | ((children & 0x001FFFFF) << 8) | (mask & 0xFF))
 #define VOX_EMPTY 0x00
 
@@ -40,6 +63,22 @@ const uint testData[136] = uint[136](
 );
 
 void main() {
+	queue.offset = 0;
+    barrier();
+
+	uint begin = 0;
+
+	if (subgroupElect()) {
+		uint expect;
+
+		do {
+			expect = begin;
+			begin = atomicCompSwap(queue.offset, expect, expect + operationSizes[update.data[expect]] * (gl_SubgroupSize >> 3));
+		} while (begin != expect);
+	}
+
+	begin = subgroupBroadcastFirst(begin);
+
 	ivec2 storePos = ivec2(gl_GlobalInvocationID.xy);
 
     for (uint x = gl_GlobalInvocationID.x; x < 17; x += gl_WorkGroupSize.x) {

@@ -115,41 +115,56 @@ struct OperationGroup {
 	size_t index = 0;
 };
 
-static OperationGroup groups[16];
+static OperationGroup groups[15];
 
+size_t subgroupSize;
 size_t nextOffset = 0;
+
+uint8_t* const content = new uint8_t[voxels::size];
 
 // TO DO: Include fallback if command would not fit in the buffer anymore
 
 namespace voxels {
+	uint8_t* init(size_t sgs) {
+		subgroupSize = sgs;
+
+		reset();
+
+		return content;
+	}
+
 	void reset() {
 		nextOffset = 0;
 
 		content[0] = 0x00;
+
+		for (int i = 0; i < 15; i++) {
+			groups[i].begin = groups[i].index = 0;
+		}
 	}
 
 	void __Interface::submit(const uint8_t opcode, const size_t size, const uint8_t amount, uint8_t* data, uint8_t usage) {
-		OperationGroup& group = groups[opcode];
+		OperationGroup& group = groups[opcode - 1];
 
 		if (group.index == 0) {
 			group.begin = nextOffset;
-			nextOffset += 1 + (SubgroupSize / 8) + size * (SubgroupSize / amount);
-
+			nextOffset += 1 + (subgroupSize >> 3) + size * (subgroupSize / amount);
+			
 			content[group.begin] = opcode;
 			content[nextOffset] = 0x00;
 
-			for (size_t off = 1; off < (SubgroupSize / 8); off += 1 + (size * 8 / amount)) {
+			for (size_t off = 1; off < (subgroupSize >> 3); off += 1 + (size * 8 / amount)) {
 				content[group.begin + off] = 0x00;
 			}
 		}
+		
+		content[group.begin + 1 + (group.index >> 3) + (size * 8 * (group.index >> 3))] |= (usage >> (group.index & 0x07));
 
-		content[group.begin + 1 + group.index / 8 + (size * group.index / amount)] |= (usage >> (group.index & 0x07));
-
-		memcpy(content + group.begin + 1 + 1 + group.index / 8 + (size * group.index / amount), data, size);
+		memcpy(content + group.begin + 1 + 1 + (group.index >> 3) + (size * group.index / amount), data, size);
 
 		group.index += amount;
 
-		if (group.index >= SubgroupSize) {
+		if (group.index >= subgroupSize) {
 			group.index = 0;
 		}
 	}

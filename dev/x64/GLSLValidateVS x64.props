@@ -19,6 +19,6 @@
     </BuildMacro>
   </ItemGroup>
   <Target Name="GLSLValidate" Inputs="@(GLSLValidate)" BeforeTargets="ClCompile" Outputs="@(GLSLValidate->'$(GLSLVALIDATOROUTPUT)/%(Filename)%(Extension).spv')">
-    <Exec Command="$(GLSLVALIDATOREXE) -V -o &quot;$(GLSLVALIDATOROUTPUT)/%(Filename)%(Extension).spv&quot; &quot;%(GLSLValidate.FullPath)&quot;" />
+    <Exec Command="$(GLSLVALIDATOREXE) --target-env vulkan1.1 -o &quot;$(GLSLVALIDATOROUTPUT)/%(Filename)%(Extension).spv&quot; &quot;%(GLSLValidate.FullPath)&quot;" />
   </Target>
 </Project>
