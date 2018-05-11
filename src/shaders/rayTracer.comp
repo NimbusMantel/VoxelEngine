@@ -71,7 +71,7 @@ void main() {
     queue.pixel = 0;
     barrier();
     
-    do {
+    while (true) {
         if (false) { // ray queue is non-empty
             // get ray from queue
         }
@@ -83,7 +83,7 @@ void main() {
             }
 
             ray = RayInit(camPos, 0.0f, camView * normalize(vec3((pixIdx % size.x) * camFrame.z - camFrame.x, (size.y - (pixIdx / size.x) - 1) * camFrame.w - camFrame.y, -1.0f)),
-            pixIdx << 1, vec3(1.0f));
+                pixIdx << 1, vec3(1.0f));
 
             pixIdx <<= 1;
 
@@ -245,7 +245,5 @@ void main() {
 
             latest = atomicCompSwap(hdrImage.data[ray.dst | 0x01], expected, packHalf2x16(result.zw + unpackHalf2x16(expected)));
         } while (latest != expected);
-    } while(true);
-
-    // Cleanup if necessary
+    }
 }

@@ -24,11 +24,11 @@ void main() {
         for (uint x = gl_GlobalInvocationID.x; x < size.x; x += gl_WorkGroupSize.x) {
             vec4 pixel = imageLoad(hdrImage, int(base + x));
 
-            pixel.w = 0.299 * pixel.x + 0.587 * pixel.y + 0.114 * pixel.z;
+            /*pixel.w = 0.299 * pixel.x + 0.587 * pixel.y + 0.114 * pixel.z;
 
             pixel.xyz *= (pixel.w / ((1.0f + pixel.w) * pixel.w)); // Median luminance still missing
 
-            pixel = vec4(pow(clamp(pixel.xyz, 0.0f, 1.0f), vec3(GammaInv)), 1.0f);
+            pixel = vec4(pow(clamp(pixel.xyz, 0.0f, 1.0f), vec3(GammaInv)), 1.0f);*/
 
             if (x >= (center.x - 5) && x <= (center.x + 4) && y >= (center.y - 1) && y <= center.y) {
                 pixel = vec4(float(pixel.x < 0.5f), float(pixel.y < 0.5f), float(pixel.z < 0.5f), 1.0f);

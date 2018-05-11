@@ -136,7 +136,7 @@ namespace voxels {
 	void reset() {
 		nextOffset = 0;
 
-		memset(content, 0x00, 1 + (subgroupSize >> 3));
+		content[0] = 0x00;
 
 		for (int i = 0; i < 15; i++) {
 			groups[i].begin = groups[i].index = 0;
@@ -151,8 +151,7 @@ namespace voxels {
 			nextOffset += 1 + (subgroupSize >> 3) + size * (subgroupSize / amount);
 			
 			content[group.begin] = opcode;
-
-			memset(content + nextOffset, 0x00, 1 + (subgroupSize >> 3));
+			content[nextOffset] = 0x00;
 
 			for (size_t off = 1; off < (subgroupSize >> 3); off += 1 + (size * 8 / amount)) {
 				content[group.begin + off] = 0x00;

@@ -45,7 +45,7 @@ Voxel Buffer Updates:
 	0100: load structure (siblings) [data: 3B-address, 8 x 4B-structure]
 	0101: change children (single) [data: 3B-address, 1B-children]
 	0110: change pointer (single) [data: 3B-address, 3B-pointer]
-	0111: load structure (single) [data: 3B-address, 1B-children]
+	0111: load structure (single) [data: 3B-address, 3B-pointer, 1B-children]
 	1000: load material (siblings) [data: 3B-address, 8 x (8B-colour, 4B-surface, 4B-light)]
 	1csl: change material (single) [data: 3B-address, c ? 8B-colour, s ? 4B-surface, l ? 4B-light]
 	1111: load material (single) [data: 3B-address, 8B-colour, 4B-surface, 4B-light]
