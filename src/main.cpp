@@ -848,6 +848,7 @@ static void createLogicalDevice() {
 
 	vk::PhysicalDeviceFeatures deviceFeatures;
 	deviceFeatures.shaderStorageImageExtendedFormats = true;
+	deviceFeatures.shaderInt16 = true;
 	deviceFeatures.shaderInt64 = true;
 
 	vk::DeviceCreateInfo deviceInfo(vk::DeviceCreateFlags(), static_cast<uint32_t>(queueInfos.size()), queueInfos.data(), static_cast<uint32_t>(vulkan.layers.size()),
