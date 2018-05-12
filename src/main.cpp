@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <fstream>
 
+#include "heap.hpp"
 #include "operations.hpp"
 #include "camera.hpp"
 
@@ -97,7 +98,7 @@ struct FeedbackPass {
 
 	struct WorkingSet {
 		uint8_t* update;
-		uint8_t visibility[voxels::size];
+		uint8_t* visibility;
 	} workingSet;
 } feedbackPass;
 
@@ -528,6 +529,7 @@ static void updateState() {
 
 static void initVoxelBuffer() {
 	feedbackPass.workingSet.update = voxels::init(vulkan.subgroupProperties.subgroupSize);
+	feedbackPass.workingSet.visibility = voxels::init();
 
 	voxels::submit(STR_LOA_S(0, 0x00));
 
@@ -535,14 +537,25 @@ static void initVoxelBuffer() {
 
 	voxels::reset();
 
-	voxels::submit(STR_LOA_S(0, VOX_STRUCTURE(1, 0x01)));
-	voxels::submit(STR_LOA_S(15, VOX_STRUCTURE(2, 0x80)));
+	uint32_t prev = 0;
+	uint32_t curr = voxels::allocate(prev);
+	uint32_t next = voxels::allocate(curr);
+
+	voxels::submit(STR_LOA_S(0, VOX_STRUCTURE(curr >> 3, 0x01)));
+	voxels::submit(STR_LOA_S(curr + 7 , VOX_STRUCTURE(next >> 3, 0x80)));
 
 	for (uint32_t i = 2; i < 16; i++) {
-		voxels::submit(STR_LOA_S(i << 3, VOX_STRUCTURE(i + 1, 0x80)));
+		prev = curr;
+		curr = next;
+		next = voxels::allocate(curr);
+
+		voxels::submit(STR_LOA_S(curr, VOX_STRUCTURE(next >> 3, 0x80)));
 	}
 
-	voxels::submit(STR_LOA_S(128, VOX_STRUCTURE(0x0, 0x0)));
+	prev = curr;
+	curr = next;
+
+	voxels::submit(STR_LOA_S(curr, VOX_STRUCTURE(0x0, 0x0)));
 }
 
 static void initRenderer() {
@@ -641,29 +654,9 @@ static void drawFrame() {
 
 	memcpy(feedbackPass.workingSet.visibility, feedbackPass.cpuStaging.temporary, feedbackPass.size);
 	memcpy(feedbackPass.cpuStaging.temporary, feedbackPass.workingSet.update, feedbackPass.size);
-	
-	// DEBUG Begin
-
-	/*uint8_t* begin = feedbackPass.workingSet.visibility;
-	uint8_t* pointer = begin;
-	uint8_t* end = begin + feedbackPass.size;
-
-	std::cout << "Visible voxels: ";
-
-	while (pointer < end) {
-		if (*pointer != 0x00) {
-
-			printf("%u(0x%02X) ", uint32_t(pointer - begin), *pointer);
-		}
-
-		pointer++;
-	}
-
-	std::cout << std::endl;*/
-
-	// DEBUG End
 
 	voxels::reset();
+	voxels::process();
 
 	submitInfos[1] = vk::SubmitInfo(0, nullptr, nullptr, 1, &feedbackPass.primary.second, 0, nullptr);
 

@@ -1,14 +1,12 @@
 #pragma once
 
-#include <cstdint>
+#include "voxels.hpp"
 
 #define VOX_STRUCTURE(children, mask) uint32_t((uint32_t(!bool(children)) << 31) | ((children & 0x001FFFFF) << 8) | (mask & 0xFF))
 
 typedef uint32_t uint24_t;
 
 namespace voxels {
-	static const size_t size = sizeof(uint8_t) << 21;
-
 	uint8_t* init(size_t subgroupSize);
 
 	void reset();

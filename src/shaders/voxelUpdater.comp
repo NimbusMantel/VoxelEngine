@@ -48,7 +48,7 @@ const uint operationData[16] = uint[16](
 #define unserialiseUint24(i) ((updateLOAD(i) << 16) | (updateLOAD(i + 1) << 8) | updateLOAD(i + 2))
 #define unserialiseUint32(i) ((updateLOAD(i) << 24) | (updateLOAD(i + 1) << 16) | (updateLOAD(i + 2) << 8) | updateLOAD(i + 3))
 
-#define unpackAddress(a) ((ivec3(a >> 2, a >> 8, a >> 15) & 0xFE) + (ivec3(a, a >> 1, a >> 2) & 0x01))
+#define unpackAddress(a) ((ivec3(a >> 2, a >> 9, a >> 16) & 0xFE) + (ivec3(a, a >> 1, a >> 2) & 0x01))
 
 void main() {
 	queue.offset = 0;

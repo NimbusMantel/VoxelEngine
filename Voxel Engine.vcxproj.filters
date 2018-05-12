@@ -23,6 +23,9 @@
     <ClCompile Include="src\operations.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\heap.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <GLSLValidate Include="src\shaders\rayTracer.comp">
@@ -40,6 +43,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="src\operations.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\heap.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="src\voxels.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

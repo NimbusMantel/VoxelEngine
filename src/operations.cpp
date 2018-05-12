@@ -115,7 +115,7 @@ struct OperationGroup {
 	size_t index = 0;
 };
 
-static OperationGroup groups[15];
+OperationGroup* const groups = new OperationGroup[15];
 
 size_t subgroupSize;
 size_t nextOffset = 0;

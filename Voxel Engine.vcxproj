@@ -143,6 +143,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\camera.cpp" />
+    <ClCompile Include="src\heap.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\operations.cpp" />
   </ItemGroup>
@@ -153,7 +154,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\camera.hpp" />
+    <ClInclude Include="src\heap.hpp" />
     <ClInclude Include="src\operations.hpp" />
+    <ClInclude Include="src\voxels.hpp" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="Notebook.txt" />
