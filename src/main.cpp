@@ -537,25 +537,20 @@ static void initVoxelBuffer() {
 
 	voxels::reset();
 
-	uint32_t prev = 0;
-	uint32_t curr = voxels::allocate(prev);
-	uint32_t next = voxels::allocate(curr);
+	uint32_t curr = voxels::allocate();
+	uint32_t next = voxels::allocate();
 
 	voxels::submit(STR_LOA_S(0, VOX_STRUCTURE(curr >> 3, 0x01)));
 	voxels::submit(STR_LOA_S(curr + 7 , VOX_STRUCTURE(next >> 3, 0x80)));
 
 	for (uint32_t i = 2; i < 16; i++) {
-		prev = curr;
 		curr = next;
-		next = voxels::allocate(curr);
+		next = voxels::allocate();
 
 		voxels::submit(STR_LOA_S(curr, VOX_STRUCTURE(next >> 3, 0x80)));
 	}
 
-	prev = curr;
-	curr = next;
-
-	voxels::submit(STR_LOA_S(curr, VOX_STRUCTURE(0x0, 0x0)));
+	voxels::submit(STR_LOA_S(next, VOX_STRUCTURE(0x0, 0x0)));
 }
 
 static void initRenderer() {

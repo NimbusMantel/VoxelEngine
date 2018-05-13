@@ -44,9 +44,9 @@ const uint operationData[16] = uint[16](
 
 #define updateLOAD(i) imageLoad(update, int(i)).x
 
-#define unserialiseUint8(i) updateLOAD(i)
-#define unserialiseUint24(i) ((updateLOAD(i) << 16) | (updateLOAD(i + 1) << 8) | updateLOAD(i + 2))
-#define unserialiseUint32(i) ((updateLOAD(i) << 24) | (updateLOAD(i + 1) << 16) | (updateLOAD(i + 2) << 8) | updateLOAD(i + 3))
+#define deserialiseUint8(i) updateLOAD(i)
+#define deserialiseUint24(i) ((updateLOAD(i) << 16) | (updateLOAD(i + 1) << 8) | updateLOAD(i + 2))
+#define deserialiseUint32(i) ((updateLOAD(i) << 24) | (updateLOAD(i + 1) << 16) | (updateLOAD(i + 2) << 8) | updateLOAD(i + 3))
 
 #define unpackAddress(a) ((ivec3(a >> 2, a >> 9, a >> 16) & 0xFE) + (ivec3(a, a >> 1, a >> 2) & 0x01))
 
@@ -62,14 +62,14 @@ void main() {
 
 			do {
 				expect = begin;
-				begin = unserialiseUint8(expect);
+				begin = deserialiseUint8(expect);
 				begin = atomicCompSwap(queue.offset, expect, unpackGroupSize(operationData[begin]) * (gl_SubgroupSize >> 3) + expect + 1);
 			} while (begin != expect);
 		}
 
 		begin = subgroupBroadcastFirst(begin);
 
-		const uint opcode = unserialiseUint8(begin);
+		const uint opcode = deserialiseUint8(begin);
 		
 		if (subgroupAll(opcode == 0x0)) {
 			break;
@@ -77,22 +77,22 @@ void main() {
 		
 		begin += 1 + unpackGroupSize(operationData[opcode]) * (gl_SubgroupInvocationID >> 3);
 		
-		const uint mask = unserialiseUint8(begin);
+		const uint mask = deserialiseUint8(begin);
 		
 		if ((mask & (0x80U >> (gl_SubgroupInvocationID & 0x07))) != 0x00) {
 			if (subgroupAll(opcode == 0x1)) { // STR_CLD_M
-				const uint address = unserialiseUint24(begin) | (gl_SubgroupInvocationID & 0x07);
+				const uint address = deserialiseUint24(begin) | (gl_SubgroupInvocationID & 0x07);
 
 				begin += unpackSingleSize(operationData[0x1]) * (gl_SubgroupInvocationID & 0x07) + 1;
 
-				imageStore(structure, unpackAddress(address), uvec4((imageLoad(structure, unpackAddress(address)).x & 0xFFFFFF00) | unserialiseUint8(begin)));
+				imageStore(structure, unpackAddress(address), uvec4((imageLoad(structure, unpackAddress(address)).x & 0xFFFFFF00) | deserialiseUint8(begin)));
 			}
 			else if (subgroupAll(opcode == 0x2)) { // VOX_CPY_M
-				const uint from = unserialiseUint24(begin) | (gl_SubgroupInvocationID & 0x07);
+				const uint from = deserialiseUint24(begin) | (gl_SubgroupInvocationID & 0x07);
 
 				begin += unpackSingleSize(operationData[0x2]) * (gl_SubgroupInvocationID & 0x07) + 1;
 
-				const uint to = unserialiseUint24(begin);
+				const uint to = deserialiseUint24(begin);
 
 				imageStore(structure, unpackAddress(to), imageLoad(structure, unpackAddress(from)));
 				imageStore(material, unpackAddress(to), imageLoad(material, unpackAddress(from)));
@@ -100,112 +100,112 @@ void main() {
 			else if (subgroupAll(opcode == 0x3)) { // VOX_CPY_S
 				begin += unpackSingleSize(operationData[0x3]) * (gl_SubgroupInvocationID & 0x07) + 1;
 
-				const uint from = unserialiseUint24(begin);
+				const uint from = deserialiseUint24(begin);
 
 				begin += 3;
 
-				const uint to = unserialiseUint24(begin);
+				const uint to = deserialiseUint24(begin);
 
 				imageStore(structure, unpackAddress(to), imageLoad(structure, unpackAddress(from)));
 				imageStore(material, unpackAddress(to), imageLoad(material, unpackAddress(from)));
 			}
 			else if (subgroupAll(opcode == 0x4)) { // STR_LOA_M
-				const uint address = unserialiseUint24(begin) | (gl_SubgroupInvocationID & 0x07);
+				const uint address = deserialiseUint24(begin) | (gl_SubgroupInvocationID & 0x07);
 
 				begin += unpackSingleSize(operationData[0x4]) * (gl_SubgroupInvocationID & 0x07) + 1;
 
-				imageStore(structure, unpackAddress(address), uvec4(unserialiseUint32(begin)));
+				imageStore(structure, unpackAddress(address), uvec4(deserialiseUint32(begin)));
 			}
 			else if (subgroupAll(opcode == 0x5)) { // STR_CLD_S
 				begin += unpackSingleSize(operationData[0x5]) * (gl_SubgroupInvocationID & 0x07) + 1;
 
-				const uint address = unserialiseUint24(begin);
+				const uint address = deserialiseUint24(begin);
 
-				imageStore(structure, unpackAddress(address), uvec4((imageLoad(structure, unpackAddress(address)).x & 0xFFFFFF00) | unserialiseUint8(begin)));
+				imageStore(structure, unpackAddress(address), uvec4((imageLoad(structure, unpackAddress(address)).x & 0xFFFFFF00) | deserialiseUint8(begin)));
 			}
 			else if (subgroupAll(opcode == 0x6)) { // STR_PNT_S
 				begin += unpackSingleSize(operationData[0x6]) * (gl_SubgroupInvocationID & 0x07) + 1;
 
-				const uint address = unserialiseUint24(begin);
+				const uint address = deserialiseUint24(begin);
 
-				imageStore(structure, unpackAddress(address), uvec4((unserialiseUint24(begin) << 8) | (imageLoad(structure, unpackAddress(address)).x & 0x000000FF)));
+				imageStore(structure, unpackAddress(address), uvec4((deserialiseUint24(begin) << 8) | (imageLoad(structure, unpackAddress(address)).x & 0x000000FF)));
 			}
 			else if (subgroupAll(opcode == 0x7)) { // STR_LOA_S
 				begin += unpackSingleSize(operationData[0x7]) * (gl_SubgroupInvocationID & 0x07) + 1;
 				
-				const uint address = unserialiseUint24(begin);
+				const uint address = deserialiseUint24(begin);
 				
 				begin += 3;
 				
-				imageStore(structure, unpackAddress(address), uvec4(unserialiseUint32(begin)));
+				imageStore(structure, unpackAddress(address), uvec4(deserialiseUint32(begin)));
 			}
 			else if (subgroupAll(opcode == 0x8)) { // MAT_LOA_M
-				const uint address = unserialiseUint24(begin) | (gl_SubgroupInvocationID & 0x07);
+				const uint address = deserialiseUint24(begin) | (gl_SubgroupInvocationID & 0x07);
 
 				begin += unpackSingleSize(operationData[0x8]) * (gl_SubgroupInvocationID & 0x07) + 1;
 
-				imageStore(material, unpackAddress(address), uvec4(unserialiseUint32(begin), unserialiseUint32(begin + 4), unserialiseUint32(begin + 8), unserialiseUint32(begin + 12)));
+				imageStore(material, unpackAddress(address), uvec4(deserialiseUint32(begin), deserialiseUint32(begin + 4), deserialiseUint32(begin + 8), deserialiseUint32(begin + 12)));
 			}
 			else if (subgroupAll(opcode == 0x9)) { // MAT_xxL_S
 				begin += unpackSingleSize(operationData[0x9]) * (gl_SubgroupInvocationID & 0x07) + 1;
 
-				const uint address = unserialiseUint24(begin);
+				const uint address = deserialiseUint24(begin);
 
 				const uvec4 oldMaterial = imageLoad(material, unpackAddress(address));
 
-				imageStore(material, unpackAddress(address), uvec4(oldMaterial.xyz, unserialiseUint32(begin)));
+				imageStore(material, unpackAddress(address), uvec4(oldMaterial.xyz, deserialiseUint32(begin)));
 			}
 			else if (subgroupAll(opcode == 0xA)) { // MAT_xSx_S
 				begin += unpackSingleSize(operationData[0xA]) * (gl_SubgroupInvocationID & 0x07) + 1;
 
-				const uint address = unserialiseUint24(begin);
+				const uint address = deserialiseUint24(begin);
 
 				const uvec4 oldMaterial = imageLoad(material, unpackAddress(address));
 
-				imageStore(material, unpackAddress(address), uvec4(oldMaterial.xy, unserialiseUint32(begin), oldMaterial.z));
+				imageStore(material, unpackAddress(address), uvec4(oldMaterial.xy, deserialiseUint32(begin), oldMaterial.z));
 			}
 			else if (subgroupAll(opcode == 0xB)) { // MAT_xSL_S
 				begin += unpackSingleSize(operationData[0xB]) * (gl_SubgroupInvocationID & 0x07) + 1;
 
-				const uint address = unserialiseUint24(begin);
+				const uint address = deserialiseUint24(begin);
 
 				const uvec4 oldMaterial = imageLoad(material, unpackAddress(address));
 
-				imageStore(material, unpackAddress(address), uvec4(oldMaterial.xy, unserialiseUint32(begin), unserialiseUint32(begin + 4)));
+				imageStore(material, unpackAddress(address), uvec4(oldMaterial.xy, deserialiseUint32(begin), deserialiseUint32(begin + 4)));
 			}
 			else if (subgroupAll(opcode == 0xC)) { // MAT_Cxx_S
 				begin += unpackSingleSize(operationData[0xC]) * (gl_SubgroupInvocationID & 0x07) + 1;
 
-				const uint address = unserialiseUint24(begin);
+				const uint address = deserialiseUint24(begin);
 
 				const uvec4 oldMaterial = imageLoad(material, unpackAddress(address));
 
-				imageStore(material, unpackAddress(address), uvec4(unserialiseUint32(begin), unserialiseUint32(begin + 4), oldMaterial.zw));
+				imageStore(material, unpackAddress(address), uvec4(deserialiseUint32(begin), deserialiseUint32(begin + 4), oldMaterial.zw));
 			}
 			else if (subgroupAll(opcode == 0xD)) { // MAT_CxL_S
 				begin += unpackSingleSize(operationData[0xD]) * (gl_SubgroupInvocationID & 0x07) + 1;
 
-				const uint address = unserialiseUint24(begin);
+				const uint address = deserialiseUint24(begin);
 
 				const uvec4 oldMaterial = imageLoad(material, unpackAddress(address));
 
-				imageStore(material, unpackAddress(address), uvec4(unserialiseUint32(begin), unserialiseUint32(begin + 4), oldMaterial.z, unserialiseUint32(begin + 8)));
+				imageStore(material, unpackAddress(address), uvec4(deserialiseUint32(begin), deserialiseUint32(begin + 4), oldMaterial.z, deserialiseUint32(begin + 8)));
 			}
 			else if (subgroupAll(opcode == 0xE)) { // MAT_CSx_S
 				begin += unpackSingleSize(operationData[0xE]) * (gl_SubgroupInvocationID & 0x07) + 1;
 
-				const uint address = unserialiseUint24(begin);
+				const uint address = deserialiseUint24(begin);
 
 				const uvec4 oldMaterial = imageLoad(material, unpackAddress(address));
 
-				imageStore(material, unpackAddress(address), uvec4(unserialiseUint32(begin), unserialiseUint32(begin + 4), unserialiseUint32(begin + 8), oldMaterial.w));
+				imageStore(material, unpackAddress(address), uvec4(deserialiseUint32(begin), deserialiseUint32(begin + 4), deserialiseUint32(begin + 8), oldMaterial.w));
 			}
 			else if (subgroupAll(opcode == 0xF)) { // MAT_LOA_S
 				begin += unpackSingleSize(operationData[0xF]) * (gl_SubgroupInvocationID & 0x07) + 1;
 
-				const uint address = unserialiseUint24(begin);
+				const uint address = deserialiseUint24(begin);
 
-				imageStore(material, unpackAddress(address), uvec4(unserialiseUint32(begin), unserialiseUint32(begin + 4), unserialiseUint32(begin + 8), unserialiseUint32(begin + 12)));
+				imageStore(material, unpackAddress(address), uvec4(deserialiseUint32(begin), deserialiseUint32(begin + 4), deserialiseUint32(begin + 8), deserialiseUint32(begin + 12)));
 			}
 		}
 	}

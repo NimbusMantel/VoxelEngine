@@ -4,8 +4,6 @@
 
 #define VOX_STRUCTURE(children, mask) uint32_t((uint32_t(!bool(children)) << 31) | ((children & 0x001FFFFF) << 8) | (mask & 0xFF))
 
-typedef uint32_t uint24_t;
-
 namespace voxels {
 	uint8_t* init(size_t subgroupSize);
 

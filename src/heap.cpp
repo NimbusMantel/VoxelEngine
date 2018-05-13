@@ -3,59 +3,75 @@
 #include <intrin.h>
 #include <utility>
 
-#include <iostream>
+#define serialiseUint24(memory, data) memory[0] = (memory[0] & 0x80) | ((data >> 16) & 0x7F); memory[1] = data >> 8; memory[2] = data;
+#define deserialiseUint24(memory) (((memory[0] & 0x7F) << 16) | (memory[1] << 8) | memory[2])
+#define copyUint24(dst, src) dst[0] = (dst[0] & 0x80) | (src[0] & 0x7F); dst[1] = src[1]; dst[2] = src[2];
+#define markUint24(mark) mark |= 0x80;
+#define unmarkUint24(mark) mark &= 0x7F;
+#define flipMarkUint24(mark) mark ^= 0x80;
+#define getMarkUint24(mark) (mark & 0x80)
 
-const uint32_t mask = 0x00049249;
+const uint24_t mask = 0x049249;
 
-uint32_t* const dequeue = new uint32_t[voxels::size << 1];
+struct SiblingGroup {
+	uint8_t prev[3];
 
-std::pair<uint32_t, uint32_t> pivot(uint32_t(voxels::size - 1), 0U);
+	union {
+		uint8_t next[3];
+		uint8_t mark;
+	};
+};
+
+SiblingGroup* const dequeue = new SiblingGroup[voxels::size];
+
+std::pair<uint24_t, uint24_t> pivot(uint24_t(voxels::size - 1), 0U);
 
 uint8_t* const visibility = new uint8_t[voxels::size];
 
 namespace voxels {
 	uint8_t* init() {
-		uint32_t prev = voxels::size - 1;
-		uint32_t curr = 0;
-		uint32_t next = 1;
+		uint24_t prev = voxels::size - 1;
+		uint24_t curr = 0;
+		uint24_t next = 1;
 
-		dequeue[0] = prev << 11;
-		dequeue[1] = 0x80000000 | next;
+		serialiseUint24(dequeue[0].prev, prev);
+		serialiseUint24(dequeue[0].next, next);
+		markUint24(dequeue[0].mark);
 
 		for (uint32_t i = 1; i < (voxels::size - 1); i++) {
 			prev = curr;
 			curr = next;
 			next = (_pext_u32(i + 1, mask << 2) << 14) | (_pext_u32(i + 1, mask << 1) << 7) | _pext_u32(i + 1, mask);
 
-			dequeue[(curr << 1) | 0x00] = prev << 11;
-			dequeue[(curr << 1) | 0x01] = next;
+			serialiseUint24(dequeue[curr].prev, prev);
+			serialiseUint24(dequeue[curr].next, next);
 		}
 
 		prev = curr;
 		curr = voxels::size - 1;
 		next = 0;
 
-		dequeue[(curr << 1) | 0x00] = prev << 11;
-		dequeue[(curr << 1) | 0x01] = next;
+		serialiseUint24(dequeue[curr].prev, prev);
+		serialiseUint24(dequeue[curr].next, next);
 
 		return visibility;
 	}
 
-	uint32_t allocate(uint32_t parent) {
-		const uint32_t next = dequeue[1] & 0x001FFFFF;
+	uint32_t allocate() {
+		const uint24_t next = deserialiseUint24(dequeue[0].next);
 
 		// TO DO: deallocate if necessary
+		
+		copyUint24(dequeue[0].next, dequeue[next].next);
+		const uint24_t dnext = deserialiseUint24(dequeue[next].next);
+		serialiseUint24(dequeue[dnext].prev, 0);
 
-		dequeue[1] = 0x80000000 | (dequeue[(next << 1) | 0x01] & 0x001FFFFF);
-		dequeue[(dequeue[(next << 1) | 0x01] & 0x001FFFFF) << 1] &= 0x000007FF;
+		serialiseUint24(dequeue[next].prev, pivot.first);
+		serialiseUint24(dequeue[next].next, pivot.second);
+		markUint24(dequeue[next].mark);
 
-		parent >>= 3;
-
-		dequeue[(next << 1) | 0x00] = (pivot.first << 11) | (parent >> 10);
-		dequeue[(next << 1) | 0x01] = 0x80000000 | (parent << 21) | pivot.second;
-
-		dequeue[(pivot.first << 1) | 0x01] = (dequeue[(pivot.first << 1) | 0x01] & 0xFFE00000) | next;
-		dequeue[(pivot.second << 1) | 0x0] = (next << 11) | (dequeue[(pivot.second << 1) | 0x0] & 0x000007FF);
+		serialiseUint24(dequeue[pivot.first].next, next);
+		serialiseUint24(dequeue[pivot.second].prev, next);
 
 		pivot.second = next;
 
@@ -63,22 +79,34 @@ namespace voxels {
 	}
 
 	void process() {
-		// TO DO
+		bool prev;
+		uint8_t curr;
 
-		/*uint8_t* begin = visibility;
-		uint8_t* pointer = begin;
-		uint8_t* end = begin + size;
+		for (uint24_t i = 0; i < voxels::size; i++) {
+			prev = getMarkUint24(dequeue[i].mark);
+			curr = visibility[i];
 
-		std::cout << "Visible voxels: ";
+			if (prev != bool(curr)) {
+				const uint24_t qprev = deserialiseUint24(dequeue[i].prev);
+				const uint24_t qnext = deserialiseUint24(dequeue[i].next);
 
-		while (pointer < end) {
-			if (*pointer != 0x00) {
-				printf("%u(0x%02X) ", uint32_t(pointer - begin), *pointer);
+				serialiseUint24(dequeue[qprev].next, qnext);
+				serialiseUint24(dequeue[qnext].prev, qprev);
+
+				serialiseUint24(dequeue[i].prev, pivot.first);
+				serialiseUint24(dequeue[i].next, pivot.second);
+				flipMarkUint24(dequeue[i].mark);
+
+				serialiseUint24(dequeue[pivot.first].next, i);
+				serialiseUint24(dequeue[pivot.second].prev, i);
+
+				if (prev) {
+					pivot.first = i;
+				}
+				else {
+					pivot.second = i;
+				}
 			}
-
-			pointer++;
 		}
-
-		std::cout << std::endl;*/
 	}
 }

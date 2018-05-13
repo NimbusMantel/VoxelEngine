@@ -5,7 +5,7 @@
 namespace voxels {
 	uint8_t* init();
 
-	uint32_t allocate(uint32_t parent);
+	uint32_t allocate();
 
 	void process();
 }
