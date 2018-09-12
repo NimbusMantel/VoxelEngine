@@ -1,0 +1,1 @@
+spirv-as -o test.spv test.dis && spirv-val --target-env vulkan1.1 test.spv
