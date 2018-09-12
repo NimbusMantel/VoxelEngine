@@ -10,53 +10,43 @@
 #extension GL_KHR_shader_subgroup_clustered : require
 #extension GL_KHR_shader_subgroup_shuffle_relative : require
 
-layout(local_size_x = 32, local_size_y = 32) in;
+void subgroupOctRayIntersectUnits(in const vec3 a, in const vec3 d0, out precise vec3 i0, out precise vec3 i1) {
+    const uint cid = gl_SubgroupInvocationID & 7U;
 
-#define RAY_LEN 8U
-#define RAY_MOD 7U
+    precise const vec3 d0_inv = 1.0 / d0;
+    precise const float d0_dot_inv = 1.0 / dot(d0, vec3(1.0));
+    precise const float a_max = max(max(a.x, a.y), a.z);
 
-void main() {
-    const uint clusterID = gl_SubgroupInvocationID & RAY_MOD;
+    precise vec3 v0 = fma(-a, d0_inv, round(fma(d0, vec3((fma(cid, 3.0, 1.0) - a_max) * d0_dot_inv), a)));
+    precise vec3 v1 = fma(-a, d0_inv, round(fma(d0, vec3((fma(cid, 3.0, 2.0) - a_max) * d0_dot_inv), a)));
+    precise vec3 v2 = fma(-a, d0_inv, round(fma(d0, vec3((fma(cid, 3.0, 3.0) - a_max) * d0_dot_inv), a)));
 
-    /* INPUTS */
-    precise vec3 x0, off;
-    uint sca;
+    precise const float t0 = max(max(v0.x, v0.y), v0.z);
+    precise const float t1 = max(max(v1.x, v1.y), v1.z);
+    precise const float t2 = max(max(v2.x, v2.y), v2.z);
 
-    precise vec3 x0_inv = 1.0 / x0;
-    precise float x0_dot_inv = 1.0 / dot(x0, vec3(1.0));
-    precise float off_max = max(max(off.x, off.y), off.z);
+    v0 = floor(fma(d0, vec3(t0), a));
+    v1 = floor(fma(d0, vec3(t1), a));
+    v2 = floor(fma(d0, vec3(t2), a));
 
-    precise vec3 v0 = fma(-off, x0_inv, round(fma(x0, vec3((fma(clusterID, 3.0, 1.0) - off_max) * x0_dot_inv), off)));
-    precise vec3 v1 = fma(-off, x0_inv, round(fma(x0, vec3((fma(clusterID, 3.0, 2.0) - off_max) * x0_dot_inv), off)));
-    precise vec3 v2 = fma(-off, x0_inv, round(fma(x0, vec3((fma(clusterID, 3.0, 3.0) - off_max) * x0_dot_inv), off)));
-
-    precise float d0 = max(max(v0.x, v0.y), v0.z);
-    precise float d1 = max(max(v1.x, v1.y), v1.z);
-    precise float d2 = max(max(v2.x, v2.y), v2.z);
-
-    v0 = uintBitsToFloat((floatBitsToUint(fma(x0, vec3(d0), off)) >> sca) << sca);
-    v1 = uintBitsToFloat((floatBitsToUint(fma(x0, vec3(d1), off)) >> sca) << sca);
-    v2 = uintBitsToFloat((floatBitsToUint(fma(x0, vec3(d2), off)) >> sca) << sca);
-
-    bool u0 = (subgroupShuffle(v0, (clusterID + RAY_MOD) & RAY_MOD) != v0);
-    bool u1 = (v0 != v1);
-    bool u2 = (v1 != v2);
+    const bool u0 = (subgroupShuffle(v2, (cid + 7U) & 7U) != v0);
+    const bool u1 = (v0 != v1);
+    const bool u2 = (v1 != v2);
 
     uint o = subgroupInclusiveAdd(uint(u0) + uint(u1) + uint(u2));
-    o -= subgroupShuffle(o, gl_SubgroupInvocationID - RAY_MOD);
+    o -= subgroupShuffle(o, gl_SubgroupInvocationID - cid);
 
-    uvec4 res[2];
+    uvec4 acc[2];
 
-    res[o & 1U][o >> 1U] = (u0 && o < RAY_MOD) ? floatBitsToUint(d0) : res[o & 1U][o >> 1U];
+    acc[o & 1U][o >> 1U] = (u0 && o < 8U) ? floatBitsToUint(t0) : acc[o & 1U][o >> 1U];
     o += uint(u0);
-    res[o & 1U][o >> 1U] = (u1 && o < RAY_MOD) ? floatBitsToUint(d1) : res[o & 1U][o >> 1U];
+    acc[o & 1U][o >> 1U] = (u1 && o < 8U) ? floatBitsToUint(t1) : acc[o & 1U][o >> 1U];
     o += uint(u1);
-    res[o & 1U][o >> 1U] = (u2 && o < RAY_MOD) ? floatBitsToUint(d2) : res[o & 1U][o >> 1U];
+    acc[o & 1U][o >> 1U] = (u2 && o < 8U) ? floatBitsToUint(t2) : acc[o & 1U][o >> 1U];
 
-    res[0] = subgroupClusteredOr(res[0], RAY_LEN);
-    res[1] = subgroupClusteredOr(res[1], RAY_LEN);
+    acc[0] = subgroupClusteredOr(acc[0], 8U);
+    acc[1] = subgroupClusteredOr(acc[1], 8U);
 
-    /* OUTPUTS */
-    precise vec3 vxt = uintBitsToFloat((floatBitsToUint(fma(x0, vec3(uintBitsToFloat(res[clusterID >> 1U][clusterID & 1U])), off)) >> sca) << sca);
-    precise vec3 vxf = (clusterID == 0) ? off : subgroupShuffleUp(vxt, 1U);
+    i1 = floor(fma(d0, vec3(uintBitsToFloat(acc[cid >> 1U][cid & 1U])), a));
+    i0 = (cid == 0) ? a : subgroupShuffleUp(i1, 1U);
 }
