@@ -2,51 +2,55 @@
 
 #extension GL_KHR_vulkan_glsl : enable
 
-#extension GL_ARB_separate_shader_objects : require
-
 #extension GL_KHR_shader_subgroup_basic : require
 #extension GL_KHR_shader_subgroup_shuffle : require
 #extension GL_KHR_shader_subgroup_arithmetic : require
+#extension GL_ARB_gpu_shader_int64 : require
 #extension GL_KHR_shader_subgroup_clustered : require
-#extension GL_KHR_shader_subgroup_shuffle_relative : require
 
-void subgroupOctRayIntersectUnits(in const vec3 a, in const vec3 d0, out precise vec3 i0, out precise vec3 i1) {
+void/*precise vec3*/ main/*subgroupOctVoxelIntersections*/(/*const vec3 d0, const vec3 i0, const uint sca*/) {
     const uint cid = gl_SubgroupInvocationID & 7U;
 
+    vec3 d0;
+    vec3 i0;
+    uint sca;
+
     precise const vec3 d0_inv = 1.0 / d0;
-    precise const float d0_dot_inv = 1.0 / dot(d0, vec3(1.0));
-    precise const float a_max = max(max(a.x, a.y), a.z);
 
-    precise vec3 v0 = fma(-a, d0_inv, round(fma(d0, vec3((fma(cid, 3.0, 1.0) - a_max) * d0_dot_inv), a)));
-    precise vec3 v1 = fma(-a, d0_inv, round(fma(d0, vec3((fma(cid, 3.0, 2.0) - a_max) * d0_dot_inv), a)));
-    precise vec3 v2 = fma(-a, d0_inv, round(fma(d0, vec3((fma(cid, 3.0, 3.0) - a_max) * d0_dot_inv), a)));
+    precise const vec3 i0_off = (i0 - uintBitsToFloat((floatBitsToUint(i0) >> sca) << sca)) * d0_inv;
+    precise const float i0_off_max = min(min(i0_off.x, i0_off.y), i0_off.z);
 
-    precise const float t0 = max(max(v0.x, v0.y), v0.z);
-    precise const float t1 = max(max(v1.x, v1.y), v1.z);
-    precise const float t2 = max(max(v2.x, v2.y), v2.z);
+    precise const float d0_dot_inv = pow(2.0, 23 - sca) / dot(d0, vec3(1.0));
 
-    v0 = floor(fma(d0, vec3(t0), a));
-    v1 = floor(fma(d0, vec3(t1), a));
-    v2 = floor(fma(d0, vec3(t2), a));
+    precise const vec3 gs = (vec3(fma(cid, 3.0, -i0_off_max)) + vec3(1.0, 2.0, 3.0)) * d0_dot_inv;
 
-    const bool u0 = (subgroupShuffle(v2, (cid + 7U) & 7U) != v0);
-    const bool u1 = (v0 != v1);
-    const bool u2 = (v1 != v2);
+    precise const vec3 s0 = floatBitsToUint(fma(d0, gs.xxx, i0)) >> sca;
+    precise const vec3 s1 = floatBitsToUint(fma(d0, gs.yyy, i0)) >> sca;
+    precise const vec3 s2 = floatBitsToUint(fma(d0, gs.zzz, i0)) >> sca;
+
+    const bool u0 = (subgroupShuffle(s2, (cid + 7U) & 7U) != s0);
+    const bool u1 = (s0 != s1);
+    const bool u2 = (s1 != s2);
 
     uint o = subgroupInclusiveAdd(uint(u0) + uint(u1) + uint(u2));
     o -= subgroupShuffle(o, gl_SubgroupInvocationID - cid);
+    o <<= 3U;
 
-    uvec4 acc[2];
+    uint64_t acc = 0U;
 
-    acc[o & 1U][o >> 1U] = (u0 && o < 8U) ? floatBitsToUint(t0) : acc[o & 1U][o >> 1U];
+    acc |= (u0 && o < 64U) ? (uint64_t(fma(cid, 3.0, 1.0)) << o) : 0U;
     o += uint(u0);
-    acc[o & 1U][o >> 1U] = (u1 && o < 8U) ? floatBitsToUint(t1) : acc[o & 1U][o >> 1U];
-    o += uint(u1);
-    acc[o & 1U][o >> 1U] = (u2 && o < 8U) ? floatBitsToUint(t2) : acc[o & 1U][o >> 1U];
+    acc |= (u1 && o < 64U) ? (uint64_t(fma(cid, 3.0, 2.0)) << o) : 0U;
+    o += uint(u0);
+    acc |= (u2 && o < 64U) ? (uint64_t(fma(cid, 3.0, 3.0)) << o) : 0U;
 
-    acc[0] = subgroupClusteredOr(acc[0], 8U);
-    acc[1] = subgroupClusteredOr(acc[1], 8U);
+    acc = packUint2x32(subgroupClusteredOr(unpackUint2x32(acc), 8U));
 
-    i1 = floor(fma(d0, vec3(uintBitsToFloat(acc[cid >> 1U][cid & 1U])), a));
-    i0 = (cid == 0) ? a : subgroupShuffleUp(i1, 1U);
+    acc = (acc >> (cid << 3U)) & 0xFF;
+
+    precise const vec3 sx = uintBitsToFloat((floatBitsToUint(fma(d0, vec3((float(acc) - i0_off_max) * d0_dot_inv), i0)) >> sca) << sca);
+    precise const vec3 tx = (sx - i0) * d0_inv;
+    precise const float c = min(min(tx.x, tx.y), tx.z);
+    precise const vec3 px = fma(d0, vec3(c), i0);
+    precise const vec3 ix/*return*/ = mix(clamp(px, sx, sx + pow(0.5, 23 - sca)), sx, equal(tx, vec3(c)));
 }
