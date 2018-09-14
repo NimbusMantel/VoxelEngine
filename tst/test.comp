@@ -39,9 +39,9 @@ void/*precise vec3*/ main/*subgroupOctVoxelIntersections*/(/*const vec3 d0, cons
     uint64_t acc = 0U;
 
     acc |= (u0 && o < 64U) ? (uint64_t(fma(cid, 3.0, 1.0)) << o) : 0U;
-    o += uint(u0);
+    o += uint(u0) * 8;
     acc |= (u1 && o < 64U) ? (uint64_t(fma(cid, 3.0, 2.0)) << o) : 0U;
-    o += uint(u0);
+    o += uint(u0) * 8;
     acc |= (u2 && o < 64U) ? (uint64_t(fma(cid, 3.0, 3.0)) << o) : 0U;
 
     acc = packUint2x32(subgroupClusteredOr(unpackUint2x32(acc), 8U));

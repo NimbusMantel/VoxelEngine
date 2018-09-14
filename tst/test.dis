@@ -1,246 +1,248 @@
 ; SPIR-V
 ; Version: 1.3
 ; Generator: Moritz Langenstein
-; Bound: 154
+; Bound: 146
 ; Schema: 0
 
 ; Capabilities
-               OpCapability Shader
                OpCapability Linkage
+               OpCapability Shader
                OpCapability GroupNonUniform
-               OpCapability GroupNonUniformArithmetic
                OpCapability GroupNonUniformShuffle
-               OpCapability GroupNonUniformShuffleRelative
+               OpCapability GroupNonUniformArithmetic
+               OpCapability Int64
                OpCapability GroupNonUniformClustered
 
 ; GLSL 4.5 extended instruction set + logical memory model
        %glsl = OpExtInstImport "GLSL.std.450"
                OpMemoryModel Logical GLSL450
 
-; Export function void subgroupOctRayIntersectUnits(const vec3 a, const vec3 d0, out vec3 i0, out vec3 i1)
-               OpDecorate %soriu LinkageAttributes "subgroupOctRayIntersectUnits" Export
+; Export function precise vec3 subgroupOctVoxelIntersections(const vec3 d0, const vec3 i0, const uint sca)
+               OpDecorate %sovi LinkageAttributes "subgroupOctVoxelIntersections" Export
 
 ; ID Decorations
-
                OpDecorate %sid RelaxedPrecision
                OpDecorate %sid BuiltIn SubgroupLocalInvocationId
                OpDecorate %2 RelaxedPrecision
                OpDecorate %cid RelaxedPrecision
-               OpDecorate %d0_inv NoContraction
+               OpDecorate %8 NoContraction
+               OpDecorate %14 NoContraction
+               OpDecorate %15 NoContraction
+               OpDecorate %16 NoContraction
                OpDecorate %d0_dot_inv NoContraction
-               OpDecorate %d0_nrm_dot NoContraction
-               OpDecorate %p0 NoContraction
-               OpDecorate %p1 NoContraction
-               OpDecorate %p2 NoContraction
-               OpDecorate %v0 NoContraction
-               OpDecorate %v1 NoContraction
-               OpDecorate %v2 NoContraction
+               OpDecorate %19 NoContraction
+               OpDecorate %21 NoContraction
+               OpDecorate %gs NoContraction
+               OpDecorate %24 NoContraction
+               OpDecorate %27 NoContraction
+               OpDecorate %30 NoContraction
+               OpDecorate %32 RelaxedPrecision
+               OpDecorate %33 RelaxedPrecision
+               OpDecorate %44 RelaxedPrecision
+               OpDecorate %45 RelaxedPrecision
+               OpDecorate %69 RelaxedPrecision
+               OpDecorate %72 NoContraction
+               OpDecorate %73 NoContraction
+               OpDecorate %75 NoContraction
+               OpDecorate %80 NoContraction
+               OpDecorate %tx NoContraction
+               OpDecorate %87 NoContraction
+               OpDecorate %88 NoContraction
+               OpDecorate %90 NoContraction
 
 ; Value type declarations
-       %void = OpTypeVoid
       %float = OpTypeFloat 32
-    %v3float = OpTypeVector %float 3
        %uint = OpTypeInt 32 0
-     %v4uint = OpTypeVector %uint 4
        %bool = OpTypeBool
-     %v3bool = OpTypeVector %bool 3
+      %ulong = OpTypeInt 64 0
 
 ; Constant value declarations
+    %float_1 = OpConstant %float 1
+    %float_2 = OpConstant %float 2
+    %float_3 = OpConstant %float 3
+   %float_23 = OpConstant %float 23
      %uint_0 = OpConstant %uint 0
-     %uint_1 = OpConstant %uint 1
      %uint_2 = OpConstant %uint 2
      %uint_3 = OpConstant %uint 3
      %uint_7 = OpConstant %uint 7
      %uint_8 = OpConstant %uint 8
-    %float_1 = OpConstant %float 1
-    %float_2 = OpConstant %float 2
-    %float_3 = OpConstant %float 3
+    %uint_64 = OpConstant %uint 64
+    %ulong_0 = OpConstant %ulong 0
+   %ulong_FF = OpConstant %ulong 0xFF
+
+; Composite type declarations
+    %v3float = OpTypeVector %float 3
+     %v2uint = OpTypeVector %uint 2
+     %v3uint = OpTypeVector %uint 3
+     %v3bool = OpTypeVector %bool 3
+
+; Constant composite declarations
+     %v3float_1 = OpConstantComposite %v3float %float_1 %float_1 %float_1
+ %v3float_1_2_3 = OpConstantComposite %v3float %float_1 %float_2 %float_3
 
 ; Reference type declarations
-         %ptr_v3float = OpTypePointer Function %v3float
-          %ptr_uint_I = OpTypePointer Input %uint
-    %arr_v4uint_uint2 = OpTypeArray %v4uint %uint_2
-%ptr_arr_v4uint_uint2 = OpTypePointer Function %arr_v4uint_uint2
-            %ptr_uint = OpTypePointer Function %uint
-          %ptr_v4uint = OpTypePointer Function %v4uint
-
-; Constant reference declarations
-         %v3float_1 = OpConstantComposite %v3float %float_1 %float_1 %float_1
-          %v4uint_0 = OpConstantComposite %v4uint %uint_0 %uint_0 %uint_0 %uint_0
-%arr_v4uint_0_uint2 = OpConstantComposite %arr_v4uint_uint2 %v4uint_0 %v4uint_0
+ %ptr_uint_I = OpTypePointer Input %uint
 
 ; Variable declarations
         %sid = OpVariable %ptr_uint_I Input
 
 ; Function declaration
-  %fun_soriu = OpTypeFunction %void %v3float %v3float %ptr_v3float %ptr_v3float
-      %soriu = OpFunction %void Inline|Const %fun_soriu
-          %a = OpFunctionParameter %v3float
+   %fun_sovi = OpTypeFunction %v3float %v3float %v3float %uint
+       %sovi = OpFunction %v3float Inline|Const %fun_sovi
          %d0 = OpFunctionParameter %v3float
-         %i0 = OpFunctionParameter %ptr_v3float
-         %i1 = OpFunctionParameter %ptr_v3float
+         %i0 = OpFunctionParameter %v3float
+        %sca = OpFunctionParameter %uint
 
 ; Function definition begin
           %1 = OpLabel
-
-; Initialize the accumulator array
-        %acc = OpVariable %ptr_arr_v4uint_uint2 Function %arr_v4uint_0_uint2
 
 ; Calculate the clusterID
           %2 = OpLoad %uint %sid
         %cid = OpBitwiseAnd %uint %2 %uint_7
 
-; Calculate d0_inv, d0_dot_inv, d0_nrm_dot and a_max
-     %d0_inv = OpFDiv %v3float %v3float_1 %d0
-          %3 = OpDot %float %d0 %v3float_1
- %d0_dot_inv = OpFDiv %float %float_1 %3
-          %4 = OpCompositeConstruct %v3float %d0_dot_inv %d0_dot_inv %d0_dot_inv
- %d0_nrm_dot = OpFMul %v3float %d0 %4
-          %5 = OpCompositeExtract %float %a 0
-          %6 = OpCompositeExtract %float %a 1
-          %7 = OpExtInst %float %glsl FMax %5 %6
-          %8 = OpCompositeExtract %float %a 2
-      %a_max = OpExtInst %float %glsl FMax %7 %8
+; Calculate i0_off_max
+          %3 = OpBitcast %v3uint %i0
+          %4 = OpCompositeConstruct %v3uint %sca %sca %sca
+          %5 = OpShiftRightLogical %v3uint %3 %4
+          %6 = OpShiftLeftLogical %v3uint %5 %4
+          %7 = OpBitcast %v3float %6
+          %8 = OpFDiv %v3float %7 %d0
+          %9 = OpCompositeExtract %float %8 0
+         %10 = OpCompositeExtract %float %8 1
+         %11 = OpExtInst %float %glsl FMin %9 %10
+         %12 = OpCompositeExtract %float %8 2
+ %i0_off_max = OpExtInst %float %glsl FMin %11 %12
 
-; Calculate the intersection distances on all axis
-          %9 = OpConvertUToF %float %cid
-         %10 = OpExtInst %float %glsl Fma %9 %float_3 %float_1
-         %11 = OpFSub %float %10 %a_max
-         %12 = OpFMul %float %11 %d0_dot_inv
-         %13 = OpCompositeConstruct %v3float %12 %12 %12
-         %14 = OpExtInst %v3float %glsl Fma %d0 %13 %a
-         %15 = OpExtInst %v3float %glsl Round %14
-         %16 = OpFNegate %v3float %a
-         %p0 = OpExtInst %v3float %glsl Fma %16 %d0_inv %15
+; Calculate d0_dot_inv
+         %13 = OpConvertUToF %float %sca
+         %14 = OpFSub %float %float_23 %13
+         %15 = OpExtInst %float %glsl Exp2 %14
+         %16 = OpDot %float %d0 %v3float_1
+ %d0_dot_inv = OpFDiv %float %15 %16
 
-         %17 = OpFAdd %v3float %13 %d0_nrm_dot
-         %18 = OpExtInst %v3float %glsl Fma %d0 %17 %a
-         %19 = OpExtInst %v3float %glsl Round %18
-         %p1 = OpExtInst %v3float %glsl Fma %16 %d0_inv %19
+; Approximate the sample distances
+         %17 = OpConvertUToF %float %cid
+         %18 = OpFNegate %float %i0_off_max
+         %19 = OpExtInst %float %glsl Fma %17 %float_3 %18
+         %20 = OpCompositeConstruct %v3float %19 %19 %19
+         %21 = OpFAdd %v3float %20 %v3float_1_2_3
+         %gs = OpVectorTimesScalar %v3float %21 %d0_dot_inv
 
-         %20 = OpFAdd %v3float %17 %d0_nrm_dot
-         %21 = OpExtInst %v3float %glsl Fma %d0 %20 %a
-         %22 = OpExtInst %v3float %glsl Round %21
-         %p2 = OpExtInst %v3float %glsl Fma %16 %d0_inv %22
+; Calculate the intersection voxels
+         %22 = OpCompositeConstruct %v3uint %sca %sca %sca
 
-; Find the maximum intersection distances
-         %23 = OpCompositeExtract %float %p0 0
-         %24 = OpCompositeExtract %float %p0 1
-         %25 = OpExtInst %float %glsl FMax %23 %24
-         %26 = OpCompositeExtract %float %p0 2
-         %t0 = OpExtInst %float %glsl FMax %25 %26
+         %23 = OpVectorShuffle %v3float %gs %gs 0 0 0
+         %24 = OpExtInst %v3float %glsl Fma %d0 %23 %i0
+         %25 = OpBitcast %v3uint %24
+         %s0 = OpShiftRightLogical %v3uint %25 %22
 
-         %27 = OpCompositeExtract %float %p1 0
-         %28 = OpCompositeExtract %float %p1 1
-         %29 = OpExtInst %float %glsl FMax %27 %28
-         %30 = OpCompositeExtract %float %p1 2
-         %t1 = OpExtInst %float %glsl FMax %29 %30
+         %26 = OpVectorShuffle %v3float %gs %gs 1 1 1
+         %27 = OpExtInst %v3float %glsl Fma %d0 %26 %i0
+         %28 = OpBitcast %v3uint %27
+         %s1 = OpShiftRightLogical %v3uint %28 %22
 
-         %31 = OpCompositeExtract %float %p2 0
-         %32 = OpCompositeExtract %float %p2 1
-         %33 = OpExtInst %float %glsl FMax %31 %32
-         %34 = OpCompositeExtract %float %p2 2
-         %t2 = OpExtInst %float %glsl FMax %33 %34
-
-; Round the intersection distances
-         %35 = OpCompositeConstruct %v3float %t0 %t0 %t0
-         %36 = OpExtInst %v3float %glsl Fma %d0 %35 %a
-         %v0 = OpExtInst %v3float %glsl Floor %36
-
-         %37 = OpCompositeConstruct %v3float %t1 %t1 %t1
-         %38 = OpExtInst %v3float %glsl Fma %d0 %37 %a
-         %v1 = OpExtInst %v3float %glsl Floor %38
-
-         %39 = OpCompositeConstruct %v3float %t2 %t2 %t2
-         %40 = OpExtInst %v3float %glsl Fma %d0 %39 %a
-         %v2 = OpExtInst %v3float %glsl Floor %40
+         %29 = OpVectorShuffle %v3float %gs %gs 2 2 2
+         %30 = OpExtInst %v3float %glsl Fma %d0 %29 %i0
+         %31 = OpBitcast %v3uint %30
+         %s2 = OpShiftRightLogical %v3uint %31 %22
 
 ; Check which intersections are unique
-         %41 = OpIAdd %uint %cid %uint_7
-         %42 = OpBitwiseAnd %uint %41 %uint_7
-         %43 = OpGroupNonUniformShuffle %v3float %uint_3 %v2 %42
-         %44 = OpFOrdNotEqual %v3bool %43 %v0
-         %u0 = OpAny %bool %44
-         %45 = OpFOrdNotEqual %v3bool %v0 %v1
-         %u1 = OpAny %bool %45
-         %46 = OpFOrdNotEqual %v3bool %v1 %v2
-         %u2 = OpAny %bool %46
+         %32 = OpIAdd %uint %cid %uint_7
+         %33 = OpBitwiseAnd %uint %32 %uint_7
+         %34 = OpGroupNonUniformShuffle %v3uint %uint_3 %s2 %33
+         %35 = OpINotEqual %v3bool %34 %s0
+         %u0 = OpAny %bool %35
+         %36 = OpINotEqual %v3bool %s0 %s1
+         %u1 = OpAny %bool %36
+         %37 = OpINotEqual %v3bool %s1 %s2
+         %u2 = OpAny %bool %37
 
 ; Calculate the insertion offset of intersections
-         %47 = OpSelect %uint %u0 %uint_1 %uint_0
-         %48 = OpSelect %uint %u1 %uint_1 %uint_0
-         %49 = OpIAdd %uint %47 %48
-         %50 = OpSelect %uint %u2 %uint_1 %uint_0
-         %51 = OpIAdd %uint %49 %50
-         %52 = OpGroupNonUniformIAdd %uint %uint_3 InclusiveScan %51
-         %53 = OpLoad %uint %sid
-         %54 = OpISub %uint %53 %uint_7
-         %55 = OpGroupNonUniformShuffle %uint %uint_3 %52 %54
-         %o0 = OpISub %uint %52 %55
+         %38 = OpSelect %uint %u0 %uint_8 %uint_0
+         %39 = OpSelect %uint %u1 %uint_8 %uint_0
+         %40 = OpIAdd %uint %38 %39
+         %41 = OpSelect %uint %u2 %uint_8 %uint_0
+         %42 = OpIAdd %uint %40 %41
+         %43 = OpGroupNonUniformIAdd %uint %uint_3 InclusiveScan %42
+         %44 = OpLoad %uint %sid
+         %45 = OpISub %uint %44 %cid
+         %46 = OpGroupNonUniformShuffle %uint %uint_3 %43 %45
+         %o0 = OpISub %uint %43 %46
 
-; Insert the intersections if unique
-         %56 = OpBitcast %uint %t0
-         %57 = OpBitwiseAnd %uint %o0 %uint_1
-         %58 = OpShiftRightLogical %uint %o0 %uint_1
-         %59 = OpAccessChain %ptr_uint %acc %57 %58
-         %60 = OpLoad %uint %59
-         %61 = OpULessThan %bool %o0 %uint_8
-         %62 = OpLogicalAnd %bool %u0 %61
-         %63 = OpSelect %uint %62 %56 %60
-               OpStore %59 %63
-         %64 = OpSelect %uint %u0 %uint_1 %uint_0
-         %o1 = OpIAdd %uint %o0 %64
+; Accumulate the unique intersection indices
+         %47 = OpConvertUToF %float %cid
+         
+         %48 = OpExtInst %float %glsl Fma %47 %float_3 %float_1
+         %49 = OpConvertFToU %ulong %48
+         %50 = OpShiftLeftLogical %ulong %49 %o0
+         %51 = OpULessThan %bool %o0 %uint_64
+         %52 = OpLogicalAnd %bool %u0 %51
+        %ac0 = OpSelect %ulong %52 %50 %ulong_0
+         %53 = OpSelect %uint %u0 %uint_8 %uint_0
+         %o1 = OpIAdd %uint %o0 %53
+         
+         %54 = OpExtInst %float %glsl Fma %47 %float_3 %float_2
+         %55 = OpConvertFToU %ulong %54
+         %56 = OpShiftLeftLogical %ulong %55 %o1
+         %57 = OpULessThan %bool %o1 %uint_64
+         %58 = OpLogicalAnd %bool %u1 %57
+         %59 = OpSelect %ulong %58 %56 %ulong_0
+        %ac1 = OpBitwiseOr %ulong %ac0 %59
+         %60 = OpSelect %uint %u1 %uint_8 %uint_0
+         %o2 = OpIAdd %uint %o1 %60
+         
+         %61 = OpExtInst %float %glsl Fma %47 %float_3 %float_3
+         %62 = OpConvertFToU %ulong %61
+         %63 = OpShiftLeftLogical %ulong %62 %o2
+         %64 = OpULessThan %bool %o2 %uint_64
+         %65 = OpLogicalAnd %bool %u2 %64
+         %66 = OpSelect %ulong %65 %63 %ulong_0
+        %ac2 = OpBitwiseOr %ulong %ac1 %66
 
-         %65 = OpBitcast %uint %t1
-         %66 = OpBitwiseAnd %uint %o1 %uint_1
-         %67 = OpShiftRightLogical %uint %o1 %uint_1
-         %68 = OpAccessChain %ptr_uint %acc %65 %66
-         %69 = OpLoad %uint %68
-         %70 = OpULessThan %bool %o1 %uint_8
-         %71 = OpLogicalAnd %bool %u1 %70
-         %72 = OpSelect %uint %71 %65 %69
-               OpStore %68 %72
-         %73 = OpSelect %uint %u1 %uint_1 %uint_0
-         %o2 = OpIAdd %uint %o1 %73
+         %67 = OpBitcast %v2uint %ac2
+         %68 = OpGroupNonUniformBitwiseOr %v2uint %uint_3 ClusteredReduce %67 %uint_8
+        %acx = OpBitcast %ulong %68
 
-         %74 = OpBitcast %uint %t2
-         %75 = OpBitwiseAnd %uint %o2 %uint_1
-         %76 = OpShiftRightLogical %uint %o2 %uint_1
-         %77 = OpAccessChain %ptr_uint %acc %74 %75
-         %78 = OpLoad %uint %77
-         %79 = OpULessThan %bool %o2 %uint_8
-         %80 = OpLogicalAnd %bool %u2 %79
-         %81 = OpSelect %uint %80 %74 %78
-               OpStore %77 %81
+; Extract the assigned unique intersection index
+         %69 = OpShiftLeftLogical %uint %cid %uint_3
+         %70 = OpShiftRightLogical %ulong %acx %69
+         %71 = OpBitwiseAnd %ulong %70 %ulong_FF
+        %idx = OpConvertUToF %float %71
 
-; Combine the results in the cluster
-         %82 = OpAccessChain %ptr_v4uint %acc %uint_0
-         %83 = OpLoad %v4uint %82
-         %84 = OpGroupNonUniformBitwiseOr %v4uint %uint_3 ClusteredReduce %83 %uint_8
-               OpStore %82 %84
-         %85 = OpAccessChain %ptr_v4uint %acc %uint_1
-         %86 = OpLoad %v4uint %85
-         %87 = OpGroupNonUniformBitwiseOr %v4uint %uint_3 ClusteredReduce %86 %uint_8
-               OpStore %85 %87
+; Calculate the intersection voxel
+         %72 = OpFSub %float %idx %i0_off_max
+         %73 = OpFMul %float %72 %d0_dot_inv
+         %74 = OpCompositeConstruct %v3float %73 %73 %73
+         %75 = OpExtInst %v3float %glsl Fma %d0 %74 %i0
+         %76 = OpBitcast %v3uint %75
+         %77 = OpCompositeConstruct %v3uint %sca %sca %sca
+         %78 = OpShiftRightLogical %v3uint %76 %77
+         %79 = OpShiftLeftLogical %v3uint %78 %77
+         %sx = OpBitcast %v3float %79
 
-; Extract and round the outbound intersection
-         %88 = OpShiftRightLogical %uint %cid %uint_1
-         %89 = OpBitwiseAnd %uint %cid %uint_1
-         %90 = OpAccessChain %ptr_uint %acc %88 %89
-         %91 = OpLoad %uint %90
-         %92 = OpBitcast %float %91
-         %93 = OpCompositeConstruct %v3float %92 %92 %92
-         %94 = OpExtInst %v3float %glsl Fma %d0 %93 %a
-         %95 = OpExtInst %v3float %glsl Floor %94
-               OpStore %i1 %95
+; Calculate the t-value for the intersection
+         %80 = OpFSub %v3float %sx %i0
+         %tx = OpFDiv %v3float %80 %d0
 
-; Share to get the inbound intersection
-         %96 = OpGroupNonUniformShuffleUp %v3float %uint_3 %95 %uint_1
-         %97 = OpIEqual %bool %cid %uint_0
-         %98 = OpCompositeConstruct %v3bool %97 %97 %97
-         %99 = OpSelect %v3float %98 %a %96
-               OpStore %i0 %99
+         %81 = OpCompositeExtract %float %tx 0
+         %82 = OpCompositeExtract %float %tx 1
+         %83 = OpExtInst %float %glsl FMin %81 %82
+         %84 = OpCompositeExtract %float %tx 2
+          %c = OpExtInst %float %glsl FMin %83 %84
+
+; Calculate the intersection position and clamp it to the voxel
+         %85 = OpCompositeConstruct %v3float %c %c %c
+         %px = OpExtInst %v3float %glsl Fma %d0 %85 %i0
+
+         %86 = OpConvertUToF %float %sca
+         %87 = OpFSub %float %86 %float_23
+         %88 = OpExtInst %float %glsl Exp2 %87
+         %89 = OpCompositeConstruct %v3float %88 %88 %88
+         %90 = OpFAdd %v3float %sx %89
+         %91 = OpExtInst %v3float %glsl FClamp %px %sx %90
+         %92 = OpFOrdEqual %v3bool %tx %85
+         %ix = OpSelect %v3float %92 %sx %91
 
 ; Function definition end
-               OpReturn
+               OpReturnValue %ix
                OpFunctionEnd
